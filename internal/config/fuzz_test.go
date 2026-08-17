@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -338,6 +339,12 @@ func FuzzAlinhamento(f *testing.F) {
 	f.Add("server_name a.com # prod\n  b.com;")
 	f.Add("location /api # gw\n{ proxy_pass http://a; }")
 	f.Add("http { server { if ( $a = b ) { return 404; } } }")
+	// Sem estas duas seeds o fuzz nunca exercitava arvore multi-arquivo: um
+	// include gerado pelo fuzzer nao casa com arquivo nenhum, entao tree.Files
+	// tinha sempre um elemento so e o alinhamento por arquivo -- o que a Task
+	// 12 introduziu -- ficava sem cobertura de propriedade.
+	f.Add("include incluido.conf;")
+	f.Add("http { include incluido.conf; }\n# depois\n")
 
 	f.Fuzz(func(t *testing.T, s string) {
 		dir := t.TempDir()
@@ -345,11 +352,16 @@ func FuzzAlinhamento(f *testing.F) {
 		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
 			t.Skip()
 		}
+		// O arquivo incluido e fixo: o que varia e o texto que o inclui.
+		incluido := "server_name incluido.exemplo; # do include\nlisten 8080;\n"
+		if err := os.WriteFile(filepath.Join(dir, "incluido.conf"), []byte(incluido), 0o644); err != nil {
+			t.Skip()
+		}
 
-		var tree *config.Tree
-		var err error
-		func() { defer func() { if r := recover(); r != nil { t.Skip() } }(); tree, err = config.Parse(config.ParseOptions{Path: p}) }()
-		if tree == nil && err == nil { t.Skip() }
+		// Nenhum recover aqui, de proposito: panic e falha do fuzz. Uma CLI
+		// consumida por agente nao pode emitir stack trace, entao "config.Parse
+		// nunca entra em panico" e propriedade, nao ruido a ser pulado.
+		tree, err := config.Parse(config.ParseOptions{Path: p})
 		if err != nil {
 			// erro do nosso lado nao e "fora de escopo" por si so: pode ser
 			// sobre-rejeicao, a classe de bug que este fuzz existe para
@@ -368,6 +380,16 @@ func FuzzAlinhamento(f *testing.F) {
 	})
 }
 
+// soTemCR informa se o resto da fonte e so \r (ou nada).
+func soTemCR(resto []byte) bool {
+	for _, b := range resto {
+		if b != '\r' {
+			return false
+		}
+	}
+	return true
+}
+
 // verificarNaoSobreRejeicao e a propriedade que sustenta esta rodada de
 // conserto: antes dela, "if err != nil { return }" tratava todo erro do
 // nosso Parse como entrada fora de escopo, o que descarta por construcao
@@ -377,8 +399,37 @@ func FuzzAlinhamento(f *testing.F) {
 // se ele aceita a entrada (sem erro e com Status != "failed") e o nosso
 // Parse a recusa, isso e falha real, nao entrada invalida.
 func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
-	if strings.Contains(nossoErro.Error(), "aspa") || strings.Contains(nossoErro.Error(), "token inesperado") || strings.Contains(nossoErro.Error(), "esperava") || strings.Contains(nossoErro.Error(), "sobraram") || strings.Contains(nossoErro.Error(), "fim inesperado") { return }
-	payload, err := crossplane.Parse(path, &crossplane.ParseOptions{
+	var problemas config.ParseErrors
+	if errors.As(nossoErro, &problemas) && len(problemas) > 0 && divergenciaConhecida(problemas[0]) {
+		return
+	}
+
+	payload, err := parseNoOraculo(path)
+	if err != nil {
+		return // crossplane tambem recusou: entrada legitimamente fora de escopo
+	}
+	if payload == nil {
+		return // crossplane entrou em panico: nao e aceitacao
+	}
+	if payload.Status != "ok" {
+		return // crossplane aceitou o arquivo mas registrou erro de parse: idem
+	}
+	t.Fatalf("sobre-rejeicao: crossplane aceitou a entrada mas o ngx recusou: %v\narquivo: %s",
+		nossoErro, path)
+}
+
+// parseNoOraculo roda o crossplane com as mesmas opcoes de parse.go:43-51.
+// O recover nao e complacencia: uma entrada que derruba o parser da
+// dependencia (prepareIfArgs, util.go:83) nao esta sendo "aceita" por ela, e
+// tratar isso como aceitacao acusaria o ngx de sobre-rejeitar justamente
+// quando ele evitou um crash.
+func parseNoOraculo(path string) (payload *crossplane.Payload, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			payload, err = nil, nil
+		}
+	}()
+	return crossplane.Parse(path, &crossplane.ParseOptions{
 		ParseComments:             true,
 		CombineConfigs:            false,
 		SingleFile:                false,
@@ -386,14 +437,58 @@ func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
 		SkipDirectiveContextCheck: true,
 		ErrorOnUnknownDirectives:  false,
 	})
-	if err != nil {
-		return // crossplane tambem recusou: entrada legitimamente fora de escopo
+}
+
+// divergenciaConhecida e a lista FECHADA de recusas do ngx que o crossplane
+// nao faz. Ela existe porque o oraculo tem que continuar acusando
+// sobre-rejeicao: a versao anterior deste arquivo silenciava por substring da
+// mensagem ("aspa", "token inesperado", "esperava", "sobraram"), o que
+// apagava a classe inteira de bug que o fuzz existe para achar -- qualquer
+// recusa nova do aligner cairia numa daquelas substrings.
+//
+// Cada entrada casa a CLASSE mais a forma exata do token, tem citacao do
+// fonte do crossplane e tem teste unitario proprio em robustez_test.go. Uma
+// recusa que nao esteja aqui -- inclusive uma nova recusa da mesma classe com
+// outro token -- e falha do fuzz, como tem que ser. Classes deliberadamente
+// FORA da lista: RecusaTokenInesperado, RecusaTokensSobrando,
+// RecusaFimInesperado e RecusaPanicoDoCrossplane, que so aparecem quando o
+// casamento entre arvore e tokens saiu do lugar -- isto e, quando ha bug.
+func divergenciaConhecida(pe config.ParseError) bool {
+	switch pe.Classe {
+	case config.RecusaAspaNaoFechada:
+		// lex.go:325-327 fecha a aspa implicitamente no fim do arquivo e nao
+		// emite token nenhum se o conteudo estiver vazio: uma aspa solta e
+		// "ok" para o crossplane. O nginx recusa. Ver
+		// TestDivergenciaAspaNaoFechada.
+		return pe.Token == `"` || pe.Token == "'"
+
+	case config.RecusaTokenNoLugarDeDiretiva:
+		// parse.go:256-261 monta o statement com t.Value sem exigir que o
+		// primeiro token seja uma palavra: so "}" (parse.go:237) e comentario
+		// (parse.go:264) sao tratados a parte, entao "{", "}" e ";" viram
+		// nome de diretiva para ele. Esses tres sao TODOS os tokens que nao
+		// sao palavra nem comentario -- a lista e exaustiva sobre os Kind do
+		// tokenizador, e uma palavra recusada nessa posicao continua sendo
+		// bug. Ver TestDivergenciaChaveComoNomeDeDiretiva e
+		// TestDivergenciaPontoEVirgulaComoNomeDeDiretiva.
+		return pe.Token == "{" || pe.Token == "}" || pe.Token == ";"
+
+	case config.RecusaTerminadorAusente:
+		// O laco de argumentos para em "}" (parse.go:285) e a checagem
+		// "is not terminated by \";\"" (analyze.go:224-227) nao roda com
+		// SkipDirectiveArgsCheck (analyze.go:202-204). So o "}" diverge. Ver
+		// TestDivergenciaDiretivaSemPontoEVirgula.
+		return pe.Token == "}"
+
+	case config.RecusaExpressaoIfInvalida:
+		// Guarda validExpr (analyze.go:212, util.go:57-67) que
+		// SkipDirectiveArgsCheck suprime e sem a qual prepareIfArgs
+		// (util.go:83) derruba o processo. O token e sempre o nome "if",
+		// citado ou nao (parse.go:352-354 compara sem olhar IsQuoted). Ver
+		// TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic.
+		return pe.Token == "if" || pe.Token == `"if"` || pe.Token == "'if'"
 	}
-	if payload.Status != "ok" {
-		return // crossplane aceitou o arquivo mas registrou erro de parse: idem
-	}
-	t.Fatalf("sobre-rejeicao: crossplane aceitou a entrada mas o ngx recusou: %v\narquivo: %s",
-		nossoErro, path)
+	return false
 }
 
 // verificarCoberturaDeRaiz confere que nenhum byte significativo de nivel
@@ -426,7 +521,12 @@ func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
 			i++
 			continue
 		}
-		if src[i] == '\\' {
+		// A valvula da barra invertida so vale para a barra SEM par de escape,
+		// que consumirEscape (tokens.go:134-143) so devolve como ok == false
+		// no fim da fonte -- \r e invisivel e nao conta como par. Antes ela
+		// pulava qualquer '\' fora de span, o que tambem perdoaria uma barra
+		// no meio do arquivo deixada de fora por outro motivo.
+		if src[i] == '\\' && soTemCR(src[i+1:]) {
 			i++
 			continue
 		}
