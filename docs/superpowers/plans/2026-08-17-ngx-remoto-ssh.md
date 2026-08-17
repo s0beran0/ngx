@@ -60,7 +60,21 @@ O `ngx` não copia binário para o destino, nem temporariamente. Ele lê arquivo
 
 *Por quê:* é o requisito. Escrever executável em `/tmp` de um servidor de produção é o tipo de coisa que dispara alerta de EDR e que um operador tem razão em não querer.
 
-*Custo aceito:* mais viagens de rede. Ler uma configuração com trinta `include` são trinta leituras SFTP. Aceitável para uma ferramenta interativa; se virar problema, o conserto é paralelizar as leituras, não copiar binário.
+*Custo aceito:* mais viagens de rede. Uma leitura SFTP por arquivo da configuração efetiva.
+
+*Medido num nginx de produção real* (Oracle Linux 9, nginx 1.20.1, acesso por VPN): a configuração efetiva tem **132 arquivos** e 9.822 linhas. A estimativa original deste plano — "trinta `include`" — errou por mais de quatro vezes. Com 132 viagens sequenciais, a latência da VPN domina o tempo de resposta e uma leitura interativa deixa de ser interativa.
+
+*Consequência:* paralelizar as leituras sai de "conserto se virar problema" e passa a ser requisito de projeto da R4. Serialize apenas o que a dependência exige: o `include` só é conhecido depois de ler quem o declara, então o paralelismo é por nível da árvore, não sobre a lista inteira.
+
+### DR5 — Privilégio é explícito, nunca inferido
+
+Medido no servidor de produção real: `nginx -T` **falha** para o usuário comum (`opc`) e só funciona via `sudo`. Não é exceção — a configuração do nginx costuma ser legível só por root, e num host de produção o `sudo` frequentemente está liberado sem senha. Ou seja: o caminho que "simplesmente funciona" é o de escalar privilégio em silêncio.
+
+O `ngx` **não** faz isso. Se um comando remoto precisa de privilégio, ele só roda com `--sudo` explícito no comando; sem a flag, o `ngx` reporta que o comando exige privilégio e qual é — não tenta de novo com `sudo`, não adivinha.
+
+*Por quê:* uma ferramenta feita para ser dirigida por agente de IA que escala privilégio sozinha, num servidor de produção, transforma um erro de leitura em um comando `root`. O atrito de digitar `--sudo` é o registro de que alguém decidiu. E como o `ngx` já tem envelope estruturado, "precisa de privilégio" é um diagnóstico acionável, não um beco sem saída.
+
+*Consequência para a R4:* a detecção de estado precisa distinguir "não consegui ler" de "não existe", e nunca degradar em silêncio. Campo indisponível é omitido — a regra da spec já cobre isso.
 
 ### DR4 — O `Glob` do crossplane passa a ser injetado
 
