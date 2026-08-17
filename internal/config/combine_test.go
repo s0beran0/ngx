@@ -20,7 +20,7 @@ func parseCombine(t *testing.T) *config.Tree {
 func TestParseSemCombineMantemArquivosSeparados(t *testing.T) {
 	tree := parseCombine(t)
 
-	require.Len(t, tree.Files, 2, "nginx.conf e conf.d/api.conf")
+	require.Len(t, tree.Files, 3, "nginx.conf, conf.d/api.conf e snippets/proxy.conf")
 }
 
 func TestCombineProduzUmUnicoArquivo(t *testing.T) {
@@ -117,4 +117,88 @@ func TestCombineRecalculaOHash(t *testing.T) {
 
 	require.NotEmpty(t, combinado.Hash)
 	require.NotEqual(t, original.Hash, combinado.Hash)
+}
+
+// Include aninhado em dois niveis: nginx.conf inclui conf.d/api.conf, que
+// por sua vez inclui snippets/proxy.conf. O padrao relativo declarado dentro
+// de conf.d/api.conf resolve contra o diretorio do arquivo de topo
+// (nginx.conf), nao contra o diretorio de quem declarou o include -- e a
+// mesma regra que o crossplane usa (p.configDir, fixo para o parse inteiro).
+// Layout padrao Debian: /etc/nginx/conf.d/*.conf incluindo algo em
+// /etc/nginx/snippets/, nao em /etc/nginx/conf.d/snippets/.
+func TestCombineResolveIncludeAninhadoDoisNiveis(t *testing.T) {
+	combinado, err := config.Combine(parseCombine(t))
+	require.NoError(t, err)
+
+	var proxy *config.Node
+	combinado.Walk(func(n *config.Node) bool {
+		if n.Directive == "proxy_pass" {
+			proxy = n
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, proxy,
+		"o conteudo do terceiro arquivo (include aninhado) deve aparecer na arvore combinada")
+
+	require.NotNil(t, proxy.Origin)
+	require.Contains(t, proxy.Origin.File, "proxy.conf")
+}
+
+// Um include literal (sem *, ? ou [) que nao casa nenhum arquivo da arvore
+// significa bug na nossa comparacao de caminhos: o Parse ja falha alto
+// quando o crossplane nao consegue abrir um include literal, entao esse
+// caso nunca deveria sobreviver em silencio ate o Combine.
+func TestCombineIncludeLiteralSemArquivoCorrespondenteFalha(t *testing.T) {
+	arquivoTopo := filepath.Join("testdata", "combine", "nginx.conf")
+	tree := &config.Tree{
+		Files: []*config.File{
+			{
+				Path: arquivoTopo,
+				Nodes: []*config.Node{
+					{
+						Directive: "include",
+						Args:      []string{"nao-existe.conf"},
+						File:      arquivoTopo,
+						Line:      3,
+					},
+				},
+			},
+		},
+	}
+
+	_, err := config.Combine(tree)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nao-existe.conf")
+}
+
+// Args e clonado na copia: mutar a arvore combinada nao pode alterar a
+// arvore original, porque as duas continuam vivas ao mesmo tempo (a
+// original guarda os spans reais para edicao).
+func TestCombineNaoCompartilhaArgsComAArvoreOriginal(t *testing.T) {
+	original := parseCombine(t)
+	combinado, err := config.Combine(original)
+	require.NoError(t, err)
+
+	acharLegado := func(t *config.Tree) *config.Node {
+		var achado *config.Node
+		t.Walk(func(n *config.Node) bool {
+			if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legado.exemplo.com" {
+				achado = n
+				return false
+			}
+			return true
+		})
+		return achado
+	}
+
+	legadoOriginal := acharLegado(original)
+	require.NotNil(t, legadoOriginal)
+
+	legadoCombinado := acharLegado(combinado)
+	require.NotNil(t, legadoCombinado)
+
+	legadoCombinado.Args[0] = "mutado.invalido"
+	require.Equal(t, "legado.exemplo.com", legadoOriginal.Args[0],
+		"mutar Args da arvore combinada nao pode afetar a arvore original")
 }
