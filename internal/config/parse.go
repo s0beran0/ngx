@@ -201,6 +201,13 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 		if err != nil {
 			return nil, err
 		}
+
+		if problemas := recusarAlvoNaoRegular(path, rc); len(problemas) > 0 {
+			_ = rc.Close()
+			c.guardarRecusas(problemas)
+			return nil, problemas
+		}
+
 		conteudo, err := io.ReadAll(rc)
 		if erroFechar := rc.Close(); err == nil {
 			err = erroFechar
@@ -218,6 +225,46 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 		c.guardar(path, conteudo)
 		return io.NopCloser(bytes.NewReader(conteudo)), nil
 	}
+}
+
+// recusarAlvoNaoRegular recusa um caminho que abriu mas nao e arquivo
+// regular -- diretorio, socket, fifo, dispositivo.
+//
+// O crossplane aceita: para um alvo de include sem caractere de glob,
+// parse.go:385-395 so confere que o os.Open funciona ("nginx will check that
+// the included file can be opened and read"), e abrir diretorio funciona; o
+// alvo entra em fnames, e lexado no laco de parse.go:161-168, e como o lexer
+// nao consulta o erro de leitura o payload sai com Status "ok" e zero
+// diretiva. O nginx, ao contrario do que o comentario deles diz, LE o alvo, e
+// ler diretorio falha -- entao recusar e o comportamento do nginx.
+//
+// Sem esta checagem a recusa acontecia de qualquer jeito, mas pelo io.ReadAll,
+// e o diagnostico saia com a string crua do runtime ("read /tmp/x: is a
+// directory"). Numa CLI feita para ser lida por agente, mensagem de erro e
+// contrato: ela tem que ser nossa e ter classe.
+//
+// A checagem depende de o io.ReadCloser saber se descrever (os.File sabe). Um
+// ParseOptions.Open que devolva um leitor em memoria nao tem alvo no
+// filesystem e simplesmente nao entra aqui.
+func recusarAlvoNaoRegular(path string, rc io.ReadCloser) ParseErrors {
+	comStat, ok := rc.(interface{ Stat() (os.FileInfo, error) })
+	if !ok {
+		return nil
+	}
+	info, err := comStat.Stat()
+	if err != nil || info.Mode().IsRegular() {
+		return nil
+	}
+
+	tipo := "nao e um arquivo regular"
+	if info.IsDir() {
+		tipo = "e um diretorio"
+	}
+	return ParseErrors{{
+		File:    path,
+		Message: fmt.Sprintf("%s: configuracao precisa ser arquivo regular", tipo),
+		Classe:  RecusaAlvoNaoERegular,
+	}}
 }
 
 func (c *cacheFonte) guardarRecusas(problemas ParseErrors) {

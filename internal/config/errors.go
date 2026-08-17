@@ -40,6 +40,10 @@ const (
 	// RecusaExpressaoIfInvalida: "if" sem expressao entre parenteses.
 	RecusaExpressaoIfInvalida ClasseRecusa = "expressao_if_invalida"
 
+	// RecusaAlvoNaoERegular: o caminho existe, abriu, e nao e arquivo
+	// regular -- diretorio, socket, fifo, dispositivo.
+	RecusaAlvoNaoERegular ClasseRecusa = "alvo_nao_e_arquivo_regular"
+
 	// RecusaPanicoDoCrossplane: o crossplane entrou em panico ao parsear.
 	RecusaPanicoDoCrossplane ClasseRecusa = "panico_do_crossplane"
 )

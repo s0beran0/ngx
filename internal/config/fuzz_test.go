@@ -487,6 +487,21 @@ func divergenciaConhecida(pe config.ParseError) bool {
 		// citado ou nao (parse.go:352-354 compara sem olhar IsQuoted). Ver
 		// TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic.
 		return pe.Token == "if" || pe.Token == `"if"` || pe.Token == "'if'"
+
+	case config.RecusaAlvoNaoERegular:
+		// "include .;" -- unica entrada enumerada SO pela classe, sem token
+		// exato, porque o alvo do include e um caminho arbitrario e nao ha
+		// lexema fixo para casar. So e aceitavel porque a classe ja e
+		// estreita: ela dispara exclusivamente quando o caminho abriu e nao e
+		// arquivo regular.
+		//
+		// Padrao sem magic vai para parse.go:385-395, que so confere que o
+		// os.Open funciona -- e abrir um diretorio funciona --, entao o alvo
+		// entra em fnames e e lexado no laco de parse.go:161-168; o lexer nao
+		// consulta o erro de leitura e devolve zero token, com Status "ok". O
+		// nginx, no lugar disso, LE o alvo, e ler diretorio falha. Ver
+		// TestDivergenciaIncludeDeDiretorio.
+		return true
 	}
 	return false
 }

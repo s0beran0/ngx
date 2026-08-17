@@ -263,6 +263,45 @@ func TestDivergenciaDiretivaSemPontoEVirgula(t *testing.T) {
 	require.Equal(t, "}", pe.Token)
 }
 
+// O crossplane so confere que o alvo explicito de um include abre
+// (parse.go:385-395, "nginx will check that the included file can be opened
+// and read") -- e abrir diretorio abre. O alvo entra em fnames, e lexado no
+// laco de parse.go:161-168, o lexer engole o erro de leitura e o payload sai
+// com Status "ok" e zero diretiva. O nginx le o alvo e falha. Achado pelo
+// fuzz depois da cobertura de include (A8) entrar; o erro cru do Go
+// ("read ...: is a directory") vazava para o diagnostico.
+func TestDivergenciaIncludeDeDiretorio(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+	p := filepath.Join(dir, "f.conf")
+	require.NoError(t, os.WriteFile(p, []byte("include sub;\n"), 0o644))
+	aceitaNoCrossplane(t, p)
+
+	tree, err := config.Parse(config.ParseOptions{Path: p})
+	require.Error(t, err)
+	require.Nil(t, tree)
+
+	var problemas config.ParseErrors
+	require.True(t, errors.As(err, &problemas), "erro cru do Go nao pode vazar: %v", err)
+	require.Equal(t, config.RecusaAlvoNaoERegular, problemas[0].Classe)
+	require.Equal(t, filepath.Join(dir, "sub"), problemas[0].File)
+	require.NotContains(t, problemas[0].Message, "is a directory",
+		"a mensagem e nossa, nao a string de erro do runtime")
+}
+
+// A mesma classe nao pode disparar para arquivo regular: e o que a mantem
+// estreita o bastante para ser enumerada sem token exato.
+func TestIncludeDeArquivoRegularContinuaAceito(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub.conf"), []byte("listen 80;\n"), 0o644))
+	p := filepath.Join(dir, "f.conf")
+	require.NoError(t, os.WriteFile(p, []byte("include sub.conf;\n"), 0o644))
+
+	tree, err := config.Parse(config.ParseOptions{Path: p})
+	require.NoError(t, err)
+	require.Len(t, tree.Files, 2)
+}
+
 // Mesma divergencia, no ramo do "if", que consome argumentos por posicao do
 // terminador: sem parar tambem no "}", a recusa saia como token inesperado --
 // a classe reservada para bug do aligner. Entrada achada pelo fuzz.
