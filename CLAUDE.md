@@ -85,6 +85,24 @@ race e um truncamento silencioso de arquivo. O truncamento era pior que o
 problema original: os spans ficavam coerentes com um `Source` truncado, e na v0.2
 uma escrita por substituição de bytes truncaria o arquivo real do usuário.
 
+### Nunca despache um loop sem condição de parada
+
+Instruções como "rode o fuzz e corrija os casos que ele encontrar" ou "itere
+até passar" não têm fim quando a busca é aberta. Cada correção revela o
+próximo caso, e o agente fica horas moendo rendimento decrescente sem
+perceber, porque a cada passo ele está de fato achando algo real.
+
+Dê sempre um teto explícito: um número de rodadas, um limite de tempo, ou um
+critério de suficiência ("pare quando os N itens listados estiverem
+endereçados, mesmo que o fuzz ainda ache casos"). E peça que o que sobrar
+vire **entregável** — uma lista de divergências conhecidas com entrada,
+comportamento esperado e observado — em vez de trabalho abandonado.
+
+*Custo evitado:* um fix de tokenizador rodou 37 minutos e 287 mil tokens
+porque o dispatch mandava corrigir tudo que o fuzz diferencial encontrasse. O
+achado que justificava a rodada — um bug que fazia o CLI recusar configuração
+válida — apareceu nos primeiros minutos; o resto foi cauda.
+
 ### Trave contratos com valores literais
 
 Quando um valor é contrato — exit code, tag JSON, nome de campo consumido por
