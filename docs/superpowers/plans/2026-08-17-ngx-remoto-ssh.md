@@ -280,6 +280,15 @@ Sob build tag `integration`, suba um container com `sshd` e `nginx`, com uma cha
 
 O caso do glob é o mais importante: é o defeito que a Task R3 corrigiu, e este é o teste que prova que ele não volta.
 
+**A bancada tem que reproduzir a forma medida em produção, não um caso fácil.** Um container com um `nginx.conf` de dez linhas passa em tudo e não prova nada. Medido num nginx de produção real (Oracle Linux 9, nginx 1.20.1), a bancada precisa de:
+
+- **Três padrões com curinga**, não um: `conf.d/*.conf`, `default.d/*.conf` e `modules/*.conf`. E, para o teste do glob valer, um arquivo homônimo no disco **local** que só apareceria se o `Glob` não estivesse injetado.
+- **Ordem de 130 arquivos** na configuração efetiva, não três. É o número que torna a latência sequencial visível e que justifica o paralelismo por nível exigido na R4. Um teste que meça o tempo com 130 arquivos é o que impede a regressão de performance.
+- **`nginx -T` legível só por root**, com `sudo` liberado sem senha para o usuário de teste — exatamente a armadilha da DR5. O teste tem que provar que sem `--sudo` o `ngx` reporta a exigência de privilégio, e que **não** escala sozinho.
+- **Um segredo dentro da configuração** (chave privada, `auth_basic_user_file`) para exercitar a redação de ponta a ponta pelo caminho remoto.
+
+A bancada é artefato do repositório, versionada, com alvo no `Makefile`. Quem clonar o projeto tem que conseguir rodar a integração com um comando. E os testes de integração ficam atrás da build tag: `go test ./...` sem a tag continua verde numa máquina sem Docker.
+
 - [ ] **Step 2: Documentar**
 
 Em `docs/remoto.md` e numa seção do `README.md`:

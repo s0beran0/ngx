@@ -3,3 +3,6 @@
 .ngx/
 .superpowers/
 .claude/
+
+# chave de teste da bancada: gerada por "make bancada-up", nunca commitada
+test/bancada/.chave/

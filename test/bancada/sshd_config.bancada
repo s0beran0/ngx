@@ -1,0 +1,29 @@
+# sshd da bancada. Container descartavel, local, sem hardening -- mas root
+# nao entra e senha nao existe: o que a bancada exercita e o caminho de
+# usuario comum autenticado por chave, mais escalada explicita por sudo.
+
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+
+PermitRootLogin no
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# O sshd do Oracle Linux e compilado com PAM obrigatorio; desligar aqui so
+# gera aviso e nao muda nada, ja que senha esta desabilitada acima.
+UsePAM yes
+
+X11Forwarding no
+AllowTcpForwarding no
+PrintMotd no
+LogLevel INFO
+
+# SFTP e como o ngx le a configuracao remota; sem isso a bancada nao serve.
+Subsystem sftp internal-sftp
