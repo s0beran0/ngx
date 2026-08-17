@@ -26,6 +26,13 @@ type Output struct {
 	Redact []string `koanf:"redact"`
 }
 
+// chaveRedact e o caminho koanf de Output.Redact, usado em Load() para
+// decidir quando a lista declarada substitui a default. Extraida como
+// constante porque renomear a tag `koanf:"redact"` ou `koanf:"output"`
+// sem atualizar este valor quebraria a substituicao em silencio, sem
+// erro de compilacao.
+const chaveRedact = "output.redact"
+
 // Settings e a configuracao efetiva do ngx.
 type Settings struct {
 	Nginx  Nginx  `koanf:"nginx"`
@@ -67,12 +74,21 @@ func Load(globalPath, localPath string) (*Settings, error) {
 
 	s := Defaults()
 
-	// O koanf funde slices por concatenacao, nao por substituicao. Se o
-	// usuario declarou output.redact, a lista dele deve substituir a
-	// default, nunca somar-se a ela — senao nao ha como remover uma regra
-	// padrao. Por isso zeramos o default aqui e deixamos o Unmarshal
-	// preencher a partir do que foi declarado nos arquivos.
-	if k.Exists("output.redact") {
+	// O mapstructure (usado pelo koanf no Unmarshal) reaproveita o slice
+	// nao-nil ja presente na struct de destino e o preenche por indice, em
+	// vez de aloca-lo do zero. Isso deixaria defaults sobrando na cauda
+	// sempre que a lista do usuario for menor que a default — por exemplo,
+	// uma lista de 1 item por cima dos 3 defaults deixaria os ultimos 2
+	// defaults intocados. Zeramos aqui para forcar substituicao total,
+	// independente de como a versao fixada do mapstructure se comporta.
+	//
+	// A zeragem so deve acontecer quando o usuario de fato declarou uma
+	// lista (mesmo vazia). Se a chave esta ausente, ou presente mas nula —
+	// caso tipico de um arquivo onde a pessoa comentou todos os itens da
+	// lista —, k.Get devolve nil e os defaults devem sobreviver; do
+	// contrario a redacao desligaria em silencio, falhando aberta numa
+	// feature de seguranca.
+	if v := k.Get(chaveRedact); v != nil {
 		s.Output.Redact = nil
 	}
 

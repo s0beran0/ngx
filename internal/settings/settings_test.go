@@ -117,3 +117,51 @@ output:
 	require.NoError(t, err)
 	require.Equal(t, []string{"minha_diretiva_secreta"}, s.Output.Redact)
 }
+
+// redact: [] e uma lista vazia declarada de proposito: o usuario decidiu
+// desligar a redacao, e isso deve ser respeitado.
+func TestRedactListaVaziaDesligaARedacao(t *testing.T) {
+	dir := t.TempDir()
+	global := escreve(t, dir, "global.yaml", `
+output:
+  redact: []
+`)
+
+	s, err := settings.Load(global, filepath.Join(dir, "ausente.yaml"))
+
+	require.NoError(t, err)
+	require.Empty(t, s.Output.Redact)
+}
+
+// redact: sem valor e um YAML nulo, tipico de um arquivo onde a pessoa
+// comentou todos os itens da lista. Isso nao pode ser confundido com uma
+// lista vazia declarada: os defaults precisam sobreviver, senao a redacao
+// desliga em silencio numa feature de seguranca.
+func TestRedactNuloPreservaOsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	global := escreve(t, dir, "global.yaml", `
+output:
+  redact:
+`)
+
+	s, err := settings.Load(global, filepath.Join(dir, "ausente.yaml"))
+
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"ssl_certificate_key",
+		"proxy_set_header Authorization",
+		"auth_basic_user_file",
+	}, s.Output.Redact)
+}
+
+// Defaults() e contrato publico consumido pela Task 6; os tres valores de
+// redact sao parte explicita desse contrato e precisam estar travados.
+func TestDefaults(t *testing.T) {
+	d := settings.Defaults()
+	require.Equal(t, "auto", d.Output.Format)
+	require.Equal(t, []string{
+		"ssl_certificate_key",
+		"proxy_set_header Authorization",
+		"auth_basic_user_file",
+	}, d.Output.Redact)
+}
