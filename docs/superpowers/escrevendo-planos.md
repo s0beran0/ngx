@@ -182,3 +182,54 @@ fatia. Elas não são inúteis, mas não são a alavanca.
    contexto inteiro de novo.
 4. **Base menor** — menos skills e menos servidores MCP reduzem os ~14.900 de
    todo agente, o que se multiplica pelo número deles.
+
+### As tres regras de dispatch, e a evidencia de cada uma
+
+Um estudo empirico em SWE-bench com Claude Sonnet, GPT-4.1 e Gemini 2.5 Pro
+mediu estrategias de controle de turno (arXiv 2510.16786). O resultado que
+importa: **limitar turnos nao piorou a qualidade — melhorou.** Orcamento
+apertado forca o agente a ir direto ao ponto em vez de explorar.
+
+| Estrategia | Taxa de sucesso | Custo |
+|---|---|---|
+| Limite fixo no percentil 75 (Claude) | −5,3% | −23,6% |
+| Limite **dinamico** — comeca baixo, estende uma vez (Claude) | **+1,6%** | −15,6% adicionais |
+
+A Anthropic recomenda o mesmo caminho por outro angulo: compaction,
+note-taking externo, isolamento em sub-agentes e carregamento just-in-time —
+tudo arquitetura e disciplina, fechando com "faca a coisa mais simples que
+funciona". Nenhuma ferramenta e necessaria.
+
+#### 1. Orcamento de turno dinamico
+
+Todo dispatch declara um teto de chamadas de ferramenta. Se o agente chegar
+ao teto, ele **para e reporta o que falta** — nao pede permissao no meio nem
+continua sozinho. Quem coordena estende uma vez, se valer.
+
+Escreva assim, com o numero calibrado a tarefa:
+
+> Voce tem um orcamento de aproximadamente **N chamadas de ferramenta**. Se
+> chegar perto do teto sem terminar, pare, grave o estado no seu relatorio e
+> reporte o que falta — nao continue. Eu estendo se valer a pena.
+
+Calibragem observada neste projeto: transcricao de codigo do brief, 20-30;
+implementacao com investigacao, 40-50; review com sonda, 30-40. Acima de 60
+o custo por turno ja dobrou em relacao ao inicio.
+
+#### 2. Note-taking externo para quebrar o quadratico
+
+Quando um agente atinge o teto, ele grava o estado num arquivo e **encerra**.
+A continuacao vai para um agente NOVO, que le o arquivo e comeca com ~15 mil
+tokens de contexto em vez de herdar 300 mil.
+
+Isso converte um custo quadratico em varios lineares. Dois agentes de 116
+turnos custam cerca de 45% menos que um de 232, mesmo pagando a base duas
+vezes. **Nao retome um agente longo por comodidade** — retomar preserva o
+contexto inteiro e e justamente o que se quer evitar.
+
+#### 3. Just-in-time dirigido
+
+Diga qual arquivo ler. Cada turno de exploracao repaga o contexto acumulado,
+entao "descubra onde esta X" custa muito mais que "leia X em caminho/y.go".
+Quando nao souber o caminho, mande localizar com uma chamada dirigida em vez
+de deixar o agente vagar.
