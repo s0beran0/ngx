@@ -68,6 +68,9 @@ func Parse(opts ParseOptions) (*Tree, error) {
 			Source: src,
 			Nodes:  converterDirectives(cfg.Parsed, cfg.File),
 		}
+		if err := alinhar(arquivo); err != nil {
+			return nil, err
+		}
 		AtribuirIDs(arquivo.Nodes, "")
 		tree.Files = append(tree.Files, arquivo)
 	}
