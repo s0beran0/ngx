@@ -200,21 +200,43 @@ note-taking externo, isolamento em sub-agentes e carregamento just-in-time —
 tudo arquitetura e disciplina, fechando com "faca a coisa mais simples que
 funciona". Nenhuma ferramenta e necessaria.
 
-#### 1. Orcamento de turno dinamico
+#### 1. Orcamento de turno: o teto e consequencia do escopo, nao um numero
 
-Todo dispatch declara um teto de chamadas de ferramenta. Se o agente chegar
-ao teto, ele **para e reporta o que falta** — nao pede permissao no meio nem
-continua sozinho. Quem coordena estende uma vez, se valer.
+**Nada aplica o teto.** Medido aqui: a ferramenta que lanca subagente nao tem
+parametro de orcamento, e hook `PreToolUse` **nao dispara dentro de
+subagente** — duas sondas, registradas no `settings.local.json` do projeto e
+tambem no `~/.claude/settings.json` global, 6 chamadas de ferramenta de
+subagente, zero entradas no log; so a sessao de quem coordena aparece.
+Portanto o teto e texto no prompt: um pedido, nunca uma barreira.
 
-Escreva assim, com o numero calibrado a tarefa:
+Um pedido so e atendido se for atendivel. O mesmo agente, mesmo modelo, no
+mesmo dia:
 
-> Voce tem um orcamento de aproximadamente **N chamadas de ferramenta**. Se
-> chegar perto do teto sem terminar, pare, grave o estado no seu relatorio e
-> reporte o que falta — nao continue. Eu estendo se valer a pena.
+| dispatch | itens de trabalho | teto | usou |
+|---|---|---|---|
+| fix round 2 da Task 9 | 4 achados + 1 ruling + 2 opcionais | 50 | **70** |
+| adendo do `include .;` | 1 achado | 25 | **13** |
 
-Calibragem observada neste projeto: transcricao de codigo do brief, 20-30;
-implementacao com investigacao, 40-50; review com sonda, 30-40. Acima de 60
-o custo por turno ja dobrou em relacao ao inicio.
+O agente nao "desobedeceu" no primeiro: ele escolheu terminar o trabalho em
+vez de largar pela metade, o que era a decisao certa diante do que foi
+pedido. **Quando o teto e a tarefa se contradizem, ganha a tarefa.**
+
+Entao a regra e sobre escopo, nao sobre o numero:
+
+- **Um defeito por dispatch.** Se voce esta escrevendo o terceiro item numa
+  lista, quebre em dois dispatches. Foi isso que fez o teto valer.
+- **A condicao de parada tem que ser verificavel, nao contavel.** Modelo nao
+  conta com precisao as proprias chamadas; ele sabe dizer se o teste ficou
+  verde. Prefira "pare quando a suite passar e commite" a "pare na chamada
+  50".
+- **Peca o numero de volta no relatorio.** Nao impede o estouro, mas o torna
+  visivel — foi assim que o 70 contra 50 apareceu.
+- **A unica barreira real e quem coordena.** Se um agente passar do previsto,
+  mate e redespache com escopo menor; nao estenda por comodidade.
+
+Calibragem observada neste projeto, ja com escopo unitario: transcricao de
+codigo do brief, 20-30; implementacao com investigacao, 40-50; review com
+sonda, 30-40. Acima de 60 o custo por turno ja dobrou em relacao ao inicio.
 
 #### 2. Note-taking externo para quebrar o quadratico
 
@@ -253,9 +275,11 @@ tudo isso ja chega ao agente. Repetir custa a cada turno dele.
 ```
 <uma frase: o que fazer e onde>
 
-## Orcamento
-Aproximadamente N chamadas de ferramenta. Se chegar perto sem terminar, pare,
-grave o estado no relatorio e reporte — nao continue.
+## Escopo
+UM defeito/tarefa. Pare quando <condicao verificavel: a suite passar, o teste
+X ficar verde> e commite. Referencia de ~N chamadas de ferramenta: se passar
+disso sem terminar, pare, grave o estado no relatorio e reporte — nao
+continue. Diga no relatorio quantas chamadas usou.
 
 ## Arquivos
 <caminhos exatos. Diga o que NAO precisa ler.>
