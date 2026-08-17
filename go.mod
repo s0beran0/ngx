@@ -1,6 +1,6 @@
 module github.com/eduardoborges/ngx
 
-go 1.25.9
+go 1.25
 
 require github.com/stretchr/testify v1.12.0
 

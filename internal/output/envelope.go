@@ -43,6 +43,10 @@ type Envelope struct {
 	Command     string       `json:"command"`
 	NgxVersion  string       `json:"ngx_version"`
 	Data        any          `json:"data"`
+	// Diagnostics nunca e nil: uma lista nula serializaria "diagnostics":null
+	// e quebraria o `.diagnostics.length` de quem consome a saida. Construa
+	// o envelope com New, que inicializa a lista vazia; nao monte um
+	// Envelope{} literal sem preencher este campo.
 	Diagnostics []Diagnostic `json:"diagnostics"`
 	Meta        Meta         `json:"meta"`
 }
