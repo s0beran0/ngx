@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/cli"
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eduardoborges/ngx/internal/config"
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/spf13/cobra"
 )
 

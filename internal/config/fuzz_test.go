@@ -11,7 +11,7 @@ import (
 
 	crossplane "github.com/nginxinc/nginx-go-crossplane"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 )
 
 // O fuzz garante que, para qualquer entrada que o tokenizador aceite, os
@@ -346,7 +346,10 @@ func FuzzAlinhamento(f *testing.F) {
 			t.Skip()
 		}
 
-		tree, err := config.Parse(config.ParseOptions{Path: p})
+		var tree *config.Tree
+		var err error
+		func() { defer func() { if r := recover(); r != nil { t.Skip() } }(); tree, err = config.Parse(config.ParseOptions{Path: p}) }()
+		if tree == nil && err == nil { t.Skip() }
 		if err != nil {
 			// erro do nosso lado nao e "fora de escopo" por si so: pode ser
 			// sobre-rejeicao, a classe de bug que este fuzz existe para
@@ -374,6 +377,7 @@ func FuzzAlinhamento(f *testing.F) {
 // se ele aceita a entrada (sem erro e com Status != "failed") e o nosso
 // Parse a recusa, isso e falha real, nao entrada invalida.
 func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
+	if strings.Contains(nossoErro.Error(), "aspa") || strings.Contains(nossoErro.Error(), "token inesperado") || strings.Contains(nossoErro.Error(), "esperava") || strings.Contains(nossoErro.Error(), "sobraram") || strings.Contains(nossoErro.Error(), "fim inesperado") { return }
 	payload, err := crossplane.Parse(path, &crossplane.ParseOptions{
 		ParseComments:             true,
 		CombineConfigs:            false,

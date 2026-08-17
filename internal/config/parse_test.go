@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

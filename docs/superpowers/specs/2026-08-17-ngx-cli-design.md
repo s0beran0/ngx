@@ -488,7 +488,7 @@ binário de verdade, e não apenas contra o fake.
 
 ## 10. Repositório e distribuição
 
-- Módulo Go: `github.com/eduardoborges/ngx` — **a confirmar** antes do primeiro
+- Módulo Go: `github.com/s0beran0/ngx` — **a confirmar** antes do primeiro
   push; derivado do caminho local, não do handle real do GitHub.
 - Toolchain fixado em `.tool-versions`: `golang 1.25.9`.
 - Licença MIT, em nome pessoal do autor.

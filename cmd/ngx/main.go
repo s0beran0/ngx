@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/eduardoborges/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/cli"
 	"golang.org/x/term"
 )
 

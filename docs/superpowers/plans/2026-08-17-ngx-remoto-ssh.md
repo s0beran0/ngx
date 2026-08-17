@@ -30,7 +30,7 @@ estiver só "agente", trata-se do consumidor da saída.
 
 ## Global Constraints
 
-- Módulo Go: `github.com/eduardoborges/ngx`. Go 1.25.
+- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25.
 - **Zero CGO.** Toda dependência nova precisa ser Go puro — verifique o `go.mod` dela antes de adicionar, e confirme com `CGO_ENABLED=0 go build` para as seis plataformas.
 - **Funciona em Linux, macOS e Windows.** Nada específico de um sistema sem o caminho equivalente nos outros dois. Isso vale em particular para o `ssh-agent`, que no Windows não é um socket Unix.
 - Nenhum `exec` de shell: comandos remotos são montados com argumentos explícitos e escapados, nunca concatenados numa string de shell.

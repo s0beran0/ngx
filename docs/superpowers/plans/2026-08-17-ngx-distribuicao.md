@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Módulo Go: `github.com/eduardoborges/ngx`. Go 1.25.
+- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25.
 - **Zero CGO.** Todo build usa `CGO_ENABLED=0`. Qualquer dependência nova precisa ser Go puro — verifique antes de adicionar.
 - Licença MIT em nome de Eduardo Benck. Nenhuma menção a SEA Tecnologia.
 - **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`, sem "Generated with".
@@ -200,8 +200,8 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X github.com/eduardoborges/ngx/internal/output.Version={{ .Version }}
-      - -X github.com/eduardoborges/ngx/internal/output.PublicKey={{ .Env.NGX_PUBLIC_KEY }}
+      - -X github.com/s0beran0/ngx/internal/output.Version={{ .Version }}
+      - -X github.com/s0beran0/ngx/internal/output.PublicKey={{ .Env.NGX_PUBLIC_KEY }}
 
 archives:
   - formats: [tar.gz]
@@ -319,14 +319,14 @@ git commit -m "release: goreleaser com canais por semver e assinatura minisign"
 
 **Interfaces:**
 - Consumes: os artefatos publicados pela Task D2
-- Produces: `install.sh`, executável via `curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | sh`
+- Produces: `install.sh`, executável via `curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh`
 
 - [ ] **Step 1: Escrever o script**
 
 Criar `install.sh`. Requisitos que o script precisa satisfazer, e que os testes do Step 2 verificam:
 
 - Detecta sistema e arquitetura via `uname -s` e `uname -m`, mapeando para os nomes que o goreleaser usa (`x86_64` → `amd64`, `aarch64`/`arm64` → `arm64`). Recusa combinação não suportada com mensagem clara.
-- Resolve a última release **stable** por padrão, consultando `https://api.github.com/repos/eduardoborges/ngx/releases/latest` — esse endpoint já exclui pré-lançamentos. Aceita `NGX_CHANNEL=beta`, que passa a listar `/releases` e pega a primeira entrada, e `NGX_VERSION=v0.2.0` para versão fixa.
+- Resolve a última release **stable** por padrão, consultando `https://api.github.com/repos/s0beran0/ngx/releases/latest` — esse endpoint já exclui pré-lançamentos. Aceita `NGX_CHANNEL=beta`, que passa a listar `/releases` e pega a primeira entrada, e `NGX_VERSION=v0.2.0` para versão fixa.
 - Baixa o tarball, o `checksums.txt` e confere o SHA256 antes de extrair. Usa `sha256sum` ou `shasum -a 256`, o que existir.
 - Instala em `/usr/local/bin` por padrão, respeitando `NGX_INSTALL_DIR`.
 - **Checa a permissão de escrita ANTES de baixar qualquer coisa**, e se faltar, aborta com a instrução exata — sem chamar `sudo` sozinho. Um script que escala privilégio por conta própria é exatamente o que ninguém deveria executar via `curl | sh`, e checar antes evita gastar o download para falhar no fim:
@@ -336,10 +336,10 @@ if [ ! -w "$NGX_INSTALL_DIR" ]; then
     echo "erro: sem permissao de escrita em $NGX_INSTALL_DIR" >&2
     echo "" >&2
     echo "rode a instalacao com privilegio:" >&2
-    echo "  curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | sudo sh" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh" >&2
     echo "" >&2
     echo "ou instale num diretorio seu, sem privilegio:" >&2
-    echo "  curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh" >&2
     exit 1
 fi
 ```
@@ -372,7 +372,7 @@ Criar `install.ps1`, equivalente em PowerShell. Requisitos:
 O one-liner documentado no README:
 
 ```powershell
-irm https://raw.githubusercontent.com/eduardoborges/ngx/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/s0beran0/ngx/main/install.ps1 | iex
 ```
 
 - [ ] **Step 4: Rodar**
@@ -500,10 +500,10 @@ Acrescente ao `README.md` seções cobrindo:
 
 ```sh
 # instalacao no sistema (precisa de privilegio)
-curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh
 
 # instalacao no seu usuario, sem privilegio
-curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | NGX_INSTALL_DIR=$HOME/.local/bin sh
+curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | NGX_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
 Documente `NGX_CHANNEL`, `NGX_VERSION` e `NGX_INSTALL_DIR`. Mostre também o download manual, para quem não executa script vindo da internet — e diga que essa é uma preferência legítima, não paranoia.

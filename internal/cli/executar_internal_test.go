@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

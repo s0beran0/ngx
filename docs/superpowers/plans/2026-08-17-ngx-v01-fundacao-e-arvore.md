@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Módulo Go: `github.com/eduardoborges/ngx`. Go 1.25 (`.tool-versions` já fixa `golang 1.25.9`).
+- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25 (`.tool-versions` já fixa `golang 1.25.9`).
 - **Zero CGO.** Nenhuma dependência que exija cgo.
 - Licença MIT em nome de Eduardo Benck. Sem qualquer menção, branding ou copyright da SEA Tecnologia.
 - **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`, sem "Generated with". Autoria exclusiva do Eduardo.
@@ -36,7 +36,7 @@
 - [ ] **Step 1: Inicializar o módulo e a licença**
 
 ```bash
-go mod init github.com/eduardoborges/ngx
+go mod init github.com/s0beran0/ngx
 go get github.com/stretchr/testify@latest
 ```
 
@@ -54,7 +54,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -221,7 +221,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -418,7 +418,7 @@ package output_test
 import (
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -638,7 +638,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -912,7 +912,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/settings"
+	"github.com/s0beran0/ngx/internal/settings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1155,8 +1155,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/cli"
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1233,8 +1233,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/eduardoborges/ngx/internal/output"
-	"github.com/eduardoborges/ngx/internal/settings"
+	"github.com/s0beran0/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/settings"
 	"github.com/spf13/cobra"
 )
 
@@ -1408,7 +1408,7 @@ package cli
 import (
 	"errors"
 
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/output"
 )
 
 func asNgxError(err error, target **output.Error) bool {
@@ -1437,7 +1437,7 @@ package main
 import (
 	"os"
 
-	"github.com/eduardoborges/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/cli"
 	"golang.org/x/term"
 )
 
@@ -1538,7 +1538,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1872,7 +1872,7 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2011,7 +2011,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 )
 
 // O fuzz garante que, para qualquer entrada que o tokenizador aceite, os
@@ -2263,7 +2263,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2660,7 +2660,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2950,7 +2950,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -3153,7 +3153,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -3485,8 +3485,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eduardoborges/ngx/internal/cli"
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
 
@@ -3607,8 +3607,8 @@ Criar `internal/cli/inspect.go`:
 package cli
 
 import (
-	"github.com/eduardoborges/ngx/internal/config"
-	"github.com/eduardoborges/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/config"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/spf13/cobra"
 )
 

@@ -8,8 +8,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/eduardoborges/ngx/internal/output"
-	"github.com/eduardoborges/ngx/internal/settings"
+	"github.com/s0beran0/ngx/internal/output"
+	"github.com/s0beran0/ngx/internal/settings"
 	"github.com/spf13/cobra"
 )
 

@@ -1,4 +1,4 @@
-module github.com/eduardoborges/ngx
+module github.com/s0beran0/ngx
 
 go 1.25.0
 
