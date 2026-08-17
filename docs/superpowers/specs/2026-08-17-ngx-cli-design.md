@@ -496,6 +496,19 @@ binário de verdade, e não apenas contra o fake.
 - Release com goreleaser: cross-compile para linux/amd64, linux/arm64 e darwin.
   Zero CGO, binário único estático.
 
+Distribuição, canais de release e auto-atualização têm plano próprio em
+`docs/superpowers/plans/2026-08-17-ngx-distribuicao.md`, com três decisões que
+estendem esta seção: canais derivados de semver (tag limpa é stable, sufixo
+`-beta`/`-rc` é pré-lançamento), verificação de release por checksum SHA256 mais
+assinatura minisign, e chave pública embutida no binário em tempo de compilação.
+O comando `ngx update` não constava de §4 e passa a existir.
+
+O motivo da assinatura, e não apenas do checksum: o `ngx` roda como root em
+servidores que servem tráfego. Um auto-update verificado só por checksum aceita
+qualquer binário de quem consiga publicar um release, porque o atacante publica
+o checksum dele junto. A assinatura mantém a garantia mesmo com a conta do
+GitHub comprometida.
+
 Dependências da v0.1:
 
 | Uso | Pacote |
