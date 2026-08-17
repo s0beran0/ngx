@@ -37,6 +37,30 @@ Confundir os dois leva a implementar a coisa errada.
   errado é mentira.
 - Nenhum `exec` de shell. `exec.Command` com argv explícito.
 
+## Despachando subagentes
+
+**O retorno de um subagente e um sumario, nunca o trabalho.** Todo dispatch
+exige, com estas palavras:
+
+> Escreva a analise completa em `<caminho>`. Como resposta final, no maximo
+> 15 linhas: veredito numa linha, cada achado como uma linha (severidade +
+> titulo + arquivo:linha), e o caminho do relatorio. Nao repita a analise na
+> resposta.
+
+*Por que:* o retorno entra no contexto de quem coordena e e relido em **todo
+turno seguinte**. Medido nesta base: a sessao de coordenacao consumiu 309
+milhoes de tokens de historico relido contra 131 milhoes de 41 subagentes
+somados — 70% do custo total — porque os relatorios voltavam inteiros. Um
+review de 3 mil tokens recebido cedo custa perto de um milhao sozinho.
+
+Todo dispatch tambem declara um **teto de chamadas de ferramenta**, e manda
+parar e reportar ao atingi-lo. Limitar turnos nao piora a qualidade: num
+estudo em SWE-bench, teto dinamico melhorou a taxa de sucesso do Claude em
+1,6% e cortou 15,6% do custo. Aqui rendeu 35% com os mesmos achados.
+
+Detalhe, template de dispatch e as demais regras:
+`docs/superpowers/escrevendo-planos.md`.
+
 ## Escrevendo planos e revisando
 
 Antes de escrever um plano de implementação ou despachar um review, leia
