@@ -30,10 +30,19 @@ type Node struct {
 	Column    int      `json:"column"`
 	Span      Span     `json:"span"`
 	HeadSpan  Span     `json:"head_span"`
-	ID        string   `json:"id,omitempty"`
-	Comment   *string  `json:"comment,omitempty"`
-	Block     []*Node  `json:"block,omitempty"`
-	Origin    *Origin  `json:"origin,omitempty"`
+
+	// HeadComments sao os spans dos comentarios que caem DENTRO de HeadSpan
+	// -- "default # x\n 0;" tem o comentario entre o nome e o ultimo
+	// argumento. O crossplane tira esses comentarios de Args
+	// (parse.go:286-290), entao sem este campo eles ficariam invisiveis na
+	// arvore e a reescrita da v0.2, que substitui os bytes de HeadSpan,
+	// apagaria um comentario que o usuario escreveu. Vazio na esmagadora
+	// maioria dos nos, por isso omitempty.
+	HeadComments []Span  `json:"head_comments,omitempty"`
+	ID           string  `json:"id,omitempty"`
+	Comment      *string `json:"comment,omitempty"`
+	Block        []*Node `json:"block,omitempty"`
+	Origin       *Origin `json:"origin,omitempty"`
 
 	// temBloco distingue "server {}" de "server;". O campo Block nao serve
 	// para isso: um bloco vazio e uma slice vazia, indistinguivel de nil
@@ -42,7 +51,14 @@ type Node struct {
 }
 
 // IsComment informa se o no representa um comentario.
-func (n *Node) IsComment() bool { return n.Directive == "#" }
+//
+// Directive == "#" sozinho nao basta: uma diretiva cujo NOME e o texto
+// citado "#" tambem chega aqui com Directive == "#", e ela e uma diretiva de
+// verdade, com argumentos e ate com bloco. O crossplane faz a distincao com
+// !IsQuoted (parse.go:264) e so preenche Comment nos dois caminhos que sao
+// comentario de fato (parse.go:264-268 e parse.go:438-444); Comment != nil e
+// portanto o mesmo teste, do lado de ca.
+func (n *Node) IsComment() bool { return n.Directive == "#" && n.Comment != nil }
 
 // HasBlock informa se o no abre um bloco, inclusive vazio.
 func (n *Node) HasBlock() bool { return n.temBloco }

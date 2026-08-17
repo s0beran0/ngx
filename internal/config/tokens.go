@@ -227,7 +227,24 @@ func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
 			valor = append(valor, t.consumirParaValor()...)
 		}
 	}
-	return fmt.Errorf("aspa %q aberta na linha %d nao foi fechada", string(aspa), line)
+	return &ErroDeAspa{Aspa: string(aspa), Linha: line}
+}
+
+// ErroDeAspa e a fonte terminando dentro de uma aspa aberta. E um tipo, e nao
+// um fmt.Errorf, porque essa e uma das divergencias enumeradas contra o
+// crossplane: o lexer dele fecha a aspa implicitamente no fim do arquivo
+// (lex.go:325-327, "if token.Len() > 0 { emit(tokenStartLine, lexState ==
+// inQuote, nil) }") e nao emite token nenhum quando o conteudo esta vazio
+// (mesma guarda), de modo que uma aspa solta vira config "ok" para ele. O
+// nginx recusa; nos recusamos junto, e o fuzz precisa reconhecer essa recusa
+// pela classe, nao por substring da mensagem.
+type ErroDeAspa struct {
+	Aspa  string
+	Linha int
+}
+
+func (e *ErroDeAspa) Error() string {
+	return fmt.Sprintf("aspa %q aberta na linha %d nao foi fechada", e.Aspa, e.Linha)
 }
 
 // lerPalavra consome uma palavra nao-quotada: nome de diretiva ou argumento.

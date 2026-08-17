@@ -40,7 +40,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	cache := novaCacheFonte()
 	abrirEspelhado := cache.decora(opts.abrir)
 
-	payload, err := crossplane.Parse(opts.Path, &crossplane.ParseOptions{
+	payload, err := parseComBarreira(opts.Path, &crossplane.ParseOptions{
 		ParseComments:             true,
 		CombineConfigs:            false,
 		SingleFile:                false,
@@ -49,7 +49,19 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		ErrorOnUnknownDirectives:  false,
 		Open:                      abrirEspelhado,
 	})
+
+	// A recusa da validacao previa vem antes de qualquer erro do crossplane:
+	// quando ela dispara, o Open devolve erro de proposito para que o parser
+	// nunca chegue no statement quebrado, e o erro que o crossplane relata em
+	// seguida e so o eco disso. Quem explica o problema e a recusa.
+	if problemas := cache.recusas(); len(problemas) > 0 {
+		return nil, problemas
+	}
 	if err != nil {
+		var problemas ParseErrors
+		if errors.As(err, &problemas) {
+			return nil, problemas
+		}
 		return nil, fmt.Errorf("ao parsear %s: %w", opts.Path, err)
 	}
 
@@ -76,6 +88,32 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	}
 	tree.Hash = Hash(tree)
 	return tree, nil
+}
+
+// parseComBarreira roda o parser do crossplane com uma rede de seguranca
+// contra panic. Uma CLI cujo consumidor e um agente de IA nao pode emitir
+// stack trace: isso nao e JSON, nao e legivel, e nao tem exit code util. O
+// panic vira ParseErrors, que a camada de CLI ja traduz para o exit code de
+// configuracao invalida (3, ver internal/cli/inspect.go).
+//
+// Cobre a goroutine do parser, que e esta; um panic dentro da goroutine do
+// lexer do crossplane continuaria escapando, e nao ha como recupera-lo daqui.
+// O caso conhecido -- prepareIfArgs (util.go:71-86) -- e do parser, e alem
+// disso ja e barrado antes por validarExpressoesIf.
+func parseComBarreira(path string, opts *crossplane.ParseOptions) (payload *crossplane.Payload, err error) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		payload = nil
+		err = ParseErrors{{
+			File:    path,
+			Message: fmt.Sprintf("o parser da dependencia entrou em panico nesta configuracao: %v", r),
+			Classe:  RecusaPanicoDoCrossplane,
+		}}
+	}()
+	return crossplane.Parse(path, opts)
 }
 
 // coletarErros converte os problemas relatados pelo crossplane num unico
@@ -125,25 +163,73 @@ func coletarErros(payload *crossplane.Payload) error {
 // unico, etc.), e a Task 9 casaria os spans com um conteudo que nao e o
 // que foi de fato parseado.
 type cacheFonte struct {
-	mu    sync.Mutex
-	dados map[string][]byte
-	erros map[string]error
+	mu       sync.Mutex
+	dados    map[string][]byte
+	erros    map[string]error
+	recusasV ParseErrors
 }
 
 func novaCacheFonte() *cacheFonte {
 	return &cacheFonte{dados: map[string][]byte{}, erros: map[string]error{}}
 }
 
-// decora envolve a funcao de abertura original interceptando os bytes
-// lidos, sem alterar o comportamento observado pelo crossplane.
+// decora envolve a funcao de abertura original: le o arquivo inteiro, guarda
+// os bytes lidos e devolve ao crossplane um leitor sobre esses MESMOS bytes.
+// Duas coisas dependem disso.
+//
+// A primeira e Source: sem a copia, ele viria de uma segunda leitura de disco
+// independente da que o crossplane tokenizou, e as duas poderiam divergir
+// (arquivo alterado entre as leituras, Open de uso unico), o que faria os
+// spans da Task 9 casarem com um conteudo que nao foi o parseado.
+//
+// A segunda e a validacao previa: e aqui, antes de o primeiro token chegar ao
+// parser, o unico ponto em que da para recusar um "if" mal formado ANTES de
+// prepareIfArgs derrubar o processo (ver expressao_if.go). Uma versao
+// anterior espelhava a leitura em streaming, e ali nao havia esse ponto: o
+// parser ja consome tokens enquanto o lexer ainda le. A leitura de uma vez
+// tambem elimina a concorrencia entre Read e Close que o streaming tinha (o
+// crossplane lexa cada arquivo numa goroutine e a abandona em varios retornos
+// antecipados: include sem argumentos, erro de Glob, erro de parse aninhado).
+//
+// Erro de leitura nao vira leitura parcial: e registrado e devolvido, para
+// que o crossplane pare em vez de tokenizar um prefixo -- um Source truncado
+// seria pior que o erro, porque os spans ficariam coerentes com ele e uma
+// reescrita da v0.2 truncaria o arquivo do usuario.
 func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) func(string) (io.ReadCloser, error) {
 	return func(path string) (io.ReadCloser, error) {
 		rc, err := abrirOriginal(path)
 		if err != nil {
 			return nil, err
 		}
-		return &leituraEspelhada{rc: rc, path: path, cache: c}, nil
+		conteudo, err := io.ReadAll(rc)
+		if erroFechar := rc.Close(); err == nil {
+			err = erroFechar
+		}
+		if err != nil {
+			c.guardarErro(path, err)
+			return nil, err
+		}
+
+		if problemas := validarExpressoesIf(path, conteudo); len(problemas) > 0 {
+			c.guardarRecusas(problemas)
+			return nil, problemas
+		}
+
+		c.guardar(path, conteudo)
+		return io.NopCloser(bytes.NewReader(conteudo)), nil
 	}
+}
+
+func (c *cacheFonte) guardarRecusas(problemas ParseErrors) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.recusasV = append(c.recusasV, problemas...)
+}
+
+func (c *cacheFonte) recusas() ParseErrors {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.recusasV
 }
 
 func (c *cacheFonte) obter(path string) ([]byte, bool) {
@@ -170,76 +256,6 @@ func (c *cacheFonte) guardarErro(path string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.erros[path] = err
-}
-
-// leituraEspelhada copia cada byte lido de um io.ReadCloser para um buffer
-// interno, e grava o resultado na cache quando o arquivo e fechado: os
-// bytes lidos se a leitura terminou limpa (io.EOF sem nenhum outro erro),
-// ou o erro em si caso contrario. lerFonte usa esse resultado para nunca
-// reler o arquivo -- nem para servir Source, nem para tentar recuperar de
-// um erro -- porque uma segunda leitura poderia devolver algo diferente
-// do que o crossplane realmente tokenizou.
-//
-// O gate eofLimpo && !houveErro existe para nao cachear uma leitura
-// incompleta como se fosse o conteudo inteiro do arquivo. Sem ele, uma
-// leitura interrompida no meio (erro de I/O real, ou o Close() de um
-// arquivo cuja goroutine de lexer foi abandonada antes do fim) gravaria
-// um prefixo do arquivo como se fosse o todo.
-//
-// O mutex protege so o buf/eofLimpo/houveErro/erro deste tipo -- Read e
-// Close rodam em goroutines diferentes (o crossplane lexa cada arquivo
-// numa goroutine separada e a abandona em varios retornos antecipados do
-// parser: include sem argumentos, erro de Glob, erro de parse aninhado),
-// entao esses campos precisam de protecao propria; o mutex de cacheFonte
-// so protege os mapas dele, nunca protegeu este buffer. O mutex NAO
-// protege rc.Read nem rc.Close: essas chamadas continuam acontecendo sem
-// sincronizacao entre as duas goroutines. Para os.File isso e seguro
-// porque o runtime faz o proprio refcounting do descritor internamente.
-// Para um ParseOptions.Open fornecido por quem usa este pacote, cujo
-// Close feche algo com estado (por exemplo um buffer compartilhado), a
-// mesma classe de race pode continuar existindo do lado do reader
-// delegado -- este tipo nao cobre isso.
-type leituraEspelhada struct {
-	rc    io.ReadCloser
-	path  string
-	cache *cacheFonte
-
-	mu        sync.Mutex
-	buf       bytes.Buffer
-	eofLimpo  bool
-	houveErro bool
-	erro      error
-}
-
-func (l *leituraEspelhada) Read(p []byte) (int, error) {
-	n, err := l.rc.Read(p)
-
-	l.mu.Lock()
-	if n > 0 {
-		l.buf.Write(p[:n])
-	}
-	switch {
-	case errors.Is(err, io.EOF):
-		l.eofLimpo = true
-	case err != nil:
-		l.houveErro = true
-		l.erro = err
-	}
-	l.mu.Unlock()
-
-	return n, err
-}
-
-func (l *leituraEspelhada) Close() error {
-	l.mu.Lock()
-	switch {
-	case l.eofLimpo && !l.houveErro:
-		l.cache.guardar(l.path, append([]byte(nil), l.buf.Bytes()...))
-	case l.houveErro:
-		l.cache.guardarErro(l.path, l.erro)
-	}
-	l.mu.Unlock()
-	return l.rc.Close()
 }
 
 // lerFonte devolve os bytes que o crossplane leu para path durante o

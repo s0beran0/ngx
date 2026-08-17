@@ -131,3 +131,19 @@ func TestInspectComSintaxeInvalidaEhErroDeConfiguracaoComDiagnosticoLocalizado(t
 	require.NotZero(t, d.Line)
 	require.NotEmpty(t, d.Message)
 }
+
+// "if () { ... }" derrubava o processo dentro do crossplane (prepareIfArgs,
+// util.go:83): sem envelope, sem exit code util, com stack trace da
+// dependencia no stderr -- a pior saida possivel para um consumidor que le o
+// stdout como JSON. O contrato aqui e o mesmo de qualquer sintaxe invalida:
+// envelope no stdout, exit 3 e diagnostico localizado.
+func TestInspectComIfSemExpressaoNaoDerrubaOProcesso(t *testing.T) {
+	code, env, bruto := rodarInspect(t, "inspect", "-c", filepath.Join("testdata", "if_vazio.conf"))
+
+	require.Equal(t, 3, int(code))
+	require.False(t, env.OK)
+	require.NotEmpty(t, bruto, "a saida precisa ser um envelope, nao um panic")
+	require.Len(t, env.Diagnostics, 1)
+	require.Equal(t, "if_vazio.conf", filepath.Base(env.Diagnostics[0].File))
+	require.Equal(t, 3, env.Diagnostics[0].Line)
+}

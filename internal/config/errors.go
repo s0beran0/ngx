@@ -2,12 +2,61 @@ package config
 
 import "fmt"
 
+// ClasseRecusa nomeia a razao pela qual o ngx recusou uma configuracao. Ela
+// existe para uma coisa so: o oraculo do FuzzAlinhamento compara o ngx com o
+// crossplane e precisa distinguir "recusa deliberada, com forma de token
+// conhecida" de "sobre-rejeicao, que e bug". Cada classe abaixo e uma
+// divergencia enumerada, estreita e com teste unitario proprio -- ver
+// divergenciasConhecidas em fuzz_test.go. Uma recusa sem classe
+// (RecusaCrossplane) e a recusa que o proprio crossplane relatou, e nunca e
+// divergencia.
+type ClasseRecusa string
+
+const (
+	// RecusaCrossplane e o erro que veio do payload do crossplane.
+	RecusaCrossplane ClasseRecusa = ""
+
+	// RecusaAspaNaoFechada: a fonte termina dentro de uma aspa aberta.
+	RecusaAspaNaoFechada ClasseRecusa = "aspa_nao_fechada"
+
+	// RecusaTokenNoLugarDeDiretiva: onde um nome de diretiva era esperado
+	// veio outro token.
+	RecusaTokenNoLugarDeDiretiva ClasseRecusa = "token_no_lugar_de_diretiva"
+
+	// RecusaTokenInesperado: token fora de lugar em qualquer outra posicao
+	// do casamento (argumento, fecha-bloco, comentario). Nao e divergencia
+	// conhecida nenhuma: se aparecer no fuzz, e bug do aligner.
+	RecusaTokenInesperado ClasseRecusa = "token_inesperado"
+
+	// RecusaTerminadorAusente: a diretiva nao termina em ';' nem abre '{'.
+	RecusaTerminadorAusente ClasseRecusa = "terminador_ausente"
+
+	// RecusaTokensSobrando: a arvore acabou antes dos tokens.
+	RecusaTokensSobrando ClasseRecusa = "tokens_sobrando"
+
+	// RecusaFimInesperado: os tokens acabaram antes da arvore.
+	RecusaFimInesperado ClasseRecusa = "fim_inesperado"
+
+	// RecusaExpressaoIfInvalida: "if" sem expressao entre parenteses.
+	RecusaExpressaoIfInvalida ClasseRecusa = "expressao_if_invalida"
+
+	// RecusaPanicoDoCrossplane: o crossplane entrou em panico ao parsear.
+	RecusaPanicoDoCrossplane ClasseRecusa = "panico_do_crossplane"
+)
+
 // ParseError e um problema encontrado ao ler a configuracao, com a
 // localizacao preservada para que o diagnostico possa apontar o lugar exato.
+//
+// Classe e Token existem para a comparacao com o crossplane no fuzz: Token
+// guarda o texto cru do lexema que motivou a recusa, para que a divergencia
+// enumerada case a forma exata do token ("{", "}") em vez de casar a
+// mensagem por substring.
 type ParseError struct {
 	File    string
 	Line    int
 	Message string
+	Classe  ClasseRecusa
+	Token   string
 }
 
 // ParseErrors agrega os problemas de um parse. Implementa error para poder
