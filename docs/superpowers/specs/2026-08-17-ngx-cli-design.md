@@ -509,6 +509,20 @@ qualquer binário de quem consiga publicar um release, porque o atacante publica
 o checksum dele junto. A assinatura mantém a garantia mesmo com a conta do
 GitHub comprometida.
 
+Acesso remoto via SSH tem plano próprio em
+`docs/superpowers/plans/2026-08-17-ngx-remoto-ssh.md`, antecipando parte do
+"multi-host via SSH" que §16 coloca na v1.0. Ele opera sem instalar nada no
+servidor: lê a configuração por SFTP e executa o nginx que já existe lá. Três
+decisões: verificação estrita de host key com escape explícito, autenticação
+tentando o `ssh-agent` antes de qualquer arquivo de chave, e `~/.ssh/config`
+respeitado para que `ngx --host web1` funcione para quem já tem `ssh web1`.
+
+Esse plano também corrige um defeito da v0.1 que só se torna visível no uso
+remoto: o `ngx` injeta `Open` no crossplane mas não `Glob`, então
+`include conf.d/*.conf` é resolvido com `filepath.Glob` sobre o disco local.
+Apontado para um host remoto, o `ngx` listaria arquivos da máquina do operador
+e os trataria como configuração do servidor.
+
 Dependências da v0.1:
 
 | Uso | Pacote |
