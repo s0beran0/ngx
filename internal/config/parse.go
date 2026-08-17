@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -120,10 +121,11 @@ func coletarErros(payload *crossplane.Payload) error {
 type cacheFonte struct {
 	mu    sync.Mutex
 	dados map[string][]byte
+	erros map[string]error
 }
 
 func novaCacheFonte() *cacheFonte {
-	return &cacheFonte{dados: map[string][]byte{}}
+	return &cacheFonte{dados: map[string][]byte{}, erros: map[string]error{}}
 }
 
 // decora envolve a funcao de abertura original interceptando os bytes
@@ -145,41 +147,113 @@ func (c *cacheFonte) obter(path string) ([]byte, bool) {
 	return b, ok
 }
 
+func (c *cacheFonte) obterErro(path string) (error, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.erros[path]
+	return e, ok
+}
+
 func (c *cacheFonte) guardar(path string, b []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dados[path] = b
 }
 
-// leituraEspelhada copia cada byte lido de um io.ReadCloser para a cache
-// antes de devolve-lo ao chamador, e grava o resultado quando o arquivo e
-// fechado.
+func (c *cacheFonte) guardarErro(path string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.erros[path] = err
+}
+
+// leituraEspelhada copia cada byte lido de um io.ReadCloser para um buffer
+// interno, e grava o resultado na cache quando o arquivo e fechado: os
+// bytes lidos se a leitura terminou limpa (io.EOF sem nenhum outro erro),
+// ou o erro em si caso contrario. lerFonte usa esse resultado para nunca
+// reler o arquivo -- nem para servir Source, nem para tentar recuperar de
+// um erro -- porque uma segunda leitura poderia devolver algo diferente
+// do que o crossplane realmente tokenizou.
+//
+// O gate eofLimpo && !houveErro existe para nao cachear uma leitura
+// incompleta como se fosse o conteudo inteiro do arquivo. Sem ele, uma
+// leitura interrompida no meio (erro de I/O real, ou o Close() de um
+// arquivo cuja goroutine de lexer foi abandonada antes do fim) gravaria
+// um prefixo do arquivo como se fosse o todo.
+//
+// O mutex protege so o buf/eofLimpo/houveErro/erro deste tipo -- Read e
+// Close rodam em goroutines diferentes (o crossplane lexa cada arquivo
+// numa goroutine separada e a abandona em varios retornos antecipados do
+// parser: include sem argumentos, erro de Glob, erro de parse aninhado),
+// entao esses campos precisam de protecao propria; o mutex de cacheFonte
+// so protege os mapas dele, nunca protegeu este buffer. O mutex NAO
+// protege rc.Read nem rc.Close: essas chamadas continuam acontecendo sem
+// sincronizacao entre as duas goroutines. Para os.File isso e seguro
+// porque o runtime faz o proprio refcounting do descritor internamente.
+// Para um ParseOptions.Open fornecido por quem usa este pacote, cujo
+// Close feche algo com estado (por exemplo um buffer compartilhado), a
+// mesma classe de race pode continuar existindo do lado do reader
+// delegado -- este tipo nao cobre isso.
 type leituraEspelhada struct {
 	rc    io.ReadCloser
 	path  string
 	cache *cacheFonte
-	buf   bytes.Buffer
+
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	eofLimpo  bool
+	houveErro bool
+	erro      error
 }
 
 func (l *leituraEspelhada) Read(p []byte) (int, error) {
 	n, err := l.rc.Read(p)
+
+	l.mu.Lock()
 	if n > 0 {
 		l.buf.Write(p[:n])
 	}
+	switch {
+	case errors.Is(err, io.EOF):
+		l.eofLimpo = true
+	case err != nil:
+		l.houveErro = true
+		l.erro = err
+	}
+	l.mu.Unlock()
+
 	return n, err
 }
 
 func (l *leituraEspelhada) Close() error {
-	l.cache.guardar(l.path, append([]byte(nil), l.buf.Bytes()...))
+	l.mu.Lock()
+	switch {
+	case l.eofLimpo && !l.houveErro:
+		l.cache.guardar(l.path, append([]byte(nil), l.buf.Bytes()...))
+	case l.houveErro:
+		l.cache.guardarErro(l.path, l.erro)
+	}
+	l.mu.Unlock()
 	return l.rc.Close()
 }
 
 // lerFonte devolve os bytes que o crossplane leu para path durante o
-// parse. Se o cache nao tiver esse arquivo -- por exemplo, um Config
-// presente no payload sem leitura correspondente registrada -- cai de
-// volta para uma leitura direta via opts.abrir, que ainda respeita
-// ParseOptions.Open.
+// parse. Se aquela leitura registrou um erro, lerFonte propaga esse erro
+// em vez de reler o arquivo: uma releitura poderia ter sucesso mesmo
+// quando a leitura original que o crossplane de fato tokenizou falhou --
+// uma falha de I/O transitoria, por exemplo --, o que produziria uma
+// Tree com Source completo e Nodes correspondendo so ao prefixo que o
+// lexer alcancou antes do erro, com err == nil escondendo o problema.
+//
+// So cai para uma leitura direta via opts.abrir (que ainda respeita
+// ParseOptions.Open) quando o cache nao tem nem bytes nem erro para esse
+// caminho -- um Config presente no payload sem leitura correspondente
+// registrada, o que nao deveria acontecer no caminho normal do
+// crossplane, mas serve de rede de seguranca.
 func lerFonte(opts ParseOptions, cache *cacheFonte, path string) ([]byte, error) {
+	if erroLeitura, ok := cache.obterErro(path); ok {
+		return nil, fmt.Errorf("ao ler %s: %w", path, erroLeitura)
+	}
+
 	if b, ok := cache.obter(path); ok {
 		return b, nil
 	}
@@ -216,7 +290,7 @@ func converterDirectives(ds crossplane.Directives, file string) []*Node {
 	return nodes
 }
 
-// clonarArgs copia os argumentos da diretiva para que nós construidos por
+// clonarArgs copia os argumentos da diretiva para que nos construidos por
 // tarefas futuras (a Task 12 monta nos novos a partir destes) nao
 // compartilhem o array de backing com a arvore do crossplane: um append
 // num Args copiado poderia sobrescrever o vizinho.

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/eduardoborges/ngx/internal/config"
 	"github.com/stretchr/testify/require"
@@ -208,4 +210,141 @@ func TestFileNaoSerializaSource(t *testing.T) {
 	}
 	sort.Strings(chaves)
 	require.Equal(t, []string{"file", "parsed"}, chaves)
+}
+
+// leitorLento entrega os bytes de dados em pedacos pequenos com uma pausa
+// entre cada leitura. Um arquivo pequeno lido do disco real costuma vir
+// inteiro (ou quase) numa unica chamada de Read do bufio.Scanner, entao o
+// timing organico nao garante que a goroutine do lexer ainda esteja lendo
+// no instante em que o parser bate no erro e fecha o arquivo -- a pausa
+// artificial torna essa sobreposicao praticamente garantida, em vez de
+// depender de sorte de agendamento do scheduler.
+type leitorLento struct {
+	dados []byte
+	pos   int
+}
+
+func (l *leitorLento) Read(p []byte) (int, error) {
+	if l.pos >= len(l.dados) {
+		return 0, io.EOF
+	}
+	time.Sleep(200 * time.Microsecond)
+
+	fim := l.pos + 32
+	if fim > len(l.dados) {
+		fim = len(l.dados)
+	}
+	n := copy(p, l.dados[l.pos:fim])
+	l.pos += n
+	return n, nil
+}
+
+func (l *leitorLento) Close() error { return nil }
+
+// Um "include;" sem argumento faz o parser do crossplane retornar
+// imediatamente, abandonando a goroutine do lexer daquele arquivo -- que
+// continua lendo do mesmo reader (o fixture tem bem mais de 2048 tokens
+// depois do include quebrado, a capacidade do canal de tokens). O Close()
+// do arquivo roda no meio disso. Antes do round 2 do fix, leituraEspelhada
+// nao tinha mutex proprio no buffer, e essa concorrencia real dava data
+// race sob -race -- reproduzido manualmente revertendo leituraEspelhada
+// para a versao do round 1 e rodando este mesmo teste. Este teste so trava
+// a regressao quando rodado com go test -race.
+func TestParseComIncludeSemArgumentosNaoTemDataRace(t *testing.T) {
+	dados, err := os.ReadFile(filepath.Join("testdata", "include_sem_args.conf"))
+	require.NoError(t, err)
+
+	abrir := func(path string) (io.ReadCloser, error) {
+		return &leitorLento{dados: dados}, nil
+	}
+
+	_, err = config.Parse(config.ParseOptions{
+		Path: "include_sem_args.conf",
+		Open: abrir,
+	})
+
+	// O include sem argumento e, por si so, um problema que o crossplane
+	// reporta via Status/Errors -- entao um erro aqui e esperado. O que
+	// este teste trava e a ausencia de data race, nao o valor do erro.
+	require.Error(t, err)
+
+	var problemas config.ParseErrors
+	require.True(t, errors.As(err, &problemas))
+}
+
+// leitorComFalha devolve um numero fixo de bytes e depois passa a
+// devolver um erro de I/O real (nao io.EOF) em toda chamada seguinte,
+// simulando uma falha no meio da leitura de um arquivo -- ex.: um FS de
+// rede que cai depois de entregar as primeiras linhas.
+type leitorComFalha struct {
+	restante []byte
+}
+
+func (l *leitorComFalha) Read(p []byte) (int, error) {
+	if len(l.restante) == 0 {
+		return 0, errors.New("falha de i/o simulada no meio do arquivo")
+	}
+	n := copy(p, l.restante)
+	l.restante = l.restante[n:]
+	return n, nil
+}
+
+func (l *leitorComFalha) Close() error { return nil }
+
+// Antes do round 2 do fix, leituraEspelhada.Close gravava incondicionalmente
+// o que houvesse no buffer, mesmo que a leitura subjacente tivesse
+// terminado num erro real em vez de io.EOF. O crossplane, por sua vez, nao
+// consulta scanner.Err(), entao esse erro de I/O terminava a tokenizacao em
+// silencio -- e config.Parse devolveria uma Tree com Source truncado e
+// err == nil. Um Source truncado e mais perigoso que o defeito original do
+// round 1: os spans da Task 9 ficariam coerentes com esse Source, e uma
+// escrita de volta por substituicao de bytes truncaria o arquivo real do
+// usuario.
+func TestParseFalhaDeIONaoTruncaSourceSilenciosamente(t *testing.T) {
+	primeiraLinha := "worker_processes auto;\n"
+
+	abrir := func(path string) (io.ReadCloser, error) {
+		return &leitorComFalha{restante: []byte(primeiraLinha)}, nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{
+		Path: "qualquer/nginx.conf",
+		Open: abrir,
+	})
+
+	require.Error(t, err, "uma falha de i/o no meio do arquivo precisa propagar como erro, nao produzir uma Tree com Source truncado e err nil")
+	require.Nil(t, tree)
+}
+
+// Antes do round 3 do fix, uma leitura que falhasse no meio mas cuja
+// releitura do fallback tivesse sucesso -- uma falha de I/O transitoria --
+// produzia err == nil, Source completo (da releitura bem-sucedida) e Nodes
+// contendo so o prefixo que o lexer alcancou antes do erro original: uma
+// arvore parcial com sucesso silencioso. Esse teste usa um Open que falha
+// na primeira leitura mas teria sucesso numa segunda, para provar que
+// lerFonte propaga o erro registrado em vez de reler o arquivo.
+func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
+	completo := []byte("worker_processes auto;\nevents {\n    worker_connections 1024;\n}\n")
+	primeiraLinha := completo[:len("worker_processes auto;\n")]
+
+	var chamadas int
+	abrir := func(path string) (io.ReadCloser, error) {
+		chamadas++
+		if chamadas == 1 {
+			// primeira leitura: falha depois da primeira linha.
+			return &leitorComFalha{restante: append([]byte{}, primeiraLinha...)}, nil
+		}
+		// se lerFonte relesse o arquivo, essa segunda leitura teria
+		// sucesso total -- e e exatamente isso que nao pode acontecer.
+		return io.NopCloser(bytes.NewReader(completo)), nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{
+		Path: "qualquer/nginx.conf",
+		Open: abrir,
+	})
+
+	require.Error(t, err, "uma falha de i/o transitoria precisa propagar como erro, nao produzir uma arvore parcial com sucesso silencioso numa releitura")
+	require.Nil(t, tree)
+	require.Equal(t, 1, chamadas, "lerFonte nao deve reler o arquivo quando ja ha um erro registrado para aquele caminho")
 }
