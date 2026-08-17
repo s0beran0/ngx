@@ -3,6 +3,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -11,7 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Caminhos padrao do arquivo de configuracao do proprio ngx.
+// Caminhos padrao do arquivo de configuracao do proprio ngx. Execute usa
+// estes valores para preencher Context.GlobalSettingsPath e
+// Context.LocalSettingsPath; testes de caixa-branca que precisam de
+// isolamento do filesystem real sobrescrevem os campos do Context em vez de
+// depender destas constantes.
 const (
 	GlobalSettingsPath = "/etc/ngx/ngx.yaml"
 	LocalSettingsPath  = ".ngx/config.yaml"
@@ -37,18 +43,37 @@ type Context struct {
 	Settings *settings.Settings
 	Renderer *output.Renderer
 	Command  string
+
+	// GlobalSettingsPath e LocalSettingsPath sao os caminhos que preparar
+	// passa para settings.Load. Execute os preenche com as constantes
+	// GlobalSettingsPath/LocalSettingsPath do pacote; ficarem no Context em
+	// vez de fixos no corpo de preparar e o que permite a um teste isolar o
+	// carregamento das settings do filesystem real sem trocar o cwd do
+	// processo inteiro.
+	GlobalSettingsPath string
+	LocalSettingsPath  string
 }
 
 // Execute roda o CLI e devolve o exit code. Nunca chama os.Exit: isso e
 // responsabilidade de main, o que mantem o CLI inteiro testavel.
 func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCode {
-	flags := &GlobalFlags{}
 	ctx := &Context{
-		Flags:    flags,
-		Renderer: &output.Renderer{Out: stdout, IsTTY: isTTY},
+		Flags:              &GlobalFlags{},
+		Renderer:           &output.Renderer{Out: stdout, IsTTY: isTTY},
+		GlobalSettingsPath: GlobalSettingsPath,
+		LocalSettingsPath:  LocalSettingsPath,
 	}
 
 	root := NewRoot(ctx)
+	return executar(root, ctx, args, stderr)
+}
+
+// executar despacha o comando ja montado e traduz o erro em exit code. E
+// separado de Execute para que um teste de caixa-branca possa injetar um
+// root com um comando extra (por exemplo, um que devolva um erro tipado
+// embrulhado com %w) sem duplicar a logica de normalizacao de erro e
+// renderizacao do envelope.
+func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer) output.ExitCode {
 	root.SetArgs(args)
 	root.SetOut(stderr)
 	root.SetErr(stderr)
@@ -58,19 +83,30 @@ func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCod
 		return output.ExitOK
 	}
 
-	// Cobra devolve erro cru para flag e comando invalidos; tratamos como uso.
-	if _, ok := err.(*output.Error); !ok {
+	// errors.As, nao uma type assertion direta: um comando pode devolver um
+	// *output.Error embrulhado com %w para anexar contexto (padrao
+	// idiomatico, ex.: fmt.Errorf("ao ler %s: %w", caminho,
+	// output.InvalidConfig(...))). Uma assertion direta nao atravessa o
+	// wrapping — trataria esse erro como cru e o substituiria por um Usage
+	// generico, perdendo o exit code e o diagnostico originais. O cobra
+	// tambem devolve erro cru (sem tipo nenhum) para flag e comando
+	// invalidos; e so nesse caso que a substituicao abaixo deve acontecer.
+	var e *output.Error
+	if !errors.As(err, &e) {
 		err = output.Usage("%s", err.Error())
 	}
 
-	renderErro(ctx, stdout, isTTY, err)
+	renderErro(ctx, stderr, err)
 	return output.CodeOf(err)
 }
 
-func renderErro(ctx *Context, stdout io.Writer, isTTY bool, err error) {
+// renderErro desenha o envelope de erro. ctx.Renderer e sempre construido por
+// Execute (ou pelo teste de caixa-branca que monta o Context), entao nunca e
+// nil aqui.
+func renderErro(ctx *Context, stderr io.Writer, err error) {
 	env := output.New(comandoDe(ctx))
 	var e *output.Error
-	if ok := asNgxError(err, &e); ok {
+	if errors.As(err, &e) {
 		env.AddDiagnostic(e.Diag)
 	} else {
 		env.AddDiagnostic(output.Diagnostic{
@@ -81,14 +117,16 @@ func renderErro(ctx *Context, stdout io.Writer, isTTY bool, err error) {
 	}
 
 	r := ctx.Renderer
-	if r == nil {
-		r = &output.Renderer{Out: stdout, IsTTY: isTTY}
-	}
 	// Um erro nunca e suprimido por --quiet nem bloqueado pelo portao de
 	// --no-redact: o agente precisa saber o que deu errado.
 	r.Quiet = false
 	r.NoRedact = false
-	_ = r.Render(env)
+	if renderErr := r.Render(env); renderErr != nil {
+		// O cobra esta com SilenceErrors; se o proprio render do envelope de
+		// erro falhar, o usuario nao pode ficar com um exit code e zero
+		// bytes em qualquer stream. Isso cai no stderr como ultimo recurso.
+		fmt.Fprintln(stderr, renderErr)
+	}
 }
 
 // NewRoot monta o comando raiz com as flags globais.
@@ -128,9 +166,12 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 		return output.Usage("--json e --human sao mutuamente exclusivos")
 	}
 
-	s, err := settings.Load(GlobalSettingsPath, LocalSettingsPath)
+	s, err := settings.Load(ctx.GlobalSettingsPath, ctx.LocalSettingsPath)
 	if err != nil {
-		return output.Internal(err, "%s", err.Error())
+		// A causa (caminho de arquivo, erro cru do parser YAML) fica so no
+		// campo Err de output.Internal, acessivel via errors.Unwrap; a
+		// mensagem do diagnostico nao deve vazar detalhe interno ao agente.
+		return output.Internal(err, "nao foi possivel carregar a configuracao do ngx")
 	}
 	ctx.Settings = s
 
@@ -141,7 +182,7 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	// format ruim suprimiria o proprio erro de uso e o usuario nao teria
 	// nenhum sinal do problema.
 	formato := resolverFormato(f, s)
-	if err := validarFormato(formato, s); err != nil {
+	if err := validarFormato(formato); err != nil {
 		return err
 	}
 
@@ -155,7 +196,6 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	ctx.Renderer.NoRedact = f.NoRedact
 	ctx.Renderer.Quiet = f.Quiet
 
-	cmd.SilenceUsage = true
 	return nil
 }
 
@@ -170,19 +210,18 @@ func resolverFormato(f *GlobalFlags, s *settings.Settings) output.Format {
 	}
 }
 
-// validarFormato recusa qualquer formato fora de auto/json/human. Quando as
-// flags --json/--human estao presentes o formato resolvido e sempre um
-// desses valores; a unica origem possivel de um formato invalido e o
-// output.format do arquivo de configuracao, por isso a mensagem nomeia a
-// configuracao como origem.
-func validarFormato(formato output.Format, s *settings.Settings) error {
+// validarFormato recusa qualquer formato fora de auto/json/human. As flags
+// --json/--human so produzem um desses valores por construcao; a unica
+// origem possivel de um formato invalido em preparar e o output.format do
+// arquivo de configuracao.
+func validarFormato(formato output.Format) error {
 	switch formato {
 	case output.FormatAuto, output.FormatJSON, output.FormatHuman, "":
 		return nil
 	default:
 		return output.Usage(
 			"output.format invalido na configuracao: %q (esperado auto, json ou human)",
-			s.Output.Format,
+			string(formato),
 		)
 	}
 }

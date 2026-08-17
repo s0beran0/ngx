@@ -1,15 +1,5 @@
 package cli
 
-import (
-	"errors"
-
-	"github.com/eduardoborges/ngx/internal/output"
-)
-
-func asNgxError(err error, target **output.Error) bool {
-	return errors.As(err, target)
-}
-
 // comandoDe devolve o nome do comando que estava executando, para que o
 // envelope de erro identifique a operacao que falhou. Antes de o cobra
 // resolver o comando — flag global invalida, por exemplo — nao ha nome, e o
