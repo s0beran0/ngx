@@ -41,6 +41,14 @@ O goreleaser gera `checksums.txt` com o SHA256 de cada artefato e o assina com m
 
 *Custo aceito:* há uma chave privada para guardar. Perdê-la significa que updates existentes param de aceitar releases novas até um binário com a chave nova ser distribuído por outro caminho.
 
+### DD6 — A release prova que a chave foi embutida, antes de publicar
+
+Injetar valor com `-ldflags -X` **falha em silêncio** se a variável alvo não existir com o nome e o tipo exatos: o linker não avisa, o build passa, e o binário sai com a variável vazia. Numa release assinada isso significa publicar um `ngx` que não consegue verificar assinatura nenhuma — a proteção some sem nenhum sinal, que é o pior modo de falha possível para um mecanismo de segurança.
+
+Então o workflow de release **verifica o artefato construído** antes de publicar: executa o binário e confirma que a chave pública embutida não está vazia. Se estiver, a release aborta.
+
+*Por quê:* a alternativa é depender de alguém lembrar de conferir. Um controle de segurança que depende de memória humana já falhou; a única pergunta é quando.
+
 ### DD3 — A chave pública é embutida, não baixada
 
 Uma chave pública que o próprio `update` baixa não protege contra nada: quem controla o servidor entrega a chave dele junto com o binário dele. Ela entra via `-ldflags -X` no build.
