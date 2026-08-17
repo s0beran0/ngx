@@ -46,6 +46,11 @@ const (
 
 	// RecusaPanicoDoCrossplane: o crossplane entrou em panico ao parsear.
 	RecusaPanicoDoCrossplane ClasseRecusa = "panico_do_crossplane"
+
+	// RecusaFalhaDeLeitura: a leitura de um arquivo da configuracao falhou
+	// no meio -- o .conf pode estar intacto, quem falhou foi o I/O. Nao e
+	// divergencia do fuzz: o fuzz le de memoria e nunca a produz.
+	RecusaFalhaDeLeitura ClasseRecusa = "falha_de_leitura"
 )
 
 // ParseError e um problema encontrado ao ler a configuracao, com a

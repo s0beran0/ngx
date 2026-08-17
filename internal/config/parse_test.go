@@ -343,12 +343,19 @@ func TestParseComIncludeSemArgumentosNaoTemDataRace(t *testing.T) {
 // devolver um erro de I/O real (nao io.EOF) em toda chamada seguinte,
 // simulando uma falha no meio da leitura de um arquivo -- ex.: um FS de
 // rede que cai depois de entregar as primeiras linhas.
+// erro, quando presente, substitui o erro padrao -- serve para os testes que
+// precisam reconhecer a string crua do runtime na saida (ou provar que ela
+// nao aparece).
 type leitorComFalha struct {
 	restante []byte
+	erro     error
 }
 
 func (l *leitorComFalha) Read(p []byte) (int, error) {
 	if len(l.restante) == 0 {
+		if l.erro != nil {
+			return 0, l.erro
+		}
 		return 0, errors.New("falha de i/o simulada no meio do arquivo")
 	}
 	n := copy(p, l.restante)
@@ -414,4 +421,95 @@ func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
 	require.Error(t, err, "uma falha de i/o transitoria precisa propagar como erro, nao produzir uma arvore parcial com sucesso silencioso numa releitura")
 	require.Nil(t, tree)
 	require.Equal(t, 1, chamadas, "lerFonte nao deve reler o arquivo quando ja ha um erro registrado para aquele caminho")
+}
+
+// Falha de I/O num arquivo INCLUIDO nao pode virar erro de sintaxe no
+// arquivo que faz o include. O crossplane, ao abrir um include explicito,
+// transforma o erro do Open num ParseError localizado no arquivo que
+// inclui, na linha do include -- e a mensagem e a string crua do runtime.
+// Se o ngx repassa isso, o consumidor recebe "erro na linha 2 do
+// nginx.conf" para um nginx.conf intacto e vai depurar o arquivo errado.
+//
+// Isso deixou de ser hipotese com o acesso remoto por SSH: nada e instalado
+// no servidor, entao cada arquivo da config e uma leitura de rede (132 num
+// host medido) e queda de conexao no meio de uma delas e rotina.
+//
+// O teste prova a ATRIBUICAO, nao so que deu erro: arquivo apontado, classe
+// propria, e a string crua do runtime ausente da mensagem.
+func TestParseFalhaDeIOEmIncludeNaoCulpaOArquivoQueInclui(t *testing.T) {
+	dir := t.TempDir()
+	topo := filepath.Join(dir, "nginx.conf")
+	incluido := filepath.Join(dir, "conf.d", "app.conf")
+
+	fonte := map[string][]byte{
+		topo:     []byte("worker_processes auto;\ninclude conf.d/app.conf;\n"),
+		incluido: []byte("server {\n    listen 80;\n}\n"),
+	}
+
+	const cru = "read tcp 10.0.0.9:22: connection reset by peer"
+
+	abrir := func(path string) (io.ReadCloser, error) {
+		b, ok := fonte[path]
+		if !ok {
+			return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+		}
+		if path == incluido {
+			// entrega as primeiras linhas e cai no meio, como uma sessao
+			// SSH que morre durante a leitura de um dos arquivos.
+			return &leitorComFalha{
+				restante: append([]byte{}, b[:9]...),
+				erro:     errors.New(cru),
+			}, nil
+		}
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{Path: topo, Open: abrir})
+
+	require.Error(t, err)
+	require.Nil(t, tree)
+
+	var problemas config.ParseErrors
+	require.ErrorAs(t, err, &problemas)
+	require.Len(t, problemas, 1)
+	p := problemas[0]
+
+	require.Equal(t, incluido, p.File,
+		"o diagnostico precisa apontar o arquivo que nao pode ser lido, nao o que faz o include")
+	require.NotEqual(t, topo, p.File,
+		"o arquivo que faz o include esta intacto: culpa-lo manda o consumidor depurar o arquivo errado")
+	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe,
+		"falha de I/O precisa ter classe propria, nao sair como recusa do crossplane")
+	require.NotContains(t, p.Message, cru,
+		"a mensagem e nossa: nao repassa a string crua do runtime Go")
+	require.NotContains(t, p.Message, "connection reset")
+}
+
+// A mesma falha no arquivo de topo: o crossplane devolve o erro direto e o
+// ngx o embrulhava num fmt.Errorf sem classe, carregando a string crua do
+// runtime para dentro do diagnostico.
+func TestParseFalhaDeIONoTopoTemClasseEMensagemPropria(t *testing.T) {
+	const cru = "read tcp 10.0.0.9:22: connection reset by peer"
+
+	abrir := func(path string) (io.ReadCloser, error) {
+		return &leitorComFalha{
+			restante: []byte("worker_processes auto;\n"),
+			erro:     errors.New(cru),
+		}, nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{Path: "remoto/nginx.conf", Open: abrir})
+
+	require.Error(t, err)
+	require.Nil(t, tree)
+
+	var problemas config.ParseErrors
+	require.ErrorAs(t, err, &problemas)
+	require.Len(t, problemas, 1)
+	p := problemas[0]
+
+	require.Equal(t, "remoto/nginx.conf", p.File)
+	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe)
+	require.NotContains(t, p.Message, cru,
+		"a mensagem e nossa: nao repassa a string crua do runtime Go")
 }

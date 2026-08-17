@@ -73,6 +73,21 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	if problemas := cache.recusas(); len(problemas) > 0 {
 		return nil, problemas
 	}
+
+	// Falha de I/O na leitura tem precedencia sobre o que o crossplane
+	// relatar em seguida, porque o que ele relata e consequencia dela e
+	// aponta o arquivo errado. Sao dois desfechos: se o arquivo truncado era
+	// o de topo (ou veio de um glob), o crossplane devolve o erro cru e a
+	// mensagem sai com a string do runtime; se era alvo de um include
+	// explicito, ele converte o erro do Open num ParseError localizado no
+	// arquivo QUE FAZ o include, na linha do include -- e o consumidor
+	// recebe "erro na linha N" para um .conf intacto e vai depurar o arquivo
+	// errado. Quem sabe o que aconteceu, e em qual arquivo, e a leitura que
+	// falhou; ela ja esta registrada no cache.
+	if problemas := cache.errosDeLeitura(); len(problemas) > 0 {
+		return nil, problemas
+	}
+
 	if err != nil {
 		var problemas ParseErrors
 		if errors.As(err, &problemas) {
@@ -293,6 +308,39 @@ func (c *cacheFonte) recusas() ParseErrors {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.recusasV
+}
+
+// errosDeLeitura converte as falhas de I/O registradas durante o parse em
+// recusas nossas: uma por arquivo, com o caminho de quem de fato falhou e
+// mensagem propria. A string crua do runtime ("read tcp ...: connection reset
+// by peer") fica de fora do diagnostico pelo mesmo motivo de
+// recusarAlvoNaoRegular: numa CLI lida por agente a mensagem e contrato, tem
+// que ser nossa e ter classe.
+//
+// A ordem sai por caminho para que dois parses da mesma configuracao quebrada
+// produzam o mesmo diagnostico -- a iteracao de map em Go e aleatoria.
+func (c *cacheFonte) errosDeLeitura() ParseErrors {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.erros) == 0 {
+		return nil
+	}
+
+	caminhos := make([]string, 0, len(c.erros))
+	for path := range c.erros {
+		caminhos = append(caminhos, path)
+	}
+	slices.Sort(caminhos)
+
+	problemas := make(ParseErrors, 0, len(caminhos))
+	for _, path := range caminhos {
+		problemas = append(problemas, ParseError{
+			File:    path,
+			Message: "a leitura deste arquivo falhou antes do fim: a configuracao nao pode ser lida por inteiro",
+			Classe:  RecusaFalhaDeLeitura,
+		})
+	}
+	return problemas
 }
 
 func (c *cacheFonte) obter(path string) ([]byte, bool) {
