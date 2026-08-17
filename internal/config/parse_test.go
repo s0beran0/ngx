@@ -1,7 +1,13 @@
 package config_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/eduardoborges/ngx/internal/config"
@@ -106,4 +112,100 @@ func TestArvoreEmMemoriaNaoEhRedigida(t *testing.T) {
 		return true
 	})
 	require.True(t, achou)
+}
+
+// O crossplane nao aborta num erro de sintaxe: ele registra o problema em
+// payload.Errors/cfg.Errors e devolve err == nil. Sem esse tratamento,
+// TestParseErroDeSintaxeViraParseErrors falharia porque config.Parse
+// devolveria uma *Tree com Source mas zero Nodes, e nenhum erro.
+func TestParseErroDeSintaxeViraParseErrors(t *testing.T) {
+	_, err := config.Parse(config.ParseOptions{
+		Path: filepath.Join("testdata", "erro_sintaxe.conf"),
+	})
+
+	require.Error(t, err)
+
+	var problemas config.ParseErrors
+	require.True(t, errors.As(err, &problemas), "o erro devolvido precisa ser (ou envolver) config.ParseErrors")
+	require.NotEmpty(t, problemas)
+	require.NotEmpty(t, problemas[0].File)
+	require.NotZero(t, problemas[0].Line)
+}
+
+// Um include apontando para um arquivo inexistente e o mesmo tipo de
+// defeito silencioso: o crossplane marca o problema no arquivo que faz o
+// include, sem gerar Config nenhum para o arquivo ausente e sem devolver
+// erro pela via normal.
+func TestParseIncludeQuebradoViraParseErrors(t *testing.T) {
+	_, err := config.Parse(config.ParseOptions{
+		Path: filepath.Join("testdata", "include_quebrado.conf"),
+	})
+
+	require.Error(t, err)
+
+	var problemas config.ParseErrors
+	require.True(t, errors.As(err, &problemas), "o erro devolvido precisa ser (ou envolver) config.ParseErrors")
+	require.NotEmpty(t, problemas)
+	require.NotEmpty(t, problemas[0].File)
+	require.NotZero(t, problemas[0].Line)
+}
+
+// ParseOptions.Open e o unico gancho de teste sem disco do pacote: precisa
+// ser exercitado com um filesystem em memoria, e precisa ser a unica fonte
+// de leitura -- um caminho ausente do FS em memoria tem que falhar mesmo
+// que exista de verdade no disco.
+func TestParseComFilesystemEmMemoria(t *testing.T) {
+	memFS := map[string][]byte{
+		"mem/nginx.conf": []byte("worker_processes auto;\n"),
+	}
+	abrir := func(path string) (io.ReadCloser, error) {
+		b, ok := memFS[path]
+		if !ok {
+			return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+		}
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{
+		Path: "mem/nginx.conf",
+		Open: abrir,
+	})
+	require.NoError(t, err)
+	require.Len(t, tree.Files, 1)
+	require.Equal(t, memFS["mem/nginx.conf"], tree.Files[0].Source)
+
+	// simples.conf existe de verdade no disco, mas nao esta no FS em
+	// memoria: o Open injetado precisa ser a unica fonte, sem fallback.
+	_, err = config.Parse(config.ParseOptions{
+		Path: filepath.Join("testdata", "simples.conf"),
+		Open: abrir,
+	})
+	require.Error(t, err)
+}
+
+// A tag json:"-" em File.Source e o unico anteparo contra os bytes crus do
+// .conf -- onde caminhos de chave privada aparecem em texto -- vazarem na
+// saida JSON por baixo da redacao, que so age sobre os argumentos. Este
+// teste trava a forma serializada de File para que a remocao acidental da
+// tag quebre a build.
+func TestFileNaoSerializaSource(t *testing.T) {
+	f := &config.File{
+		Path:   "exemplo.conf",
+		Source: []byte("segredo-que-nao-pode-vazar"),
+		Nodes:  []*config.Node{},
+	}
+
+	b, err := json.Marshal(f)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), "segredo-que-nao-pode-vazar")
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(b, &m))
+
+	chaves := make([]string, 0, len(m))
+	for k := range m {
+		chaves = append(chaves, k)
+	}
+	sort.Strings(chaves)
+	require.Equal(t, []string{"file", "parsed"}, chaves)
 }
