@@ -284,6 +284,22 @@ Predicados múltiplos dentro de um filtro são conjunção (E lógico).
 
 ## 6. Envelope, exit codes e redação
 
+### 6.0 Código de diagnóstico: `NGX-NNNN`, sempre numérico
+
+O `code` de um `Diagnostic` é **interface pública**: um agente consumindo a saída ramifica por ele. Por isso o formato é fixo, `NGX-` seguido de quatro dígitos, e a alocação é por faixa:
+
+| Faixa | Domínio |
+|---|---|
+| `0001`–`0009` | genéricos, alinhados ao exit code de mesmo número |
+| `0100`–`0199` | configuração e parse |
+| `0200`–`0299` | transporte e SSH |
+
+**A severidade nunca entra no código.** O `Diagnostic` já tem o campo `severity`; repetir a informação como prefixo (`NGX-W001`, `NGX-E001`) cria duas fontes de verdade que podem discordar, e obriga quem consome a fazer *parse* de string para descobrir algo que já vem estruturado.
+
+Essa regra existe porque a ausência dela custou: dois subagentes trabalhando em paralelo em arquivos diferentes inventaram, cada um, uma família própria — `NGX-W00N` e `NGX-E00N` — porque nenhum era dono do namespace e nada dizia qual era o esquema. O código não é detalhe de implementação de um pacote; é contrato do produto, e contrato precisa de dono.
+
+*Limitação conhecida, não resolvida:* os códigos `0001`–`0009` identificam o **exit code**, não a condição. Toda configuração inválida sai como `NGX-0003`, qualquer que seja a causa. Em `internal/config` a condição específica vive num campo separado, `Classe`. São dois mecanismos de identidade para o mesmo propósito, e unificá-los é uma decisão em aberto — o caminho provável é a `Classe` virar código na faixa `0100`, e o `0003` ficar só como genérico de quem não tem faixa própria.
+
 ### 6.1 Envelope
 
 Estrutura idêntica a §6 da spec v1.0:

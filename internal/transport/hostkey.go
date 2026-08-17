@@ -30,21 +30,21 @@ import (
 const (
 	// CodigoHostDesconhecido: o host nao esta no known_hosts. Atrito normal
 	// de primeiro acesso.
-	CodigoHostDesconhecido = "NGX-E001"
+	CodigoHostDesconhecido = "NGX-0201"
 
 	// CodigoHostKeyAlterada: o host esta no known_hosts com outra chave.
 	// Possivel interceptacao.
-	CodigoHostKeyAlterada = "NGX-E002"
+	CodigoHostKeyAlterada = "NGX-0202"
 
 	// CodigoHostKeyRevogada: a chave apresentada esta marcada @revoked.
-	CodigoHostKeyRevogada = "NGX-E003"
+	CodigoHostKeyRevogada = "NGX-0203"
 
 	// CodigoKnownHostsAusente: o arquivo known_hosts nao existe.
-	CodigoKnownHostsAusente = "NGX-E004"
+	CodigoKnownHostsAusente = "NGX-0204"
 
 	// CodigoAvisoHostKeyInsegura: --insecure-host-key foi usado e a
 	// verificacao foi pulada.
-	CodigoAvisoHostKeyInsegura = "NGX-W002"
+	CodigoAvisoHostKeyInsegura = "NGX-0211"
 )
 
 // VerificadorHostKey monta o ssh.HostKeyCallback do ngx conforme a DR1: a

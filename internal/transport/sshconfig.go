@@ -27,7 +27,7 @@ const PortaSSHPadrao = 22
 //
 // Os codigos NGX-000N espelham exit codes e sao sempre erros. Avisos, que por
 // definicao nao derrubam o comando, usam a faixa NGX-W###.
-const CodigoAvisoSSHConfig = "NGX-W001"
+const CodigoAvisoSSHConfig = "NGX-0210"
 
 // SSHOptions descreve como o ngx alcanca um host remoto. Host e o alvo final
 // da conexao — se o ~/.ssh/config traduzir o alias via HostName, e o HostName
