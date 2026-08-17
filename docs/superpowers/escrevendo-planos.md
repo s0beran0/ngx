@@ -145,3 +145,40 @@ O que isso muda na prática:
 - **`Read`, `Grep` e `Glob` do Claude Code não passam pelo hook.** Como boa
   parte do consumo dos subagentes é leitura de arquivo, o ganho real aqui é
   menor que os 60–90% anunciados. Ele ajuda em `go test`, não em tudo.
+
+### O custo de um subagente é quadrático no número de turnos
+
+Medido nos transcripts reais desta execução, não estimado:
+
+| | |
+|---|---|
+| contexto inicial de todo agente | ~14.900 tokens |
+| contexto final do agente mais longo (232 turnos) | ~325.000 tokens |
+| custo médio de um turno adicional | ~114.000 tokens de histórico relido |
+| histórico relido, total | ~131 milhões de tokens |
+| conteúdo gerado pelo modelo, total | ~539 mil tokens |
+
+Para cada token que o modelo escreveu, 243 foram de histórico reenviado. Cada
+turno relê todo o contexto acumulado, e o contexto cresce a cada turno — então
+o custo não cresce com o número de turnos, cresce com o **quadrado** dele. Um
+agente de 232 turnos custou 44 milhões; um de 104 custou 11 milhões.
+
+**Consequência prática, que é contraintuitiva:** prefira **mais agentes
+curtos** a um agente longo. Dividir 232 turnos em dois agentes de 116 custa
+cerca de 45% menos, mesmo pagando a base de 15 mil tokens duas vezes.
+
+**O que NÃO adianta:** comprimir a saída das ferramentas. Todo o conteúdo de
+resultado de ferramenta somado — Read, Bash, Edit, Write — dá ~245 mil tokens,
+ou 0,08% do histórico relido. Ferramentas de compressão de saída atacam essa
+fatia. Elas não são inúteis, mas não são a alavanca.
+
+**O que adianta, em ordem:**
+
+1. **Tetos de turno.** Toda busca aberta precisa de limite. O agente mais caro
+   desta execução foi o do loop de fuzz sem condição de parada.
+2. **Dividir tarefa longa em dois dispatches** em vez de um, com o segundo
+   recebendo o estado por arquivo em vez de por contexto herdado.
+3. **Dizer exatamente qual arquivo ler.** Cada turno de exploração custa o
+   contexto inteiro de novo.
+4. **Base menor** — menos skills e menos servidores MCP reduzem os ~14.900 de
+   todo agente, o que se multiplica pelo número deles.
