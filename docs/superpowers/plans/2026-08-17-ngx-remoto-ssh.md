@@ -66,6 +66,24 @@ O `ngx` não copia binário para o destino, nem temporariamente. Ele lê arquivo
 
 *Consequência:* paralelizar as leituras sai de "conserto se virar problema" e passa a ser requisito de projeto da R4. Serialize apenas o que a dependência exige: o `include` só é conhecido depois de ler quem o declara, então o paralelismo é por nível da árvore, não sobre a lista inteira.
 
+### DR7 — `~/.ssh/config` ilegível degrada com aviso, nunca aborta
+
+A biblioteca de parse honra `Host` (com wildcard e negação), `Include`, `Match all` e `Match Host`. Qualquer outro critério — `user`, `final`, `canonical`, `exec` — faz o parse do **arquivo inteiro** falhar, não apenas daquela entrada. Detalhes e fontes em `docs/superpowers/specs/2026-08-17-ngx-remoto-dependencias.md`.
+
+Um `~/.ssh/config` com `Match user deploy` é perfeitamente válido para o `ssh` e nada raro. Se o `ngx` abortasse, ele quebraria para quem tem um arquivo legítimo, por limitação nossa.
+
+Então: falha de parse vira **diagnóstico de severidade `warning`** no envelope, dizendo qual arquivo e qual linha o `ngx` não entendeu, e a resolução segue com o que veio de flags e dos defaults. O que **não** pode acontecer é o `ngx` ignorar o arquivo em silêncio e conectar em outro host que não o pretendido — o aviso é o que impede isso de virar surpresa.
+
+### DR6 — O `ngx` não usa `sftp.Client.Glob`
+
+O `Glob` do `github.com/pkg/sftp` **descarta erros de I/O por contrato**. O comentário da própria função diz: *"Glob ignores file system errors such as I/O errors reading directories. The only possible returned error is ErrBadPattern"* (`match.go:40-42`). E no caminho sem metacaractere ele é literal: `file, err := c.Lstat(pattern); if err != nil { return nil, nil }` — conexão caindo devolve nenhum resultado e nenhum erro.
+
+O `ngx` implementa o próprio glob remoto sobre `ReadDir` + `path.Match`, propagando erro de I/O como erro.
+
+*Por quê:* `include /etc/nginx/conf.d/*.conf` num link instável devolveria zero arquivos em silêncio, e o `ngx` apresentaria a configuração do servidor sem os 112 arquivos que ela tem — como se o servidor genuinamente não os tivesse. Uma ferramenta lida por agente de IA não pode ser confiantemente incompleta: o consumidor não tem como desconfiar.
+
+*Nota:* o `filepath.Glob` da stdlib tem a mesma semântica, e localmente isso quase nunca importa. É a mesma premissa que o SSH inverte — falha de leitura deixa de ser rara e vira rotina. Vale também para o item parkeado da Task 7 no ledger, pela mesma razão.
+
 ### DR5 — Privilégio é explícito, nunca inferido
 
 Medido no servidor de produção real: `nginx -T` **falha** para o usuário comum (`opc`) e só funciona via `sudo`. Não é exceção — a configuração do nginx costuma ser legível só por root, e num host de produção o `sudo` frequentemente está liberado sem senha. Ou seja: o caminho que "simplesmente funciona" é o de escalar privilégio em silêncio.
