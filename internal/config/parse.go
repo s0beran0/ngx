@@ -71,6 +71,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		AtribuirIDs(arquivo.Nodes, "")
 		tree.Files = append(tree.Files, arquivo)
 	}
+	tree.Hash = Hash(tree)
 	return tree, nil
 }
 
