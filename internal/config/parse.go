@@ -63,12 +63,15 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		if err != nil {
 			return nil, err
 		}
-		tree.Files = append(tree.Files, &File{
+		arquivo := &File{
 			Path:   cfg.File,
 			Source: src,
 			Nodes:  converterDirectives(cfg.Parsed, cfg.File),
-		})
+		}
+		AtribuirIDs(arquivo.Nodes, "")
+		tree.Files = append(tree.Files, arquivo)
 	}
+	tree.Hash = Hash(tree)
 	return tree, nil
 }
 
