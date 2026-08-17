@@ -19,7 +19,9 @@
 - Licença MIT em nome de Eduardo Benck. Nenhuma menção a SEA Tecnologia.
 - **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`, sem "Generated with".
 - Comentários de código em português, sem acentuação.
-- Plataformas: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`.
+- Plataformas: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`,
+  `windows/amd64`, `windows/arm64`.
+- Arquivo de distribuição: `.tar.gz` em Linux e macOS, `.zip` no Windows.
 
 ## Decisões
 
@@ -42,6 +44,20 @@ O goreleaser gera `checksums.txt` com o SHA256 de cada artefato e o assina com m
 ### DD3 — A chave pública é embutida, não baixada
 
 Uma chave pública que o próprio `update` baixa não protege contra nada: quem controla o servidor entrega a chave dele junto com o binário dele. Ela entra via `-ldflags -X` no build.
+
+### DD4 — Windows é suportado, com ressalva documentada
+
+O `ngx` compila e roda em Windows, porque o nginx para Windows existe e é distribuído oficialmente. Mas o próprio nginx.org classifica aquela build como **beta**: usa apenas `select()`/`poll()`, "alta performance e escalabilidade não devem ser esperadas", apenas um worker efetivamente trabalha, e não há suporte a UDP nem QUIC.
+
+*Consequência prática:* o binário do nginx no Windows não é instalado por gerenciador de pacotes — fica solto num diretório desempacotado, tipo `C:\nginx-1.31.3\nginx.exe`, e usa o diretório de execução como prefixo. Então a detecção automática de caminhos que funciona em Linux não se aplica, e a documentação precisa mostrar como apontar o `ngx` para o diretório certo com `-c`.
+
+*O README diz isso ao usuário.* Suportar a plataforma e ser honesto sobre suas limitações não são coisas contraditórias — omitir levaria alguém a apostar produção numa build que o próprio fornecedor não recomenda.
+
+### DD5 — No Windows, o binário em execução é renomeado, não sobrescrito
+
+O Windows trava o executável em execução: renomear funciona, deletar não. O `Apply` do Windows renomeia o binário atual para `.old`, coloca o novo no lugar, e a remoção do `.old` fica para a execução seguinte do `ngx`, que a faz na inicialização.
+
+*Por quê:* a lógica de `rename` atômico que funciona em Linux e macOS falharia no Windows, e o modo de falha seria um update que aborta no meio, deixando o usuário sem binário funcional. Não é detalhe de portabilidade — é a diferença entre atualizar e quebrar a instalação.
 
 ---
 
@@ -98,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin]
+        goos: [linux, darwin, windows]
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
@@ -180,7 +196,7 @@ builds:
     binary: ngx
     env:
       - CGO_ENABLED=0
-    goos: [linux, darwin]
+    goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
@@ -189,6 +205,11 @@ builds:
 
 archives:
   - formats: [tar.gz]
+    # Windows recebe .zip: e o que a plataforma abre sem ferramenta extra, e
+    # o que o install.ps1 espera.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
@@ -307,7 +328,23 @@ Criar `install.sh`. Requisitos que o script precisa satisfazer, e que os testes 
 - Detecta sistema e arquitetura via `uname -s` e `uname -m`, mapeando para os nomes que o goreleaser usa (`x86_64` → `amd64`, `aarch64`/`arm64` → `arm64`). Recusa combinação não suportada com mensagem clara.
 - Resolve a última release **stable** por padrão, consultando `https://api.github.com/repos/eduardoborges/ngx/releases/latest` — esse endpoint já exclui pré-lançamentos. Aceita `NGX_CHANNEL=beta`, que passa a listar `/releases` e pega a primeira entrada, e `NGX_VERSION=v0.2.0` para versão fixa.
 - Baixa o tarball, o `checksums.txt` e confere o SHA256 antes de extrair. Usa `sha256sum` ou `shasum -a 256`, o que existir.
-- Instala em `/usr/local/bin` por padrão, respeitando `NGX_INSTALL_DIR`. Se não houver permissão de escrita, **não** chama `sudo` sozinho: falha com a instrução de como rodar com privilégio. Um script de instalação que escala privilégio por conta própria é exatamente o que ninguém deve executar via `curl | sh`.
+- Instala em `/usr/local/bin` por padrão, respeitando `NGX_INSTALL_DIR`.
+- **Checa a permissão de escrita ANTES de baixar qualquer coisa**, e se faltar, aborta com a instrução exata — sem chamar `sudo` sozinho. Um script que escala privilégio por conta própria é exatamente o que ninguém deveria executar via `curl | sh`, e checar antes evita gastar o download para falhar no fim:
+
+```sh
+if [ ! -w "$NGX_INSTALL_DIR" ]; then
+    echo "erro: sem permissao de escrita em $NGX_INSTALL_DIR" >&2
+    echo "" >&2
+    echo "rode a instalacao com privilegio:" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | sudo sh" >&2
+    echo "" >&2
+    echo "ou instale num diretorio seu, sem privilegio:" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh" >&2
+    exit 1
+fi
+```
+
+  As duas saídas importam: quem está numa máquina onde não tem root precisa da segunda tanto quanto quem tem precisa da primeira.
 - Usa `set -eu`, limpa o diretório temporário com `trap`, e funciona em `sh` puro — não assume bash.
 
 > A verificação de assinatura minisign **não** entra no script: exigiria o minisign instalado antes da instalação. O checksum protege contra download corrompido e a origem é HTTPS do GitHub. Quem quiser a garantia forte baixa manualmente e verifica, ou instala uma vez e usa `ngx update` daí em diante, que verifica assinatura. Documente essa diferença no README.
@@ -321,16 +358,35 @@ Criar `install_test.sh`, que exercita o script sem tocar o sistema:
 - Confirma que checksum divergente aborta a instalação: baixe, corrompa o tarball e verifique que o script recusa.
 - Confirma que `NGX_VERSION` fixa de fato instala aquela versão.
 
-- [ ] **Step 3: Rodar**
+- [ ] **Step 3: Escrever o script de instalação do Windows**
+
+Criar `install.ps1`, equivalente em PowerShell. Requisitos:
+
+- Detecta a arquitetura por `$env:PROCESSOR_ARCHITECTURE` (`AMD64` → `amd64`, `ARM64` → `arm64`).
+- Baixa o `.zip` — não o `.tar.gz` — e o `checksums.txt`, confere o SHA256 com `Get-FileHash -Algorithm SHA256`, e só então extrai com `Expand-Archive`.
+- Instala em `$env:LOCALAPPDATA\ngx\bin` por padrão, respeitando `$env:NGX_INSTALL_DIR`. Esse diretório é gravável sem elevação, que é o comportamento certo para a plataforma — diferente do Unix, no Windows não há um `/usr/local/bin` convencional.
+- **Acrescenta o diretório ao `PATH` do usuário** se ainda não estiver lá, via `[Environment]::SetEnvironmentVariable('Path', ..., 'User')`, e avisa que é preciso abrir um terminal novo para a mudança valer. Sem isso, a pessoa instala e o comando não é encontrado.
+- Se o usuário apontar `NGX_INSTALL_DIR` para um caminho que exija elevação, como `C:\Program Files`, detecta a falta de permissão **antes de baixar** e instrui a rodar o PowerShell como administrador — mesma regra do Unix, sem tentar elevar sozinho.
+- Aceita `$env:NGX_CHANNEL` e `$env:NGX_VERSION`, com o mesmo significado da versão Unix.
+
+O one-liner documentado no README:
+
+```powershell
+irm https://raw.githubusercontent.com/eduardoborges/ngx/main/install.ps1 | iex
+```
+
+- [ ] **Step 4: Rodar**
 
 Run: `sh install_test.sh`
 Expected: todos os casos passam, e nada foi escrito fora do diretório temporário.
 
-- [ ] **Step 4: Commit**
+O `install.ps1` não tem teste automatizado neste plano — exigiria um runner Windows, e o CI da Task D1 não tem um. Verifique-o à mão numa máquina Windows, ou num runner `windows-latest` avulso, e registre no relatório o que foi testado e o que não foi. **Não** reporte como verificado o que você não conseguiu rodar.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add install.sh install_test.sh
-git commit -m "feat: script de instalacao com verificacao de checksum"
+git add install.sh install.ps1 install_test.sh
+git commit -m "feat: scripts de instalacao para unix e windows"
 ```
 
 ---
@@ -353,8 +409,9 @@ Este passo é leitura, não código. Antes de implementar, determine e anote no 
 1. **`aead.dev/minisign` v0.3.0** — a assinatura exata de `Verify`, como obter uma `PublicKey` a partir da string embutida, e **se o módulo tem dependência não-stdlib que exija cgo**. Leia o `go.mod` dele no module cache depois de `go get`. Se exigir cgo, pare e reporte: a restrição de build estático é inegociável e a alternativa seria verificar Ed25519 direto com `crypto/ed25519`, decodificando o formato do minisign à mão.
 2. **Formato do `checksums.txt` do goreleaser** — a ordem das colunas e o separador, para o parser não depender de suposição. Gere um com `goreleaser release --snapshot --clean` e leia.
 3. **Substituição do binário em execução** — em Linux e macOS, `rename(2)` sobre um binário em execução funciona porque o inode antigo sobrevive enquanto houver descritor aberto, mas escrever *por cima* falha com `ETXTBSY`. Confirme o comportamento e escreva o teste que o cobre.
+4. **O mesmo, no Windows** — lá o executável em execução é travado: renomear funciona, **deletar não**. Confirme e determine se `os.Rename` do Go basta ou se é preciso `MoveFileEx` via `golang.org/x/sys/windows`. Referência útil: a estratégia de `github.com/minio/selfupdate`, que renomeia o binário atual para `.old`, põe o novo no lugar, e não consegue apagar o `.old` — deixando a limpeza para depois. Não precisamos adotar a biblioteca; precisamos entender a técnica.
 
-Registre as três respostas no relatório antes de seguir. Não escreva código a partir de suposição sobre nenhuma delas.
+Registre as quatro respostas no relatório antes de seguir. Não escreva código a partir de suposição sobre nenhuma delas — em particular sobre a 4, porque o modo de falha é um update que aborta no meio e deixa o usuário sem binário funcional.
 
 - [ ] **Step 2: Escrever os testes de verificação**
 
@@ -381,9 +438,26 @@ Gere um par de chaves de teste no próprio teste e assine o conteúdo de teste, 
 - Respeite o `--timeout` global do CLI no `http.Client`.
 - Trate 403 com `X-RateLimit-Remaining: 0` como erro específico, dizendo ao usuário que o limite da API foi atingido — é o erro mais provável em uso real e um "falhou" genérico manda a pessoa procurar no lugar errado.
 
-- [ ] **Step 5: Implementar a substituição atômica**
+- [ ] **Step 5: Implementar a substituição, com caminhos separados por sistema**
 
-`internal/update/update.go`, função `Apply`. Escreve o binário novo num arquivo temporário **no mesmo diretório** do binário atual (para o rename não cruzar filesystem), aplica a mesma permissão do original, `fsync`, e então `rename`. Se faltar permissão de escrita no diretório, erro claro dizendo qual diretório e que privilégio é necessário — sem tentar escalar.
+O comportamento diverge entre Unix e Windows o bastante para justificar dois arquivos com build tags: `internal/update/apply_unix.go` (`//go:build !windows`) e `internal/update/apply_windows.go` (`//go:build windows`), com a mesma assinatura `aplicar(caminho string, novo []byte, perm os.FileMode) error`.
+
+**Unix.** Escreve o binário novo num arquivo temporário **no mesmo diretório** do atual — para o rename não cruzar filesystem —, aplica a mesma permissão do original, `fsync`, e então `rename`. O inode antigo sobrevive enquanto o processo em execução o mantiver aberto.
+
+**Windows.** O executável em execução não pode ser deletado, mas pode ser renomeado. A sequência:
+
+1. Escreve o novo como `ngx.exe.new` no mesmo diretório.
+2. Renomeia `ngx.exe` para `ngx.exe.old`.
+3. Renomeia `ngx.exe.new` para `ngx.exe`.
+4. **Tenta** remover o `.old`, e ignora a falha — ela é esperada, porque o arquivo ainda está em uso pelo processo que está rodando.
+
+Se o passo 3 falhar depois de o 2 ter dado certo, restaure: renomeie o `.old` de volta. Deixar o usuário sem `ngx.exe` é o pior desfecho possível desta função, pior que não atualizar.
+
+**Limpeza do `.old`.** Acrescente uma função `LimparResiduo(caminho string)` que remove um `.old` remanescente, e chame-a **na inicialização do `ngx`**, silenciosamente — se falhar, não é problema do usuário. Sem isso, cada atualização deixa um binário órfão no diretório para sempre.
+
+Em ambos os casos, se faltar permissão de escrita no diretório, erro claro dizendo qual diretório e que privilégio é necessário, sem tentar escalar.
+
+Teste os dois caminhos. O de Windows pode ser exercitado num runner `windows-latest` avulso, ou verificado à mão — mas registre no relatório o que foi de fato executado e o que não foi.
 
 - [ ] **Step 6: Escrever o comando**
 
@@ -422,9 +496,33 @@ git commit -m "feat(update): auto-atualizacao com verificacao de assinatura"
 
 Acrescente ao `README.md` seções cobrindo:
 
-**Instalação** — o one-liner de `curl`, com as variáveis `NGX_CHANNEL`, `NGX_VERSION` e `NGX_INSTALL_DIR` documentadas. Mostre também o download manual, para quem não executa script vindo da internet — e diga que essa é uma preferência legítima, não paranoia.
+**Instalação em Linux e macOS** — o one-liner de `curl`, mostrando as **duas** formas desde o começo, porque a maioria das máquinas onde o `ngx` é útil exige privilégio para escrever em `/usr/local/bin`:
+
+```sh
+# instalacao no sistema (precisa de privilegio)
+curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | sudo sh
+
+# instalacao no seu usuario, sem privilegio
+curl -fsSL https://raw.githubusercontent.com/eduardoborges/ngx/main/install.sh | NGX_INSTALL_DIR=$HOME/.local/bin sh
+```
+
+Documente `NGX_CHANNEL`, `NGX_VERSION` e `NGX_INSTALL_DIR`. Mostre também o download manual, para quem não executa script vindo da internet — e diga que essa é uma preferência legítima, não paranoia.
+
+**Instalação no Windows** — o one-liner de PowerShell, o diretório padrão (`%LOCALAPPDATA%\ngx\bin`), o aviso de abrir um terminal novo para o `PATH` valer, e como instalar em local que exija administrador.
+
+**Nota honesta sobre nginx no Windows** — o `ngx` roda em Windows, mas o nginx de lá é oficialmente **beta** segundo o próprio nginx.org: usa apenas `select()`/`poll()`, apenas um worker efetivamente trabalha, não há suporte a UDP nem QUIC, e faltam os módulos XSLT, image filter, GeoIP e Perl embutido. Diga isso sem rodeios e aponte para `https://nginx.org/en/docs/windows.html`.
+
+Explique também que, no Windows, o nginx normalmente não é instalado por gerenciador de pacotes: fica num diretório desempacotado, tipo `C:\nginx-1.31.3\`, e usa o diretório de execução como prefixo. Então a autodetecção que funciona em Linux não se aplica, e é preciso apontar o caminho explicitamente:
+
+```powershell
+ngx inspect -c C:\nginx-1.31.3\conf\nginx.conf
+```
 
 **Atualização** — `ngx update`, `ngx update --check`, `ngx update --channel beta`. Explique que o update verifica assinatura minisign e checksum antes de substituir o binário, e que um binário compilado localmente recusa se auto-atualizar por não ter chave pública embutida.
+
+No Windows, acrescente que o executável em uso não pode ser removido pelo sistema, então a versão antiga fica como `ngx.exe.old` até a próxima execução do `ngx`, que a apaga sozinha. Se a pessoa vir esse arquivo, é esperado — dizer isso evita o chamado de suporte.
+
+Em Linux e macOS, se o `ngx` estiver instalado em diretório do sistema, o update precisa do mesmo privilégio da instalação: documente `sudo ngx update`.
 
 **Canais** — que `v0.2.0` é stable e `v0.2.0-beta.1` é beta, que o canal beta recebe as duas, e que toda a série v0.x é instável por natureza independentemente do canal.
 
@@ -447,10 +545,12 @@ git commit -m "docs: instalacao, atualizacao e verificacao de releases"
 |---|---|
 | CI via GitHub Actions | D1 |
 | Release na main | D2 (por tag, disparada a partir de `main`) |
-| Instalação via curl | D3 |
+| Instalação via curl | D3 (`install.sh`) |
+| Instalação e atualização no Windows | D2, D3 (`install.ps1`), D4, D5 |
 | Auto-update `ngx update` | D4 |
 | Releases diferenciadas beta/stable | D2 (`prerelease: auto`) e D4 (`--channel`) |
 | Documentação no README | D5 |
+| Aviso de `sudo` na instalação | D3 (antes do download) e D5 |
 
 ## Ordem de execução
 
