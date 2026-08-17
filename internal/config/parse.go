@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 
@@ -14,9 +15,16 @@ import (
 
 // ParseOptions controla a leitura. Open existe para permitir testes com
 // filesystem em memoria, sem tocar disco.
+//
+// Glob acompanha Open e nao e opcional na pratica: quem injeta um filesystem
+// -- teste em memoria ou host remoto -- precisa injetar os dois. Sem Glob, o
+// crossplane cai em filepath.Glob e resolve "include conf.d/*.conf" contra o
+// disco LOCAL, entao a arvore misturaria arquivos da maquina de quem roda o
+// comando com a configuracao que se pediu para ler.
 type ParseOptions struct {
 	Path string
 	Open func(path string) (io.ReadCloser, error)
+	Glob func(pattern string) ([]string, error)
 }
 
 func (o ParseOptions) abrir(path string) (io.ReadCloser, error) {
@@ -24,6 +32,13 @@ func (o ParseOptions) abrir(path string) (io.ReadCloser, error) {
 		return o.Open(path)
 	}
 	return os.Open(path)
+}
+
+func (o ParseOptions) expandir(pattern string) ([]string, error) {
+	if o.Glob != nil {
+		return o.Glob(pattern)
+	}
+	return filepath.Glob(pattern)
 }
 
 // Parse le a configuracao e devolve a arvore canonica. Cada arquivo e
@@ -48,6 +63,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		SkipDirectiveContextCheck: true,
 		ErrorOnUnknownDirectives:  false,
 		Open:                      abrirEspelhado,
+		Glob:                      opts.expandir,
 	})
 
 	// A recusa da validacao previa vem antes de qualquer erro do crossplane:

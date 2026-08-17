@@ -185,6 +185,73 @@ func TestParseComFilesystemEmMemoria(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Um include com curinga nao pode escapar do filesystem injetado. Sem
+// ParseOptions.Glob o crossplane cai em filepath.Glob e casa o padrao contra o
+// disco LOCAL: apontado para um host remoto, o ngx leria conf.d/*.conf da
+// maquina do operador e apresentaria aquilo como configuracao do servidor.
+//
+// O teste monta as duas coisas ao mesmo tempo, no MESMO diretorio: um
+// filesystem em memoria com dois arquivos casando o padrao, e um terceiro
+// arquivo, so no disco real, que casa o mesmo padrao e nao esta em memoria.
+// Se o Glob do disco vencer, ele entra na lista e o Open injetado falha ao
+// abri-lo.
+func TestParseIncludeComCuringaNaoVazaParaODiscoLocal(t *testing.T) {
+	dir := t.TempDir()
+	confD := filepath.Join(dir, "conf.d")
+	require.NoError(t, os.MkdirAll(confD, 0o755))
+
+	// so no disco real: nenhuma leitura pode alcancar este arquivo.
+	discoLocal := filepath.Join(confD, "disco-local.conf")
+	require.NoError(t, os.WriteFile(discoLocal, []byte("worker_shutdown_timeout 1s;\n"), 0o644))
+
+	topo := filepath.Join(dir, "nginx.conf")
+	memFS := map[string][]byte{
+		topo:                               []byte("include conf.d/*.conf;\n"),
+		filepath.Join(confD, "a-mem.conf"): []byte("worker_processes 2;\n"),
+		filepath.Join(confD, "b-mem.conf"): []byte("worker_rlimit_nofile 1024;\n"),
+	}
+
+	opts := config.ParseOptions{
+		Path: topo,
+		Open: func(path string) (io.ReadCloser, error) {
+			b, ok := memFS[path]
+			if !ok {
+				return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+			}
+			return io.NopCloser(bytes.NewReader(b)), nil
+		},
+		Glob: func(pattern string) ([]string, error) {
+			var casados []string
+			for path := range memFS {
+				ok, err := filepath.Match(pattern, path)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					casados = append(casados, path)
+				}
+			}
+			sort.Strings(casados)
+			return casados, nil
+		},
+	}
+
+	tree, err := config.Parse(opts)
+	require.NoError(t, err)
+
+	var lidos []string
+	for _, f := range tree.Files {
+		lidos = append(lidos, f.Path)
+	}
+	sort.Strings(lidos)
+	require.Equal(t, []string{
+		filepath.Join(confD, "a-mem.conf"),
+		filepath.Join(confD, "b-mem.conf"),
+		topo,
+	}, lidos)
+	require.NotContains(t, lidos, discoLocal)
+}
+
 // A tag json:"-" em File.Source e o unico anteparo contra os bytes crus do
 // .conf -- onde caminhos de chave privada aparecem em texto -- vazarem na
 // saida JSON por baixo da redacao, que so age sobre os argumentos. Este
