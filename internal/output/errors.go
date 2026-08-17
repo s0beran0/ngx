@@ -68,7 +68,11 @@ func HashMismatch(esperado, atual string) *Error {
 		"a configuracao mudou desde a leitura: esperado %s, atual %s", esperado, atual)
 }
 
-// Internal envolve uma falha de IO ou um defeito do proprio ngx.
+// Internal envolve uma falha de IO ou um defeito do proprio ngx. A causa
+// original (err) e guardada no campo Err e so fica acessivel via
+// errors.Unwrap/errors.Is/errors.As: Error() e Diag.Message devolvem apenas
+// o format, nunca a causa. Isso e deliberado — quem renderizar o diagnostico
+// no envelope JSON nao deve vazar detalhes internos ao agente.
 func Internal(err error, format string, args ...any) *Error {
 	e := newError(ExitInternal, "NGX-0001", format, args...)
 	e.Err = err

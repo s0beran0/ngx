@@ -18,22 +18,40 @@ func TestCodeOfErroDesconhecidoEhInterno(t *testing.T) {
 	require.Equal(t, output.ExitInternal, output.CodeOf(errors.New("boom")))
 }
 
+// Os valores numericos dos exit codes sao o contrato de saida do processo.
+// Comparar constante simbolica com constante simbolica nao pega uma troca
+// acidental de valor (ex.: ExitDrift de 7 para 8); aqui fixamos os numeros.
+func TestValoresDosExitCodesSaoContrato(t *testing.T) {
+	require.Equal(t, 0, int(output.ExitOK))
+	require.Equal(t, 1, int(output.ExitInternal))
+	require.Equal(t, 2, int(output.ExitUsage))
+	require.Equal(t, 3, int(output.ExitInvalidConfig))
+	require.Equal(t, 7, int(output.ExitDrift))
+	require.Equal(t, 9, int(output.ExitHashMismatch))
+}
+
 func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 	casos := []struct {
-		nome string
-		err  error
-		want output.ExitCode
+		nome     string
+		err      error
+		want     output.ExitCode
+		wantDiag string
 	}{
-		{"usage", output.Usage("seletor malformado: %q", "http..server"), output.ExitUsage},
-		{"config invalida", output.InvalidConfig("nginx -t falhou"), output.ExitInvalidConfig},
-		{"drift", output.Drift("config em disco mudou apos o ultimo reload"), output.ExitDrift},
-		{"hash", output.HashMismatch("sha256:aa", "sha256:bb"), output.ExitHashMismatch},
-		{"interno", output.Internal(errors.New("io"), "falha ao ler"), output.ExitInternal},
+		{"usage", output.Usage("seletor malformado: %q", "http..server"), output.ExitUsage, "NGX-0002"},
+		{"config invalida", output.InvalidConfig("nginx -t falhou"), output.ExitInvalidConfig, "NGX-0003"},
+		{"drift", output.Drift("config em disco mudou apos o ultimo reload"), output.ExitDrift, "NGX-0007"},
+		{"hash", output.HashMismatch("sha256:aa", "sha256:bb"), output.ExitHashMismatch, "NGX-0009"},
+		{"interno", output.Internal(errors.New("io"), "falha ao ler"), output.ExitInternal, "NGX-0001"},
 	}
 
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			require.Equal(t, c.want, output.CodeOf(c.err))
+
+			var e *output.Error
+			require.ErrorAs(t, c.err, &e)
+			require.Equal(t, c.wantDiag, e.Diag.Code)
+			require.Equal(t, output.SeverityError, e.Diag.Severity)
 		})
 	}
 }
@@ -64,4 +82,12 @@ func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
 
 	require.Contains(t, err.Error(), "sha256:esperado")
 	require.Contains(t, err.Error(), "sha256:atual")
+}
+
+// Internal precisa preservar a causa original via Unwrap, mesmo que ela nao
+// apareca na mensagem exibida. Sem isso, quem chama errors.Is/errors.As
+// contra a causa nunca a encontra.
+func TestInternalPreservaACausa(t *testing.T) {
+	causa := errors.New("io: disco cheio")
+	require.ErrorIs(t, output.Internal(causa, "falha ao ler"), causa)
 }
