@@ -102,3 +102,46 @@ outro módulo — o teste precisa assertar o **literal**, não a constante simb�
   execuções deu mais informação que o implementador, que reportou 2 em 3.
 - Nunca instrua um revisor a não sinalizar algo. Se você acha que um achado seria
   falso positivo, deixe-o aparecer e decida depois, registrando a decisão.
+
+## Despachando subagentes sem queimar contexto
+
+Cada subagente é uma sessão própria: relê o próprio histórico a cada turno e
+não aparece no `/context` de quem coordena. Numa execução real deste projeto,
+os subagentes consumiram cerca de 1,7 milhão de tokens contra 1,1 milhão dos
+revisores — e o agente mais caro foi um Sonnet, não um Opus. **Trocar de modelo
+não é a alavanca; reduzir turnos e saída verbosa é.**
+
+### O que escrever em todo dispatch
+
+- **`go test ./...` sem `-v` por padrão.** Use `-v` apenas quando algo falhar e
+  você precisar do detalhe. A saída verbosa da suíte deste projeto passa de
+  16 KB; a compacta cabe em 300 bytes.
+- **Nunca cole saída longa no relatório.** Reporte a conclusão e o caminho do
+  arquivo. Quem quiser o detalhe abre o arquivo.
+- **Relatório final curto e fixo:** STATUS, commits, uma linha de teste,
+  concerns. O detalhe vai no arquivo de relatório, não na resposta.
+- **Dê teto a qualquer busca aberta** — número de rodadas ou limite de tempo —
+  e peça que o que sobrar vire lista de divergências conhecidas. Ver a regra
+  sobre loops sem condição de parada.
+
+### RTK está ativo nesta máquina
+
+O `rtk` intercepta comandos de shell e comprime a saída antes de ela entrar no
+contexto. Está instalado via Homebrew (`homebrew-core`, Apache 2.0) e ligado
+por um hook `PreToolUse` global.
+
+O que isso muda na prática:
+
+- `go test` é reescrito automaticamente. A suíte inteira reporta
+  `Go test: 160 passed in 5 packages` em vez de 16 KB de saída. **Falhas não
+  são escondidas** — verificado quebrando um teste de propósito: o RTK mostra
+  nome, arquivo, linha e mensagem, e informa o caminho da saída completa, que
+  ele salva em disco.
+- **`git` está excluído da interceptação**, de propósito. O fluxo de review
+  gera pacotes com `git diff a..b > arquivo`, e o proxy colapsaria o diff para
+  `--stat` — deixando o revisor com nomes de arquivo e nenhum conteúdo. Falha
+  silenciosa que nenhum teste acusaria. A exclusão está em
+  `~/Library/Application Support/rtk/config.toml`.
+- **`Read`, `Grep` e `Glob` do Claude Code não passam pelo hook.** Como boa
+  parte do consumo dos subagentes é leitura de arquivo, o ganho real aqui é
+  menor que os 60–90% anunciados. Ele ajuda em `go test`, não em tudo.
