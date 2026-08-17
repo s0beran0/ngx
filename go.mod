@@ -8,6 +8,7 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/stretchr/testify v1.12.0
+	golang.org/x/crypto v0.55.0
 )
 
 require (
