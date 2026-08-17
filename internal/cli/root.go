@@ -155,6 +155,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.BoolVar(&f.NoRedact, "no-redact", false, "mostra valores sensiveis (so em terminal)")
 
 	root.AddCommand(newVersionCmd(ctx))
+	root.AddCommand(newInspectCmd(ctx))
 	return root
 }
 
