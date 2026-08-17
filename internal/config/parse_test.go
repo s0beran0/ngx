@@ -315,3 +315,36 @@ func TestParseFalhaDeIONaoTruncaSourceSilenciosamente(t *testing.T) {
 	require.Error(t, err, "uma falha de i/o no meio do arquivo precisa propagar como erro, nao produzir uma Tree com Source truncado e err nil")
 	require.Nil(t, tree)
 }
+
+// Antes do round 3 do fix, uma leitura que falhasse no meio mas cuja
+// releitura do fallback tivesse sucesso -- uma falha de I/O transitoria --
+// produzia err == nil, Source completo (da releitura bem-sucedida) e Nodes
+// contendo so o prefixo que o lexer alcancou antes do erro original: uma
+// arvore parcial com sucesso silencioso. Esse teste usa um Open que falha
+// na primeira leitura mas teria sucesso numa segunda, para provar que
+// lerFonte propaga o erro registrado em vez de reler o arquivo.
+func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
+	completo := []byte("worker_processes auto;\nevents {\n    worker_connections 1024;\n}\n")
+	primeiraLinha := completo[:len("worker_processes auto;\n")]
+
+	var chamadas int
+	abrir := func(path string) (io.ReadCloser, error) {
+		chamadas++
+		if chamadas == 1 {
+			// primeira leitura: falha depois da primeira linha.
+			return &leitorComFalha{restante: append([]byte{}, primeiraLinha...)}, nil
+		}
+		// se lerFonte relesse o arquivo, essa segunda leitura teria
+		// sucesso total -- e e exatamente isso que nao pode acontecer.
+		return io.NopCloser(bytes.NewReader(completo)), nil
+	}
+
+	tree, err := config.Parse(config.ParseOptions{
+		Path: "qualquer/nginx.conf",
+		Open: abrir,
+	})
+
+	require.Error(t, err, "uma falha de i/o transitoria precisa propagar como erro, nao produzir uma arvore parcial com sucesso silencioso numa releitura")
+	require.Nil(t, tree)
+	require.Equal(t, 1, chamadas, "lerFonte nao deve reler o arquivo quando ja ha um erro registrado para aquele caminho")
+}
