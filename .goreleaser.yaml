@@ -1,0 +1,115 @@
+# Configuracao do goreleaser para o ngx.
+#
+# O release e disparado por tag (ver .github/workflows/release.yml). O canal
+# sai do proprio semver (DD1): "v0.2.0" e stable, "v0.2.0-rc.1" e pre-release.
+# Nao ha branch de release para manter em sincronia.
+version: 2
+project_name: ngx
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ngx
+    main: ./cmd/ngx
+    binary: ngx
+    env:
+      # Binario estatico, sem cgo. Mesma regra do CI: uma dependencia que
+      # exigisse cgo quebraria o cross-compile das seis plataformas.
+      - CGO_ENABLED=0
+    flags:
+      # Tira o caminho da maquina de build do binario: sem isso o mesmo commit
+      # produz binarios diferentes conforme o diretorio do runner.
+      - -trimpath
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X github.com/s0beran0/ngx/internal/output.Version={{ .Version }}
+      # ATENCAO: PONTO DE EMBUTIR A CHAVE PUBLICA (DD3).
+      #
+      # A chave publica minisign entra aqui, no build, e nunca e baixada em
+      # tempo de execucao — uma chave que o proprio "ngx update" busca na rede
+      # nao protege contra nada, porque quem controla o servidor entrega a
+      # chave dele junto com o binario dele.
+      #
+      # O valor vem da variable de repositorio NGX_PUBLIC_KEY (variable, nao
+      # secret: chave publica e publica por definicao). O default vazio e
+      # deliberado e vale so para build local/snapshot: binario sem chave faz
+      # o "ngx update" recusar atualizar, em vez de aceitar sem verificacao.
+      # No release, o workflow aborta antes de compilar se a variable estiver
+      # vazia — um release sem chave embutida seria pior que nenhum release.
+      #
+      # PENDENTE: a variavel output.PublicKey ainda nao existe em
+      # internal/output/envelope.go (Task D2, Step 2). Enquanto nao existir, o
+      # linker ignora este -X em silencio e o binario sai sem chave.
+      - -X github.com/s0beran0/ngx/internal/output.PublicKey={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
+
+archives:
+  - id: ngx
+    formats: [tar.gz]
+    # Windows recebe .zip: e o que a plataforma abre sem ferramenta extra, e
+    # o que o install.ps1 espera.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      # Um arquivo listado aqui que nao exista no repositorio faz o goreleaser
+      # abortar. Por isso so o LICENSE por enquanto: acrescente README.md a
+      # esta lista quando o arquivo existir na raiz.
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# Assinar apenas o checksums.txt e suficiente: ele cobre todos os artefatos
+# por hash, entao uma assinatura protege o conjunto inteiro (DD2).
+#
+# A chave privada vive fora do GitHub e chega ao runner como secret; o caminho
+# do arquivo temporario vem em MINISIGN_KEY_FILE e a senha em MINISIGN_PASSWORD,
+# entregue pelo stdin porque o minisign nao le senha de variavel de ambiente.
+signs:
+  - id: minisign
+    cmd: minisign
+    args:
+      - -S
+      - -s
+      - "{{ .Env.MINISIGN_KEY_FILE }}"
+      - -m
+      - "${artifact}"
+      - -x
+      - "${signature}"
+    signature: "${artifact}.minisig"
+    artifacts: checksum
+    stdin: "{{ .Env.MINISIGN_PASSWORD }}"
+
+release:
+  # Marca a release como pre-release quando a tag tem sufixo de pre-lancamento
+  # (-beta, -rc, -alpha). E o que separa o canal beta do stable (DD1).
+  prerelease: auto
+  draft: false
+  footer: |
+    ---
+
+    ### Verificando o download
+
+    Os artefatos sao cobertos por `checksums.txt`, e o `checksums.txt` e
+    assinado com minisign. A chave publica esta versionada no repositorio,
+    em `ngx-minisign.pub`, e e a mesma embutida no binario.
+
+    ```sh
+    minisign -Vm checksums.txt -p ngx-minisign.pub
+    sha256sum --ignore-missing -c checksums.txt
+    ```
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
