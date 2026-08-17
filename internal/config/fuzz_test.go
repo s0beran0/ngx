@@ -335,6 +335,9 @@ func FuzzAlinhamento(f *testing.F) {
 	f.Add("upstream u {\n server a;\n server b;\n}")
 	f.Add("map $a $b {\n default 0;\n # com\n}")
 	f.Add("location ~ \\.php$ { proxy_pass http://a; }")
+	f.Add("server_name a.com # prod\n  b.com;")
+	f.Add("location /api # gw\n{ proxy_pass http://a; }")
+	f.Add("http { server { if ( $a = b ) { return 404; } } }")
 
 	f.Fuzz(func(t *testing.T, s string) {
 		dir := t.TempDir()
@@ -345,7 +348,12 @@ func FuzzAlinhamento(f *testing.F) {
 
 		tree, err := config.Parse(config.ParseOptions{Path: p})
 		if err != nil {
-			return // entrada fora de escopo: crossplane ou o alinhador recusaram
+			// erro do nosso lado nao e "fora de escopo" por si so: pode ser
+			// sobre-rejeicao, a classe de bug que este fuzz existe para
+			// achar. So esta de fato fora de escopo se o crossplane tambem
+			// recusar a mesma entrada.
+			verificarNaoSobreRejeicao(t, p, err)
+			return
 		}
 
 		for _, arquivo := range tree.Files {
@@ -355,6 +363,33 @@ func FuzzAlinhamento(f *testing.F) {
 			verificarTerminadorDoSpan(t, arquivo)
 		}
 	})
+}
+
+// verificarNaoSobreRejeicao e a propriedade que sustenta esta rodada de
+// conserto: antes dela, "if err != nil { return }" tratava todo erro do
+// nosso Parse como entrada fora de escopo, o que descarta por construcao
+// exatamente a classe de bug que o aligner tinha -- sobre-rejeicao de
+// configuracao valida. Aqui o oraculo e o proprio crossplane, rodado com as
+// mesmas opcoes que internal/config/parse.go usa (Parse, parse.go:43-51):
+// se ele aceita a entrada (sem erro e com Status != "failed") e o nosso
+// Parse a recusa, isso e falha real, nao entrada invalida.
+func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
+	payload, err := crossplane.Parse(path, &crossplane.ParseOptions{
+		ParseComments:             true,
+		CombineConfigs:            false,
+		SingleFile:                false,
+		SkipDirectiveArgsCheck:    true,
+		SkipDirectiveContextCheck: true,
+		ErrorOnUnknownDirectives:  false,
+	})
+	if err != nil {
+		return // crossplane tambem recusou: entrada legitimamente fora de escopo
+	}
+	if payload.Status != "ok" {
+		return // crossplane aceitou o arquivo mas registrou erro de parse: idem
+	}
+	t.Fatalf("sobre-rejeicao: crossplane aceitou a entrada mas o ngx recusou: %v\narquivo: %s",
+		nossoErro, path)
 }
 
 // verificarCoberturaDeRaiz confere que nenhum byte significativo de nivel
@@ -406,6 +441,15 @@ func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
 // cada filho vive dentro do Span do pai e que irmaos nao se sobrepoem --
 // sem essa propriedade, uma reescrita por substituicao de bytes na v0.2
 // corromperia o arquivo.
+//
+// Excecao deliberada para nao-comentario vs comentario: um comentario
+// encontrado no meio dos argumentos de uma diretiva (Task 9, defeito 1)
+// chega aqui como IRMAO da diretiva anterior, mas seu texto fica
+// fisicamente DENTRO do span dela -- e assim que o proprio crossplane
+// estrutura a arvore (parse.go:286-290 poe o comentario fora de Args,
+// parse.go:435-445 o anexa como no "#" depois da diretiva e do bloco dela),
+// nao um defeito de alinhamento. Por isso a checagem de nao-sobreposicao
+// contra o irmao anterior so vale para nos que nao sao comentario.
 func verificarContencaoENaoSobreposicao(t *testing.T, src []byte, nodes []*config.Node, pai *config.Node) {
 	anteriorFim := -1
 	for _, n := range nodes {
@@ -419,20 +463,31 @@ func verificarContencaoENaoSobreposicao(t *testing.T, src []byte, nodes []*confi
 					n.Directive, n.Span.Start, n.Span.End, pai.Directive, pai.Span.Start, pai.Span.End)
 			}
 		}
-		if n.Span.Start < anteriorFim {
+		if !n.IsComment() && n.Span.Start < anteriorFim {
 			t.Fatalf("span de %q comeca em %d, antes do fim do irmao anterior em %d",
 				n.Directive, n.Span.Start, anteriorFim)
 		}
-		anteriorFim = n.Span.End
+		if n.Span.End > anteriorFim {
+			anteriorFim = n.Span.End
+		}
 		verificarContencaoENaoSobreposicao(t, src, n.Block, n)
 	}
 }
 
 // verificarHeadSpanEhNomeMaisArgumentos confere que o HeadSpan cobre
 // exatamente o nome da diretiva e seus argumentos, nada mais e nada menos:
-// retokenizar o texto do HeadSpan tem que produzir 1+len(Args) TokenWord e
-// nenhum outro tipo de token. Um alinhador que contasse os argumentos
-// errado (off-by-one, ou que incluisse o proximo token) seria pego aqui.
+// retokenizar o texto do HeadSpan tem que produzir so TokenWord (e, desde a
+// Task 9 defeito 1, TokenComment tambem — um comentario no meio dos
+// argumentos fica fisicamente dentro do HeadSpan, ver align.go) e nenhum
+// outro tipo de token. Um alinhador que incluisse o proximo token (';' ou
+// '{') seria pego aqui de qualquer forma, comentario ou nao.
+//
+// A contagem exata "1 diretiva + len(Args) palavras" vale para toda
+// diretiva, exceto "if": prepareIfArgs (crossplane/util.go:71-86) remove de
+// Args os tokens "(" e ")" quando vem isolados, entao len(n.Args) nao conta
+// os tokens-palavra reais entre o nome e o terminador (Task 9, defeito 2).
+// Para "if" a checagem de tipo de token acima (nada alem de palavra ou
+// comentario) e o que pega um alinhador que avancasse demais.
 func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 	var percorrer func(nodes []*config.Node)
 	percorrer = func(nodes []*config.Node) {
@@ -454,15 +509,20 @@ func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 
 			var palavras int
 			for _, tk := range toks {
+				if tk.Kind == config.TokenComment {
+					continue
+				}
 				if tk.Kind != config.TokenWord {
-					t.Fatalf("head span de %q contem token %v que nao e palavra; texto=%q",
+					t.Fatalf("head span de %q contem token %v que nao e palavra nem comentario; texto=%q",
 						n.Directive, tk.Kind, texto)
 				}
 				palavras++
 			}
-			if esperado := 1 + len(n.Args); palavras != esperado {
-				t.Fatalf("head span de %q tem %d palavras, esperava %d (1 diretiva + %d args); texto=%q",
-					n.Directive, palavras, esperado, len(n.Args), texto)
+			if n.Directive != "if" {
+				if esperado := 1 + len(n.Args); palavras != esperado {
+					t.Fatalf("head span de %q tem %d palavras, esperava %d (1 diretiva + %d args); texto=%q",
+						n.Directive, palavras, esperado, len(n.Args), texto)
+				}
 			}
 
 			percorrer(n.Block)

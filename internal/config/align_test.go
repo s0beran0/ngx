@@ -153,6 +153,93 @@ func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 	}
 }
 
+// Comentario entre argumentos: crossplane/parse.go:286-290 tira "# prod" de
+// Args e crossplane/parse.go:435-445 o anexa como no "#" irmao depois da
+// diretiva inteira (Task 9, defeito 1).
+func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.conf")
+	src := "server_name a.com # prod\n  b.com;\nlisten 80;\n"
+	require.NoError(t, os.WriteFile(p, []byte(src), 0o644))
+
+	tree, err := config.Parse(config.ParseOptions{Path: p})
+	require.NoError(t, err)
+
+	nodes := tree.Files[0].Nodes
+	require.Len(t, nodes, 3, "server_name, o comentario dos argumentos e listen")
+
+	serverName := nodes[0]
+	require.Equal(t, "server_name", serverName.Directive)
+	require.Equal(t, []string{"a.com", "b.com"}, serverName.Args)
+	require.Equal(t, "server_name a.com # prod\n  b.com;", string(src[serverName.Span.Start:serverName.Span.End]))
+
+	comentario := nodes[1]
+	require.True(t, comentario.IsComment())
+	require.NotNil(t, comentario.Comment)
+	require.Equal(t, " prod", *comentario.Comment)
+	require.Equal(t, "# prod", string(src[comentario.Span.Start:comentario.Span.End]))
+
+	listen := nodes[2]
+	require.Equal(t, "listen", listen.Directive)
+	require.Equal(t, "listen 80;", string(src[listen.Span.Start:listen.Span.End]))
+}
+
+// Comentario entre o nome/argumentos e o bloco: mesmo mecanismo do
+// crossplane, mas agora o no "#" fica depois da diretiva E depois do bloco
+// dela (Task 9, defeito 1, segundo exemplo).
+func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.conf")
+	src := "location /api # gw\n{ proxy_pass http://a; }\n"
+	require.NoError(t, os.WriteFile(p, []byte(src), 0o644))
+
+	tree, err := config.Parse(config.ParseOptions{Path: p})
+	require.NoError(t, err)
+
+	nodes := tree.Files[0].Nodes
+	require.Len(t, nodes, 2, "location e o comentario dos seus argumentos")
+
+	location := nodes[0]
+	require.Equal(t, "location", location.Directive)
+	require.Equal(t, []string{"/api"}, location.Args)
+	require.True(t, location.HasBlock())
+	require.Equal(t, "location /api", string(src[location.HeadSpan.Start:location.HeadSpan.End]),
+		"o head span nao inclui o comentario, que vem depois do ultimo arg")
+	require.Equal(t, "location /api # gw\n{ proxy_pass http://a; }",
+		string(src[location.Span.Start:location.Span.End]))
+
+	comentario := nodes[1]
+	require.True(t, comentario.IsComment())
+	require.Equal(t, "# gw", string(src[comentario.Span.Start:comentario.Span.End]))
+}
+
+// if com parenteses isolados: crossplane/util.go:71-86 (prepareIfArgs) tira
+// "(" e ")" de Args quando vem isolados, entao len(n.Args) nao conta os
+// tokens-palavra reais entre "if" e o terminador (Task 9, defeito 2).
+func TestIfComParentesesEspacadosAlinha(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.conf")
+	src := "http { server { if ( $a = b ) { return 404; } } }\n"
+	require.NoError(t, os.WriteFile(p, []byte(src), 0o644))
+
+	tree, err := config.Parse(config.ParseOptions{Path: p})
+	require.NoError(t, err)
+
+	var se *config.Node
+	tree.Walk(func(n *config.Node) bool {
+		if n.Directive == "if" {
+			se = n
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, se)
+	require.Equal(t, []string{"$a", "=", "b"}, se.Args)
+	require.Equal(t, "if ( $a = b )", string(src[se.HeadSpan.Start:se.HeadSpan.End]))
+	require.True(t, se.HasBlock())
+	require.Equal(t, "if ( $a = b ) { return 404; }", string(src[se.Span.Start:se.Span.End]))
+}
+
 func TestBlocoVazioEhReconhecido(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "vazio.conf")
