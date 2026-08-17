@@ -1,0 +1,155 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Um push novo na mesma ref cancela a execucao anterior: o resultado dela ja
+# nao interessa e o runner fica livre.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # O binario e distribuido estatico. Fixar aqui evita que algum job esqueca.
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      # A versao vem do .tool-versions, o mesmo arquivo que o asdf usa na
+      # maquina do desenvolvedor. Duplicar o numero aqui faria o CI e o
+      # ambiente local divergirem sem ninguem notar.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache: true
+
+      - name: formatacao
+        run: |
+          arquivos=$(gofmt -l .)
+          if [ -n "$arquivos" ]; then
+            echo "gofmt pendente nos arquivos:" >&2
+            echo "$arquivos" >&2
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      # O race detector exige cgo; e a unica excecao ao CGO_ENABLED=0, e vale
+      # so para rodar os testes, nunca para o binario distribuido.
+      - name: testes com race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./... -race -count=1
+
+      # Uma dependencia que exija cgo quebraria o cross-compile, e o erro so
+      # apareceria no release.
+      - name: build sem cgo
+        run: go build ./...
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        alvo: [FuzzAlinhamento, FuzzTokenizeSpans]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache: true
+
+      # Tempo fixo e curto, nunca ilimitado: fuzz sem teto ja queimou orcamento
+      # neste projeto. O objetivo aqui e pegar regressao obvia; campanha longa
+      # se roda a mao.
+      - name: fuzz ${{ matrix.alvo }} por 60s
+        run: >
+          go test ./internal/config
+          -run '^$'
+          -fuzz '^${{ matrix.alvo }}$'
+          -fuzztime=60s
+
+      # O corpus que o fuzz gera ao achar uma falha nao aparece no log; sem
+      # isso, um achado do CI e irreproduzivel.
+      - name: guardar corpus de falha
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fuzz-corpus-${{ matrix.alvo }}
+          path: internal/config/testdata/fuzz/
+          if-no-files-found: ignore
+
+  cross:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache: true
+
+      - name: compila para ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o /dev/null ./cmd/ngx
+
+  # DESLIGADO DE PROPOSITO.
+  #
+  # Os testes atras da build tag `integration` exercitam o caminho remoto
+  # contra a bancada (`make bancada-up`: container docker com sshd e nginx).
+  # Esse codigo ainda esta sendo escrito, entao o job so produziria vermelho
+  # sem informacao.
+  #
+  # A chave e a variavel de repositorio NGX_CI_INTEGRACAO: enquanto ela nao
+  # existir (ou nao valer "1"), o job e pulado. Para ligar, basta
+  # `gh variable set NGX_CI_INTEGRACAO --body 1` — sem commit. Ate la, roda-se
+  # a mao: `make bancada-up && go test ./... -tags integration`.
+  integracao:
+    if: vars.NGX_CI_INTEGRACAO == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .tool-versions
+          cache: true
+
+      - name: sobe a bancada
+        run: make bancada-up
+
+      - name: smoke da bancada
+        run: make bancada-smoke
+
+      - name: testes de integracao
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./... -tags integration -race -count=1
+
+      # Derruba mesmo se os testes falharem: o job seguinte no mesmo runner
+      # nao pode herdar container nem chave de teste.
+      - name: derruba a bancada
+        if: always()
+        run: make bancada-down
