@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -308,4 +310,248 @@ func verificarDiferencialContraCrossplane(t *testing.T, s string, toks []config.
 				i, s, nossos[i].Quoted, deles[i].IsQuoted, nossos[i].Value)
 		}
 	}
+}
+
+// FuzzAlinhamento verifica propriedades do casamento token-arvore (Task 9)
+// que podem de fato falhar num alinhamento incorreto. "Span dentro dos
+// limites da fonte" nao esta entre elas de proposito: Tokenize ja garante
+// isso sozinho (Task 8), e um alinhador que so copiasse [0,len(src)) para
+// todo no passaria nesse teste sem alinhar nada. As quatro propriedades
+// abaixo dependem de COMO os offsets sao distribuidos entre os nos, que e
+// onde um bug de alinhamento realmente vive:
+//
+//  1. cobertura: todo byte nao-espaco de nivel raiz pertence ao Span de
+//     algum no raiz;
+//  2. contencao/nao-sobreposicao: o Span de um filho vive dentro do Span do
+//     pai, e irmaos nao se sobrepoem;
+//  3. HeadSpan e exatamente "nome + argumentos": retokenizar o texto do
+//     HeadSpan produz 1+len(Args) TokenWord e nada mais;
+//  4. terminador: Span de uma diretiva nao-comentario termina em ';' ou '}'.
+func FuzzAlinhamento(f *testing.F) {
+	f.Add("server { listen 80; }")
+	f.Add("http { server { location / { proxy_pass http://a; } } }")
+	f.Add("# c\nevents {}")
+	f.Add(`add_header X-A "b; c";`)
+	f.Add("upstream u {\n server a;\n server b;\n}")
+	f.Add("map $a $b {\n default 0;\n # com\n}")
+	f.Add("location ~ \\.php$ { proxy_pass http://a; }")
+	f.Add("server_name a.com # prod\n  b.com;")
+	f.Add("location /api # gw\n{ proxy_pass http://a; }")
+	f.Add("http { server { if ( $a = b ) { return 404; } } }")
+
+	f.Fuzz(func(t *testing.T, s string) {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "f.conf")
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Skip()
+		}
+
+		tree, err := config.Parse(config.ParseOptions{Path: p})
+		if err != nil {
+			// erro do nosso lado nao e "fora de escopo" por si so: pode ser
+			// sobre-rejeicao, a classe de bug que este fuzz existe para
+			// achar. So esta de fato fora de escopo se o crossplane tambem
+			// recusar a mesma entrada.
+			verificarNaoSobreRejeicao(t, p, err)
+			return
+		}
+
+		for _, arquivo := range tree.Files {
+			verificarCoberturaDeRaiz(t, arquivo)
+			verificarContencaoENaoSobreposicao(t, arquivo.Source, arquivo.Nodes, nil)
+			verificarHeadSpanEhNomeMaisArgumentos(t, arquivo)
+			verificarTerminadorDoSpan(t, arquivo)
+		}
+	})
+}
+
+// verificarNaoSobreRejeicao e a propriedade que sustenta esta rodada de
+// conserto: antes dela, "if err != nil { return }" tratava todo erro do
+// nosso Parse como entrada fora de escopo, o que descarta por construcao
+// exatamente a classe de bug que o aligner tinha -- sobre-rejeicao de
+// configuracao valida. Aqui o oraculo e o proprio crossplane, rodado com as
+// mesmas opcoes que internal/config/parse.go usa (Parse, parse.go:43-51):
+// se ele aceita a entrada (sem erro e com Status != "failed") e o nosso
+// Parse a recusa, isso e falha real, nao entrada invalida.
+func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
+	payload, err := crossplane.Parse(path, &crossplane.ParseOptions{
+		ParseComments:             true,
+		CombineConfigs:            false,
+		SingleFile:                false,
+		SkipDirectiveArgsCheck:    true,
+		SkipDirectiveContextCheck: true,
+		ErrorOnUnknownDirectives:  false,
+	})
+	if err != nil {
+		return // crossplane tambem recusou: entrada legitimamente fora de escopo
+	}
+	if payload.Status != "ok" {
+		return // crossplane aceitou o arquivo mas registrou erro de parse: idem
+	}
+	t.Fatalf("sobre-rejeicao: crossplane aceitou a entrada mas o ngx recusou: %v\narquivo: %s",
+		nossoErro, path)
+}
+
+// verificarCoberturaDeRaiz confere que nenhum byte significativo de nivel
+// raiz escapa do Span de todo no raiz -- a formulacao concreta de que o
+// casamento nao "perdeu" nenhum trecho do documento.
+//
+// "Significativo" usa a mesma nocao de espaco que o tokenizador (unicode.
+// IsSpace, decodificado rune a rune) -- nao so os quatro bytes ascii. Uma
+// primeira versao deste helper checava so ' ', '\t', '\n', '\r' e o fuzz
+// achou "\v" (vertical tab) como falso positivo em minutos: o tokenizador
+// corretamente trata \v como espaco (tokens.go, espacoAqui) e nao emite
+// token nenhum para ele, entao ele fica fora de qualquer span de proposito
+// -- o defeito era no teste, nao no alinhamento.
+//
+// Uma barra invertida sozinha (sem par de escape, tipicamente no ultimo
+// byte do arquivo) e o mesmo gap legitimo documentado em verificarCobertura
+// no fuzz do tokenizador: consumida pelo tokenizador (avanca a posicao) mas
+// sem formar token nenhum, entao nao e espaco e nao esta em span nenhum --
+// o fuzz achou esse caso tambem, na mesma rodada.
+func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
+	src := arquivo.Source
+	coberto := make([]bool, len(src))
+	for _, n := range arquivo.Nodes {
+		for i := n.Span.Start; i < n.Span.End; i++ {
+			coberto[i] = true
+		}
+	}
+	for i := 0; i < len(src); {
+		if coberto[i] {
+			i++
+			continue
+		}
+		if src[i] == '\\' {
+			i++
+			continue
+		}
+		r, tam := utf8.DecodeRune(src[i:])
+		if tam == 0 {
+			tam = 1
+		}
+		if !unicode.IsSpace(r) {
+			t.Fatalf("byte %d (%q) fora de qualquer span de nivel raiz e nao e espaco", i, string(src[i]))
+		}
+		i += tam
+	}
+}
+
+// verificarContencaoENaoSobreposicao confere, recursivamente, que o Span de
+// cada filho vive dentro do Span do pai e que irmaos nao se sobrepoem --
+// sem essa propriedade, uma reescrita por substituicao de bytes na v0.2
+// corromperia o arquivo.
+//
+// Excecao deliberada para nao-comentario vs comentario: um comentario
+// encontrado no meio dos argumentos de uma diretiva (Task 9, defeito 1)
+// chega aqui como IRMAO da diretiva anterior, mas seu texto fica
+// fisicamente DENTRO do span dela -- e assim que o proprio crossplane
+// estrutura a arvore (parse.go:286-290 poe o comentario fora de Args,
+// parse.go:435-445 o anexa como no "#" depois da diretiva e do bloco dela),
+// nao um defeito de alinhamento. Por isso a checagem de nao-sobreposicao
+// contra o irmao anterior so vale para nos que nao sao comentario.
+func verificarContencaoENaoSobreposicao(t *testing.T, src []byte, nodes []*config.Node, pai *config.Node) {
+	anteriorFim := -1
+	for _, n := range nodes {
+		if n.Span.Start < 0 || n.Span.End > len(src) || n.Span.Start > n.Span.End {
+			t.Fatalf("span invalido [%d,%d) para %q em fonte de %d bytes",
+				n.Span.Start, n.Span.End, n.Directive, len(src))
+		}
+		if pai != nil {
+			if n.Span.Start < pai.Span.Start || n.Span.End > pai.Span.End {
+				t.Fatalf("span de %q [%d,%d) nao esta contido no do pai %q [%d,%d)",
+					n.Directive, n.Span.Start, n.Span.End, pai.Directive, pai.Span.Start, pai.Span.End)
+			}
+		}
+		if !n.IsComment() && n.Span.Start < anteriorFim {
+			t.Fatalf("span de %q comeca em %d, antes do fim do irmao anterior em %d",
+				n.Directive, n.Span.Start, anteriorFim)
+		}
+		if n.Span.End > anteriorFim {
+			anteriorFim = n.Span.End
+		}
+		verificarContencaoENaoSobreposicao(t, src, n.Block, n)
+	}
+}
+
+// verificarHeadSpanEhNomeMaisArgumentos confere que o HeadSpan cobre
+// exatamente o nome da diretiva e seus argumentos, nada mais e nada menos:
+// retokenizar o texto do HeadSpan tem que produzir so TokenWord (e, desde a
+// Task 9 defeito 1, TokenComment tambem — um comentario no meio dos
+// argumentos fica fisicamente dentro do HeadSpan, ver align.go) e nenhum
+// outro tipo de token. Um alinhador que incluisse o proximo token (';' ou
+// '{') seria pego aqui de qualquer forma, comentario ou nao.
+//
+// A contagem exata "1 diretiva + len(Args) palavras" vale para toda
+// diretiva, exceto "if": prepareIfArgs (crossplane/util.go:71-86) remove de
+// Args os tokens "(" e ")" quando vem isolados, entao len(n.Args) nao conta
+// os tokens-palavra reais entre o nome e o terminador (Task 9, defeito 2).
+// Para "if" a checagem de tipo de token acima (nada alem de palavra ou
+// comentario) e o que pega um alinhador que avancasse demais.
+func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
+	var percorrer func(nodes []*config.Node)
+	percorrer = func(nodes []*config.Node) {
+		for _, n := range nodes {
+			if n.IsComment() {
+				percorrer(n.Block)
+				continue
+			}
+			if n.HeadSpan.Start < n.Span.Start || n.HeadSpan.End > n.Span.End {
+				t.Fatalf("head span de %q [%d,%d) fora do span do no [%d,%d)",
+					n.Directive, n.HeadSpan.Start, n.HeadSpan.End, n.Span.Start, n.Span.End)
+			}
+
+			texto := string(arquivo.Source[n.HeadSpan.Start:n.HeadSpan.End])
+			toks, err := config.Tokenize([]byte(texto))
+			if err != nil {
+				t.Fatalf("head span de %q nao retokeniza (%v); texto=%q", n.Directive, err, texto)
+			}
+
+			var palavras int
+			for _, tk := range toks {
+				if tk.Kind == config.TokenComment {
+					continue
+				}
+				if tk.Kind != config.TokenWord {
+					t.Fatalf("head span de %q contem token %v que nao e palavra nem comentario; texto=%q",
+						n.Directive, tk.Kind, texto)
+				}
+				palavras++
+			}
+			if n.Directive != "if" {
+				if esperado := 1 + len(n.Args); palavras != esperado {
+					t.Fatalf("head span de %q tem %d palavras, esperava %d (1 diretiva + %d args); texto=%q",
+						n.Directive, palavras, esperado, len(n.Args), texto)
+				}
+			}
+
+			percorrer(n.Block)
+		}
+	}
+	percorrer(arquivo.Nodes)
+}
+
+// verificarTerminadorDoSpan confere que o Span de toda diretiva
+// nao-comentario termina no delimitador esperado -- ';' para diretiva
+// simples, '}' para bloco. Um alinhador que parasse um token antes ou
+// depois do delimitador real seria pego aqui.
+func verificarTerminadorDoSpan(t *testing.T, arquivo *config.File) {
+	src := arquivo.Source
+	var percorrer func(nodes []*config.Node)
+	percorrer = func(nodes []*config.Node) {
+		for _, n := range nodes {
+			if !n.IsComment() {
+				if n.Span.End < 1 || n.Span.End > len(src) {
+					t.Fatalf("span fim invalido para %q: %d (fonte tem %d bytes)",
+						n.Directive, n.Span.End, len(src))
+				}
+				ultimo := src[n.Span.End-1]
+				if ultimo != ';' && ultimo != '}' {
+					t.Fatalf("span de %q termina em %q, esperava ';' ou '}'", n.Directive, string(ultimo))
+				}
+			}
+			percorrer(n.Block)
+		}
+	}
+	percorrer(arquivo.Nodes)
 }
