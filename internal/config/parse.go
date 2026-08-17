@@ -151,26 +151,62 @@ func (c *cacheFonte) guardar(path string, b []byte) {
 	c.dados[path] = b
 }
 
-// leituraEspelhada copia cada byte lido de um io.ReadCloser para a cache
-// antes de devolve-lo ao chamador, e grava o resultado quando o arquivo e
-// fechado.
+// leituraEspelhada copia cada byte lido de um io.ReadCloser para um buffer
+// interno, e grava esse buffer na cache quando o arquivo e fechado -- mas
+// so se a leitura tiver terminado limpa (io.EOF sem nenhum outro erro).
+//
+// Duas coisas exigem isso:
+//
+//  1. O crossplane lexa cada arquivo numa goroutine separada e a abandona
+//     em varios retornos antecipados do parser (include sem argumentos,
+//     erro de Glob, erro de parse aninhado). Nesses caminhos o Close() do
+//     arquivo roda enquanto a goroutine do lexer ainda pode estar lendo
+//     do mesmo reader, entao o buffer precisa do seu proprio mutex -- o
+//     mutex de cacheFonte so protege o mapa, nunca protegeu este buffer.
+//  2. Para include de caminho explicito, o crossplane abre cada arquivo
+//     duas vezes: uma sonda de legibilidade que nunca chama Read, e a
+//     leitura real. A sonda nunca atinge eofLimpo, entao nunca grava nada
+//     na cache -- sem isso, a sonda escreveria []byte{} para aquele
+//     caminho e o fallback em lerFonte nunca disparia, porque a chave ja
+//     existiria no mapa (mesmo vazia). Pelo mesmo motivo, uma leitura que
+//     falha no meio do arquivo (erro de I/O real) tambem nunca grava nada
+//     -- ela cai no fallback de lerFonte, que propaga o erro em vez de
+//     devolver um Source truncado com err == nil.
 type leituraEspelhada struct {
 	rc    io.ReadCloser
 	path  string
 	cache *cacheFonte
-	buf   bytes.Buffer
+
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	eofLimpo  bool
+	houveErro bool
 }
 
 func (l *leituraEspelhada) Read(p []byte) (int, error) {
 	n, err := l.rc.Read(p)
+
+	l.mu.Lock()
 	if n > 0 {
 		l.buf.Write(p[:n])
 	}
+	switch {
+	case err == io.EOF:
+		l.eofLimpo = true
+	case err != nil:
+		l.houveErro = true
+	}
+	l.mu.Unlock()
+
 	return n, err
 }
 
 func (l *leituraEspelhada) Close() error {
-	l.cache.guardar(l.path, append([]byte(nil), l.buf.Bytes()...))
+	l.mu.Lock()
+	if l.eofLimpo && !l.houveErro {
+		l.cache.guardar(l.path, append([]byte(nil), l.buf.Bytes()...))
+	}
+	l.mu.Unlock()
 	return l.rc.Close()
 }
 
@@ -216,7 +252,7 @@ func converterDirectives(ds crossplane.Directives, file string) []*Node {
 	return nodes
 }
 
-// clonarArgs copia os argumentos da diretiva para que nós construidos por
+// clonarArgs copia os argumentos da diretiva para que nos construidos por
 // tarefas futuras (a Task 12 monta nos novos a partir destes) nao
 // compartilhem o array de backing com a arvore do crossplane: um append
 // num Args copiado poderia sobrescrever o vizinho.
