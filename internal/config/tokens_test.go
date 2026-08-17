@@ -109,6 +109,130 @@ func TestAspasNaoFechadasVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Fix round 1 -- Critical: "${" e tratado pelo crossplane como expansao de
+// parametro e fica dentro da mesma palavra. Sem isso, "http://${backend}"
+// vira quatro tokens com "{" e "}" fantasmas, e a Task 9 rejeita o arquivo
+// inteiro no primeiro proxy_pass com variavel de template Docker/envsubst.
+func TestExpansaoDeParametroNaoQuotadaFicaNumSoToken(t *testing.T) {
+	toks, err := config.Tokenize([]byte(`proxy_pass http://${backend};`))
+	require.NoError(t, err)
+
+	require.Len(t, toks, 3, "http://${backend} precisa ser um unico token, sem { e } fantasmas")
+	require.Equal(t, "proxy_pass", toks[0].Value)
+	require.Equal(t, config.TokenWord, toks[1].Kind)
+	require.Equal(t, "http://${backend}", toks[1].Value)
+	require.Equal(t, "http://${backend}", toks[1].Raw)
+	require.Equal(t, config.TokenSemicolon, toks[2].Kind)
+}
+
+// Expansao de parametro tambem funciona dentro de aspas, onde ela e so mais
+// um caractere do valor (nao ha estado inVar dentro de aspas).
+func TestExpansaoDeParametroDentroDeAspas(t *testing.T) {
+	toks, err := config.Tokenize([]byte(`set $a "${b}c";`))
+	require.NoError(t, err)
+
+	require.Equal(t, "${b}c", toks[2].Value)
+	require.True(t, toks[2].Quoted)
+}
+
+// Fix round 1 -- Important: o conjunto de espacos tem que bater com o do
+// crossplane (strings.TrimSpace / unicode.IsSpace), nao so os quatro bytes
+// ascii. NBSP entra em .conf por copia de documentacao web e e invisivel;
+// sem esse ajuste a contagem de argumentos diverge da do crossplane.
+func TestConjuntoDeEspacosCobreNBSPTabVerticalEFormFeed(t *testing.T) {
+	src := []byte("listen 80;\vserver_name\fa;")
+
+	toks, err := config.Tokenize(src)
+	require.NoError(t, err)
+
+	var valores []string
+	for _, tok := range toks {
+		valores = append(valores, tok.Value)
+	}
+	require.Equal(t, []string{"listen", "80", ";", "server_name", "a", ";"}, valores,
+		"NBSP, tab vertical e form feed tem que separar argumentos, igual ao crossplane")
+}
+
+// Fix round 1 -- Important: o CR de um terminador CRLF nao pode entrar no
+// span (nem no Value) de um comentario. Se entrasse, reescrever esse
+// comentario na v0.2 apagaria o CR e converteria a linha de CRLF para LF --
+// uma mudanca fora do alvo que o projeto promete nunca fazer.
+func TestComentarioCRLFExcluiCRDoSpanEDoValue(t *testing.T) {
+	src := []byte("# comentario\r\nlisten 80;\r\n")
+
+	toks, err := config.Tokenize(src)
+	require.NoError(t, err)
+
+	require.Equal(t, config.TokenComment, toks[0].Kind)
+	require.Equal(t, "# comentario", toks[0].Raw, "o CR fica de fora do span do comentario")
+	require.Equal(t, " comentario", toks[0].Value)
+	require.Equal(t, string(src[toks[0].Start:toks[0].End]), toks[0].Raw)
+
+	require.Equal(t, "listen", toks[1].Value)
+	require.Equal(t, 2, toks[1].Line, "a segunda linha comeca depois do CRLF")
+}
+
+// Fix round 1 -- Important: so a barra que precede a aspa delimitadora e
+// desescapada; qualquer outro escape fica literal em Value, igual ao
+// crossplane. msg "a\nb"; produz Value a\nb (barra e n literais), nao uma
+// quebra de linha real.
+func TestEscapeDentroDeAspasSoDesescapaAAspaAtiva(t *testing.T) {
+	toks, err := config.Tokenize([]byte(`msg "a\nb";`))
+	require.NoError(t, err)
+
+	require.Equal(t, `a\nb`, toks[1].Value,
+		"so a barra antes da aspa e removida; o resto do escape fica literal")
+}
+
+// Fix round 1 -- Important: Column conta runes, nao bytes -- e a posicao
+// visual que um editor mostraria. Start continua obrigatoriamente em bytes.
+func TestColumnContaRunesNaoBytes(t *testing.T) {
+	src := []byte(`msg "çãé";`)
+
+	toks, err := config.Tokenize(src)
+	require.NoError(t, err)
+	require.Len(t, toks, 3)
+
+	require.Equal(t, config.TokenSemicolon, toks[2].Kind)
+	require.Equal(t, 12, toks[2].Start, "start continua contando bytes (ç, ã, e sao 2 bytes cada)")
+	require.Equal(t, 10, toks[2].Column, "column conta runes: e a posicao que um editor mostraria")
+}
+
+// Achado do fuzz no fix round 1: uma barra invertida solta no ultimo byte
+// do arquivo (sem par de escape possivel) e engolida pelo crossplane --
+// nao produz token nenhum. Sem esse tratamento, viravamos um token fantasma
+// "\" que o crossplane nunca produz, desalinhando a contagem na Task 9.
+func TestBarraInvertidaNoFimDoArquivoNaoGeraTokenFantasma(t *testing.T) {
+	toks, err := config.Tokenize([]byte(`foo \`))
+	require.NoError(t, err)
+
+	require.Len(t, toks, 1, "a barra final solta nao deve gerar token nenhum")
+	require.Equal(t, "foo", toks[0].Value)
+}
+
+// Achado do fuzz no fix round 1: um \r solto (sem \n depois) no meio de uma
+// palavra nao-quotada e invisivel para o crossplane -- nunca termina a
+// palavra. So um \n de verdade termina. Sem isso, "0\r0" virava dois tokens
+// em vez de um, desalinhando a contagem na Task 9.
+func TestBarraCRSoltaNoMeioDaPalavraNaoTerminaAPalavra(t *testing.T) {
+	toks, err := config.Tokenize([]byte("0\r0;"))
+	require.NoError(t, err)
+
+	require.Len(t, toks, 2)
+	require.Equal(t, "00", toks[0].Value, "o \\r solto fica invisivel, nao separa os dois digitos")
+	require.Equal(t, config.TokenSemicolon, toks[1].Kind)
+}
+
+// Achado do fuzz no fix round 1: uma barra invertida seguida de \r, quando
+// forma a palavra inteira (nada mais para tokenizar), nao produz token
+// nenhum -- igual ao crossplane, que tambem engole os dois sem nunca
+// mesclar nada com o esc pendente.
+func TestBarraSeguidaDeCRSemMaisNadaNaoGeraToken(t *testing.T) {
+	toks, err := config.Tokenize([]byte(" \\\r"))
+	require.NoError(t, err)
+	require.Empty(t, toks)
+}
+
 // Cobertura: todo byte que nao e espaco em branco pertence a algum token.
 func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))
