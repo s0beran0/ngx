@@ -55,9 +55,9 @@ func TestParseRedactRuleRejeitaEntradaVazia(t *testing.T) {
 // quando nao esta. Isso e pior que um erro alto, porque falha em silencio.
 func TestParseRedactRuleRejeitaDiretivaInvalida(t *testing.T) {
 	casos := []string{
-		"ssl_certificate_key;",       // ponto-e-virgula copiado do .conf
-		"*.ssl_certificate_key",      // glob sem o prefixo "**." exato
-		"**ssl_certificate_key",      // "**" sem o ponto
+		"ssl_certificate_key;",  // ponto-e-virgula copiado do .conf
+		"*.ssl_certificate_key", // glob sem o prefixo "**." exato
+		"**ssl_certificate_key", // "**" sem o ponto
 		"http.server.ssl_certificate_key",
 		"server/**/auth_basic_user_file",
 	}

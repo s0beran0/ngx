@@ -39,10 +39,10 @@ type Meta struct {
 
 // Envelope e o formato unico de toda saida JSON do ngx.
 type Envelope struct {
-	OK          bool         `json:"ok"`
-	Command     string       `json:"command"`
-	NgxVersion  string       `json:"ngx_version"`
-	Data        any          `json:"data"`
+	OK         bool   `json:"ok"`
+	Command    string `json:"command"`
+	NgxVersion string `json:"ngx_version"`
+	Data       any    `json:"data"`
 	// Diagnostics nunca e nil: uma lista nula serializaria "diagnostics":null
 	// e quebraria o `.diagnostics.length` de quem consome a saida. Construa
 	// o envelope com New, que inicializa a lista vazia; nao monte um
