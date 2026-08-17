@@ -233,6 +233,35 @@ func TestBarraSeguidaDeCRSemMaisNadaNaoGeraToken(t *testing.T) {
 	require.Empty(t, toks)
 }
 
+// Fix round 2 -- Important: o conserto do CR de um CRLF em lerComentario
+// nao foi espelhado em lerPalavra nem em lerVar, deixando o CR dentro do
+// span de uma palavra comum. Uma futura reescrita por substituicao de bytes
+// apagaria esse CR e converteria a linha de CRLF para LF -- a mesma mudanca
+// fora do alvo que o comentario ja evita.
+func TestPalavraCRLFExcluiCRDoSpan(t *testing.T) {
+	src := []byte("proxy_set_header Host\r\n  $host;\r\n")
+
+	toks, err := config.Tokenize(src)
+	require.NoError(t, err)
+
+	require.Equal(t, "Host", toks[1].Value)
+	require.Equal(t, "Host", toks[1].Raw, "o CR do CRLF nao pode ficar dentro do span da palavra")
+}
+
+// Fix round 2 -- Important: rede de regressao explicita para a terminacao
+// do modo ${...} por espaco. Um revisor mutou essa condicao e a suite
+// inteira passou sem esse teste.
+func TestExpansaoDeParametroTerminaPorEspaco(t *testing.T) {
+	toks, err := config.Tokenize([]byte(`a ${b c;`))
+	require.NoError(t, err)
+
+	var valores []string
+	for _, tok := range toks {
+		valores = append(valores, tok.Value)
+	}
+	require.Equal(t, []string{"a", "${b c", ";"}, valores)
+}
+
 // Cobertura: todo byte que nao e espaco em branco pertence a algum token.
 func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))

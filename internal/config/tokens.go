@@ -127,7 +127,7 @@ func (t *tokenizer) consumirParaValor() []byte {
 // comportamento genuino do crossplane: o estado "escape pendente" atravessa
 // um \r solto e se funde com o PROXIMO caractere de verdade, esteja ele onde
 // estiver -- nao com o \r em si. Se a fonte acabar antes de achar essa rune
-// (so havia a barra e talvez alguns \r até o fim do arquivo), o par nunca se
+// (so havia a barra e talvez alguns \r ate o fim do arquivo), o par nunca se
 // forma: tudo o que foi consumido fica invisivel (nunca entra em Value, mas
 // continua avancando a posicao, entao continua dentro do Raw do token que
 // estiver sendo construido), e ok volta false.
@@ -260,6 +260,13 @@ func (t *tokenizer) lerPalavra(start, line, col int) error {
 			continue
 		}
 		if c == '\r' {
+			// espelha lerComentario: o CR de um terminador CRLF fica de fora
+			// do span, pertence ao espaco em branco que vem depois, nao a
+			// palavra. So um CR solto (sem \n em seguida) e invisivel e
+			// consumido aqui.
+			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
+				break
+			}
 			t.avancar()
 			continue
 		}
@@ -306,6 +313,11 @@ func (t *tokenizer) lerVar(valor *[]byte) {
 			continue
 		}
 		if c == '\r' {
+			// mesmo tratamento de lerPalavra: o CR de um CRLF fica de fora
+			// do span, nao entra na expansao.
+			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
+				return
+			}
 			t.avancar()
 			continue
 		}
