@@ -28,6 +28,7 @@ func FuzzTokenizeSpans(f *testing.F) {
 	f.Add(`proxy_pass http://${backend};`)
 	f.Add("set $a \"${b}c\";")
 	f.Add("listen 80;\r\nserver_name a;\r\n# fim\r\n")
+	f.Add("proxy_set_header Host\r\n  $host;\r\n")
 	f.Add(`log_format m '$remote_addr "$http_user_agent"';`)
 	f.Add(`msg "diz \"oi\" e \\ e \n";`)
 	f.Add("map $a $b {\n  ~^/x  \"y; z\";\n  default 0;\n}")
@@ -48,7 +49,25 @@ func FuzzTokenizeSpans(f *testing.F) {
 		verificarLinhaEColuna(t, s, toks)
 		verificarIdempotencia(t, s, toks)
 		verificarDiferencialContraCrossplane(t, s, toks)
+		verificarCRLFNuncaTerminaSpan(t, s, toks)
 	})
+}
+
+// verificarCRLFNuncaTerminaSpan e a propriedade que sustenta a correcao do
+// CR de CRLF em lerPalavra e lerVar (fix round 2): nenhum token pode
+// terminar num \r que seja seguido de \n na fonte. Esse CR pertence ao
+// espaco em branco depois do token, nunca ao span do token -- senao uma
+// reescrita por substituicao de bytes converteria a linha de CRLF para LF.
+func verificarCRLFNuncaTerminaSpan(t *testing.T, s string, toks []config.Token) {
+	for _, tok := range toks {
+		if tok.End == 0 || s[tok.End-1] != '\r' {
+			continue
+		}
+		if tok.End < len(s) && s[tok.End] == '\n' {
+			t.Fatalf("token %q em [%d,%d) termina num \\r seguido de \\n na fonte %q",
+				tok.Value, tok.Start, tok.End, s)
+		}
+	}
 }
 
 // verificarSpansEOrdem confere a higiene basica dos spans: ordem crescente,
