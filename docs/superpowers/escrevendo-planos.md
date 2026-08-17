@@ -233,3 +233,57 @@ Diga qual arquivo ler. Cada turno de exploracao repaga o contexto acumulado,
 entao "descubra onde esta X" custa muito mais que "leia X em caminho/y.go".
 Quando nao souber o caminho, mande localizar com uma chamada dirigida em vez
 de deixar o agente vagar.
+
+### O prompt de dispatch e relido a cada turno — corte-o
+
+Medido nos transcripts: o prompt medio de dispatch tinha **896 tokens**, e o
+total relido por causa deles foi **1,74 milhao de tokens** — sete vezes tudo
+que uma ferramenta de compressao de saida poderia poupar. Um prompt de 1.234
+tokens num agente de 104 turnos custou 128 mil sozinho.
+
+A maior parte era redundante: restricoes globais que **ja estao no CLAUDE.md**
+que o agente carrega, e requisitos que **ja estao no brief** que ele vai ler.
+
+**Nao repita no dispatch o que o CLAUDE.md ja diz.** Commits sem mencao a IA,
+comentarios em portugues sem acentuacao, zero CGO, listas JSON como `[]` —
+tudo isso ja chega ao agente. Repetir custa a cada turno dele.
+
+#### Template de dispatch (alvo: 300-400 tokens)
+
+```
+<uma frase: o que fazer e onde>
+
+## Orcamento
+Aproximadamente N chamadas de ferramenta. Se chegar perto sem terminar, pare,
+grave o estado no relatorio e reporte — nao continue.
+
+## Arquivos
+<caminhos exatos. Diga o que NAO precisa ler.>
+
+## O que fazer
+<so o que o brief nao cobre, ou o que mudou desde que ele foi escrito>
+
+## Ao terminar
+`go test ./... -race` (sem -v). Commite. Relatorio em <caminho>.
+Resposta final: STATUS, commit, uma linha de teste, uma linha por item.
+```
+
+O "por que isto importa" motiva o agente e as vezes vale — mas cobra o preco
+a cada turno. Use uma frase, nao um paragrafo.
+
+### Tres desperdicios menores, tambem medidos
+
+**`Write` falha em 16% das chamadas.** Agentes em worktree isolado tentam
+escrever o relatorio no `.superpowers/` do repo principal, o isolamento
+bloqueia, e eles tentam de novo. Cerca de 15 turnos perdidos. **Diga no
+dispatch para escrever direto na copia dentro do worktree**, sem tentar o
+caminho compartilhado.
+
+**89 comandos Bash repetidos pelo mesmo agente** — `cd` refeito 12 vezes, o
+mesmo fuzz rodado 9 vezes. O diretorio de trabalho **persiste** entre chamadas
+de Bash; diga isso quando o agente precisar navegar. E agrupe verificacoes num
+comando so em vez de uma por turno.
+
+**Bash e a ferramenta mais chamada** (642 contra 238 de Read). Como o custo e
+por turno, encadear tres verificacoes num unico comando vale mais que otimizar
+o que cada uma imprime.
