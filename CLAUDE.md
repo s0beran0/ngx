@@ -7,6 +7,23 @@ Eduardo Benck, open source sob MIT.
 Design e decisões: `docs/superpowers/specs/`. Planos de implementação:
 `docs/superpowers/plans/`.
 
+## Dois públicos, uma ferramenta
+
+O `ngx` é usado por **agentes de IA** e por **humanos**, e isso não é acidente:
+a saída é JSON quando stdout não é um terminal, e legível quando é. `--json` e
+`--human` forçam. Todo comando novo precisa servir aos dois.
+
+Onde o comportamento diverge, a divergência é deliberada e vira regra de
+segurança: `--no-redact` só é aceito em terminal, porque um humano depurando
+pode ver o segredo e um agente lendo o pipe, estruturalmente, não consegue nem
+pedir.
+
+**Cuidado com a palavra "agente".** Ela aparece com dois sentidos no projeto:
+o *agente de IA* que consome a saída, e o `ssh-agent`, programa do sistema
+operacional que guarda chaves SSH e não tem relação nenhuma com IA. Escreva
+sempre `ssh-agent` com o prefixo; "agente" sozinho significa o consumidor.
+Confundir os dois leva a implementar a coisa errada.
+
 ## Convenções
 
 - Go 1.25, zero CGO, binário estático.

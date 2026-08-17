@@ -8,6 +8,22 @@
 
 **Tech Stack:** `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`, e — a confirmar na Task R2 — uma forma portável de falar com o `ssh-agent`.
 
+## Nota de terminologia
+
+Este projeto usa a palavra "agente" em dois sentidos, e confundi-los leva a
+implementar a coisa errada:
+
+- **agente de IA** — quem *consome* a saída do `ngx`. É o que a spec quer dizer
+  em "o agente age sem reparsear" e é a razão de a saída ser JSON por padrão
+  quando não há terminal. O `ngx` também é usado por humanos diretamente, e é
+  por isso que existe `--human`.
+- **`ssh-agent`** — um programa do sistema operacional, anterior a tudo isso,
+  que mantém chaves SSH destravadas em memória e assina desafios em nome de
+  quem autentica. Nada a ver com IA.
+
+Neste documento, `ssh-agent` aparece sempre escrito assim, com o prefixo. Onde
+estiver só "agente", trata-se do consumidor da saída.
+
 **Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md`. Este plano realiza parte do item "multi-host via SSH" que a spec coloca na v1.0 (§16), antecipado a pedido.
 
 **Pré-requisito:** Plano 1 concluído. Este plano depende de `config.Parse`, `config.Combine`, `internal/runtime` e do envelope de saída.
@@ -32,11 +48,11 @@ O `ngx` usa o `known_hosts` do usuário e **recusa** host desconhecido ou cuja c
 
 *Custo aceito:* o primeiro acesso a um host novo exige que ele esteja no `known_hosts` — o que se resolve com um `ssh` manual antes, e é o mesmo atrito que o `ssh` já impõe.
 
-### DR2 — Agente primeiro, `~/.ssh/config` depois, flags por cima
+### DR2 — `ssh-agent` primeiro, `~/.ssh/config` depois, flags por cima
 
 A ordem de resolução é: flags explícitas vencem; o que faltar vem do `~/.ssh/config` para aquele host; a autenticação tenta o `ssh-agent` antes de qualquer arquivo de chave.
 
-*Por quê:* com o agente, a chave privada nunca é lida pelo `ngx` — ele envia o desafio e recebe a assinatura. Menos código nosso tocando material de chave é menos superfície para errar. E ler o `~/.ssh/config` significa que `ngx --host web1 inspect` funciona para quem já tem `ssh web1` funcionando, sem reconfigurar nada.
+*Por quê:* com o `ssh-agent`, a chave privada nunca é lida pelo `ngx` — ele envia o desafio e recebe a assinatura. Menos código nosso tocando material de chave é menos superfície para errar. E ler o `~/.ssh/config` significa que `ngx --host web1 inspect` funciona para quem já tem `ssh web1` funcionando, sem reconfigurar nada.
 
 ### DR3 — Nada é instalado no servidor remoto
 
@@ -72,7 +88,7 @@ Essa distinção é o ponto central do teste: confundir as duas coisas faz um `n
 
 - [ ] **Step 2: Definir a interface e implementar o local**
 
-`Local()` é um envelope fino sobre `os.Open`, `filepath.Glob` e `exec.CommandContext`. `Describe()` devolve algo como `"local"`, para aparecer no `meta` do envelope e o agente saber contra o que operou.
+`Local()` é um envelope fino sobre `os.Open`, `filepath.Glob` e `exec.CommandContext`. `Describe()` devolve algo como `"local"`, para aparecer no `meta` do envelope e quem consome a saída saber contra o que operou.
 
 - [ ] **Step 3: Rodar e commitar**
 
@@ -116,9 +132,9 @@ Se qualquer item exigir cgo, pare e reporte antes de prosseguir.
 
 - [ ] **Step 3: Implementar**
 
-Ordem de autenticação: agente, depois chave em arquivo (com prompt de passphrase se necessário), depois senha. Senha vem de `NGX_SSH_PASSWORD` ou de prompt em terminal — **nunca** de flag; se alguém adicionar uma flag de senha, o review deve reprovar.
+Ordem de autenticação: `ssh-agent`, depois chave em arquivo (com prompt de passphrase se necessário), depois senha. Senha vem de `NGX_SSH_PASSWORD` ou de prompt em terminal — **nunca** de flag; se alguém adicionar uma flag de senha, o review deve reprovar.
 
-Os arquivos `agent_unix.go` e `agent_windows.go` levam build tags e expõem a mesma função de conexão ao agente. Quando não houver agente disponível, isso não é erro: apenas aquele método de autenticação não entra na lista.
+Os arquivos `agent_unix.go` e `agent_windows.go` levam build tags e expõem a mesma função de conexão ao `ssh-agent`. Quando não houver `ssh-agent` disponível, isso não é erro: apenas aquele método de autenticação não entra na lista.
 
 - [ ] **Step 4: Rodar e commitar**
 
@@ -126,7 +142,7 @@ Run: `go test ./internal/transport/ -race`, e `CGO_ENABLED=0 go build` para as s
 
 ```bash
 git add internal/transport/
-git commit -m "feat(transport): cliente ssh com known_hosts estrito e agente portavel"
+git commit -m "feat(transport): cliente ssh com known_hosts estrito e ssh-agent portavel"
 ```
 
 ---
@@ -277,7 +293,7 @@ git commit -m "test(transport): integracao ssh real; docs de operacao remota"
 | Executar em servidor remoto via SSH | R1, R2, R4, R5 |
 | Passar host, user, porta | R2 (`~/.ssh/config`), R5 (flags) |
 | Senha, quando o servidor exigir | R2 (env ou prompt, nunca flag) |
-| Chave SSH e caminho da chave | R2 (`--key`, `IdentityFile`, agente antes) |
+| Chave SSH e caminho da chave | R2 (`--key`, `IdentityFile`, `ssh-agent` antes) |
 | Não instalar o CLI na VM | DR3, R1 (SFTP mais exec remoto) |
 | Funcionar em Linux, macOS e Windows | Global Constraints; R2 Step 1 item 1 |
 
