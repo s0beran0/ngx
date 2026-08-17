@@ -287,3 +287,45 @@ comando so em vez de uma por turno.
 **Bash e a ferramenta mais chamada** (642 contra 238 de Read). Como o custo e
 por turno, encadear tres verificacoes num unico comando vale mais que otimizar
 o que cada uma imprime.
+
+### O maior gargalo e a sessao de coordenacao, nao os subagentes
+
+Medido nos transcripts desta execucao:
+
+| | turnos | historico relido | por turno |
+|---|---|---|---|
+| 41 subagentes somados | 1.137 | 131,0 M | 115 mil |
+| a sessao de coordenacao | 687 | **309,5 M** | **450 mil** |
+
+**A sessao principal foi 70% do custo total.** O contexto dela comecou em 22
+mil tokens e chegou a 844 mil — e cada turno relê tudo.
+
+O que a inflou: **os relatorios dos subagentes voltam inteiros para ela.** Um
+review que retorna 3 mil tokens de analise, recebido 300 turnos antes do fim,
+custa ~900 mil tokens sozinho, porque e relido em cada turno seguinte.
+
+Isso contraria a orientacao da Anthropic sobre sub-agentes, que e retornarem
+**sumarios condensados de 1.000 a 2.000 tokens** depois de explorar
+extensivamente.
+
+#### A regra: o retorno do subagente e um sumario, nao o trabalho
+
+Todo dispatch precisa exigir, explicitamente:
+
+> Escreva a analise completa em `<caminho do relatorio>`. Como resposta final,
+> devolva no maximo 15 linhas: veredito numa linha, cada achado como uma linha
+> (severidade + titulo + arquivo:linha), e o caminho do relatorio. **Nao repita
+> a analise na resposta** — quem coordena le o arquivo se precisar.
+
+O relatorio completo continua existindo e continua sendo lido — sob demanda,
+uma vez, por quem precisa. A diferenca e que ele deixa de ser reenviado a cada
+turno da sessao de coordenacao pelo resto da execucao.
+
+#### E a coordenacao precisa de higiene de contexto
+
+- **`/compact` ao fim de cada fase**, nao quando degradar. Um resumo feito de
+  uma sessao saudavel e melhor que um feito de uma sessao ja confusa.
+- **`/clear` ao trocar de assunto** — investigar consumo de tokens e executar
+  um plano de implementacao nao precisam compartilhar contexto.
+- **Nao imprimir arquivo inteiro no terminal** para "conferir". `wc -l`,
+  `grep -c` e `tail -5` respondem a mesma pergunta por uma fracao do custo.
