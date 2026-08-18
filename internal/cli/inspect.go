@@ -73,7 +73,7 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 		Use:   "inspect",
 		Short: "Dump completo: arvore de configuracao e resumo",
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			caminho := caminhoDaConfig(ctx)
 			if caminho == "" {
 				return output.Usage("informe a configuracao com -c ou em nginx.config")
@@ -84,14 +84,23 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 			// arquivos da maquina do operador e os apresentaria como
 			// configuracao do servidor (DR4). No alvo local o transporte e
 			// justamente os.Open e filepath.Glob, entao nada muda.
-			tr := ctx.transporte()
+			//
+			// Com --sudo o transporte repete com privilegio SO o arquivo que
+			// a leitura comum recusou por permissao. E o caso real de um
+			// nginx de producao: a maioria dos arquivos e legivel por todos,
+			// e um punhado guarda credencial e fica restrito ao root.
+			ctxExec, cancelar := ctx.contextoDeExecucao(cmd.Context())
+			defer cancelar()
+
+			tr := ctx.TransporteDeLeitura(ctxExec)
 			tree, err := config.Parse(config.ParseOptions{
 				Path: caminho,
 				Open: tr.Open,
 				Glob: tr.Glob,
 			})
+			diagsLeitura := DiagnosticosDeLeitura(tr)
 			if err != nil {
-				return erroDeParse(err)
+				return erroDeParse(comDicaDeSudo(err, ctx), diagsLeitura...)
 			}
 
 			if combine {
@@ -102,6 +111,7 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 			}
 
 			env := ctx.NovoEnvelope("inspect")
+			env.Diagnostics = append(env.Diagnostics, diagsLeitura...)
 			env.Data = InspectData{Config: tree.Files, Summary: resumir(tree)}
 			env.Meta.ConfigHash = tree.Hash
 			return ctx.Renderer.Render(env)
@@ -126,7 +136,33 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 // para que a saida aponte o lugar exato do problema; quando ha mais de um
 // item, cada um aparece localizado na mensagem, em vez de uma unica linha
 // generica.
-func erroDeParse(err error) error {
+// comDicaDeSudo acrescenta, quando a recusa foi por permissao e --sudo nao
+// foi pedido, a frase que transforma um beco sem saida em proximo passo.
+//
+// Sem isso o operador recebe "nao tem permissao" e fica sem saber que a
+// ferramenta resolve aquilo -- e a saida errada, afrouxar permissao no
+// servidor, e a mais obvia para quem esta com pressa. A DR5 impede escalar
+// sozinho; nada impede dizer como.
+func comDicaDeSudo(err error, ctx *Context) error {
+	if ctx.Flags != nil && ctx.Flags.Sudo {
+		return err
+	}
+	var problemas config.ParseErrors
+	if !errors.As(err, &problemas) {
+		return err
+	}
+	for i := range problemas {
+		if problemas[i].Classe != config.RecusaFalhaDeLeitura ||
+			!strings.Contains(problemas[i].Message, "permissao") {
+			continue
+		}
+		problemas[i].Message += ". Rode com --sudo para que o ngx leia com privilegio " +
+			"apenas os arquivos recusados; nao e preciso mudar permissao no servidor"
+	}
+	return problemas
+}
+
+func erroDeParse(err error, extras ...output.Diagnostic) error {
 	var problemas config.ParseErrors
 	if !errors.As(err, &problemas) || len(problemas) == 0 {
 		return output.Internal(err, "%s", err.Error())
@@ -146,6 +182,7 @@ func erroDeParse(err error) error {
 	e := output.InvalidConfig("%s", strings.Join(itens, "; "))
 	e.Diag.File = problemas[0].File
 	e.Diag.Line = problemas[0].Line
+	e.Extras = append(e.Extras, extras...)
 	e.Err = err
 	return e
 }

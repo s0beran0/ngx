@@ -27,6 +27,12 @@ type Error struct {
 	Code ExitCode
 	Diag Diagnostic
 	Err  error
+
+	// Extras sao diagnosticos que acompanham a falha sem serem a causa dela
+	// -- por exemplo, quais arquivos precisaram de privilegio antes de a
+	// leitura falhar em outro. Sem este campo eles se perderiam justamente
+	// no caminho de erro, que e onde mais ajudam a entender o que houve.
+	Extras []Diagnostic
 }
 
 func (e *Error) Error() string { return e.Diag.Message }

@@ -82,6 +82,24 @@ Um `~/.ssh/config` com `Match user deploy` é perfeitamente válido para o `ssh`
 
 Então: falha de parse vira **diagnóstico de severidade `warning`** no envelope, dizendo qual arquivo e qual linha o `ngx` não entendeu, e a resolução segue com o que veio de flags e dos defaults. O que **não** pode acontecer é o `ngx` ignorar o arquivo em silêncio e conectar em outro host que não o pretendido — o aviso é o que impede isso de virar surpresa.
 
+### DR8 — Leitura privilegiada é mínima, em três degraus
+
+Num servidor real a configuração raramente é toda legível pelo usuário da conexão: a maioria dos arquivos é pública e um punhado guarda credencial e fica restrito ao root. Medido num nginx de produção: **um** arquivo entre 132.
+
+A resposta **não** é orientar quem usa a afrouxar permissão no servidor. Aquele arquivo está restrito de propósito, e uma ferramenta que exige `chmod` em `/etc/nginx` para funcionar troca a segurança do host por conveniência de leitura — replicada por toda a frota por quem só quer o `ngx` rodando.
+
+Com `--sudo`, a leitura desce três degraus, parando no primeiro que responder:
+
+1. **SFTP como o usuário da conexão.** Sem privilégio nenhum. Cobre a maioria.
+2. **`sudo -n cat <arquivo>`**, apenas para o arquivo recusado. Os outros 131 continuam sendo lidos sem privilégio.
+3. **`sudo -n nginx -T`**, quando nem o `cat` passa. É o caso do servidor endurecido, cujo `sudoers` libera comandos específicos — tipicamente o próprio nginx — e recusa um `cat` genérico. Sem este degrau a leitura privilegiada seria inútil justamente onde o `sudo` está bem configurado.
+
+O dump é o último degrau, e não o primeiro, porque `nginx -T` exige configuração **válida**: a hora em que mais se precisa ler a configuração é quando ela quebrou, e ali só a leitura arquivo a arquivo responde.
+
+Sem `--sudo` nada disso acontece — a DR5 continua valendo —, mas o diagnóstico passa a dizer que `--sudo` resolve, para que o beco sem saída não empurre o operador para a solução errada.
+
+*Transparência:* todo caminho que exigiu privilégio aparece no envelope, com a origem. Ler a configuração de um servidor com `sudo` não pode acontecer calado.
+
 ### DR6 — O `ngx` não usa `sftp.Client.Glob`
 
 O `Glob` do `github.com/pkg/sftp` **descarta erros de I/O por contrato**. O comentário da própria função diz: *"Glob ignores file system errors such as I/O errors reading directories. The only possible returned error is ErrBadPattern"* (`match.go:40-42`). E no caminho sem metacaractere ele é literal: `file, err := c.Lstat(pattern); if err != nil { return nil, nil }` — conexão caindo devolve nenhum resultado e nenhum erro.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -198,6 +199,44 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 //
 // ComSudo carrega a flag --sudo diretamente: sem ela, um comando que precise
 // de privilegio e reportado, nunca repetido com sudo (DR5).
+// TransporteDeLeitura devolve o transporte que os comandos usam para LER
+// configuracao, ja com a leitura privilegiada quando --sudo foi pedido.
+//
+// A escalada e minima: cada arquivo e tentado primeiro como o usuario da
+// conexao, e so o que for recusado por permissao e repetido com sudo. Numa
+// configuracao onde um arquivo entre 132 e restrito -- medido num nginx de
+// producao real --, 131 seguem sendo lidos sem privilegio nenhum.
+//
+// Sem --sudo devolve o transporte cru: a DR5 exige que privilegio seja
+// pedido, nunca inferido.
+func (c *Context) TransporteDeLeitura(ctx context.Context) transport.Transport {
+	sudo := c.Flags != nil && c.Flags.Sudo
+	return transport.ComLeituraPrivilegiadaEDump(ctx, c.transporte(), sudo, c.dumpDeFallback)
+}
+
+// dumpDeFallback entrega a configuracao efetiva por `nginx -T`, o ultimo
+// recurso de leitura. Num servidor endurecido o sudoers libera comandos
+// especificos -- tipicamente o nginx -- e recusa um `cat` generico; ali este
+// e o unico caminho que funciona.
+func (c *Context) dumpDeFallback(ctx context.Context) (map[string][]byte, error) {
+	d, err := c.NovoRuntime().DumpConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	arquivos := make(map[string][]byte, len(d.Files))
+	for _, f := range d.Files {
+		arquivos[f.Path] = []byte(f.Content)
+	}
+	return arquivos, nil
+}
+
+// DiagnosticosDeLeitura recolhe o que o transporte de leitura observou --
+// quais caminhos exigiram privilegio, quais nem com ele abriram. Ler
+// configuracao de servidor com sudo nao pode acontecer calado.
+func DiagnosticosDeLeitura(tr transport.Transport) []output.Diagnostic {
+	return transport.Diagnosticos(tr)
+}
+
 func (c *Context) NovoRuntime() *runtime.Runtime {
 	if c.Flags == nil {
 		return runtime.New(c.transporte())

@@ -156,6 +156,13 @@ func renderErro(ctx *Context, stderr io.Writer, err error) {
 	var e *output.Error
 	if errors.As(err, &e) {
 		env.AddDiagnostic(e.Diag)
+		// Os extras contam o que aconteceu ANTES da falha -- quais arquivos
+		// exigiram privilegio, por exemplo. Perde-los aqui deixaria o
+		// envelope de erro menos informativo que o de sucesso, justamente
+		// quando quem le mais precisa de contexto.
+		for _, d := range e.Extras {
+			env.AddDiagnostic(d)
+		}
 	} else {
 		env.AddDiagnostic(output.Diagnostic{
 			Severity: output.SeverityError,
