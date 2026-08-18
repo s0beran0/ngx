@@ -111,9 +111,20 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 		roda := true
 		s.Running = &roda
 	case exigePrivilegio(texto):
-		// Processo existe mas pertence a outro usuario. Afirmar que nao
-		// roda seria falso; afirmar que roda seria adivinhar a partir da
-		// mensagem. Fica indisponivel, com o motivo dito.
+		// Processo existe mas pertence a outro usuario -- o normal, porque o
+		// master do nginx roda como root. Afirmar que nao roda seria falso;
+		// afirmar que roda seria adivinhar a partir da mensagem.
+		//
+		// Com --sudo, porem, o operador JA autorizou privilegio de forma
+		// explicita, e a DR5 exige que ele seja explicito, nao que seja
+		// recusado. Entao a segunda tentativa acontece so aqui, so quando a
+		// primeira topou em permissao, e so com a flag: nada e escalado por
+		// conta propria. Sem a flag, o campo continua indisponivel e dito.
+		if r.sudo && r.confirmaComPrivilegio(ctx, pid) {
+			roda := true
+			s.Running = &roda
+			break
+		}
 		s.diag(output.SeverityWarning, CodigoPrivilegioNecessario,
 			fmt.Sprintf("o pid %d existe mas pertence a outro usuario, e conferir seu estado "+
 				"em %s exige privilegio", pid, r.tr.Describe()))
@@ -135,4 +146,13 @@ func (s *State) diag(sev output.Severity, codigo, mensagem string) {
 		Message:  mensagem,
 		File:     s.PIDFile,
 	})
+}
+
+// confirmaComPrivilegio repete o kill -0 com sudo. Devolve true so quando a
+// resposta e inequivoca: sudo indisponivel, senha exigida ou qualquer outra
+// falha devolvem false, e ai o campo segue indisponivel em vez de virar um
+// palpite.
+func (r *Runtime) confirmaComPrivilegio(ctx context.Context, pid int) bool {
+	_, _, exit, err := r.tr.Run(ctx, []string{"sudo", "-n", "kill", "-0", strconv.Itoa(pid)})
+	return err == nil && exit == 0
 }

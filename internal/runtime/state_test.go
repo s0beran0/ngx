@@ -146,3 +146,41 @@ func TestStateNaoUsaSudoNoKill(t *testing.T) {
 	require.Len(t, chamadas, 1)
 	assert.Equal(t, []string{"kill", "-0", "7"}, chamadas[0])
 }
+
+// Com --sudo o operador ja autorizou privilegio, e a DR5 exige que ele seja
+// EXPLICITO, nao que seja recusado. O master do nginx roda como root, entao
+// sem esta segunda tentativa o campo `running` ficaria indisponivel no caso
+// mais comum que existe -- verificado contra um nginx de producao real.
+//
+// O par de casos e o que prova a regra: sem a flag nada e escalado.
+func TestStateComSudoConfirmaProcessoDeOutroUsuario(t *testing.T) {
+	novo := func() *fakeTransport {
+		f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{
+			stderr: "kill: (4242): Operation not permitted\n",
+			exit:   1,
+		}).responde("sudo -n kill -0 4242", resposta{})
+		f.arquivos["/run/nginx.pid"] = "4242"
+		return f
+	}
+
+	t.Run("com sudo o campo fica disponivel", func(t *testing.T) {
+		f := novo()
+		s, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
+		require.NoError(t, err)
+
+		require.NotNil(t, s.Running, "com privilegio autorizado o estado e conhecido")
+		assert.True(t, *s.Running)
+		assert.Empty(t, s.Diagnostics, "nada a avisar quando a resposta e inequivoca")
+	})
+
+	t.Run("sem sudo nada e escalado", func(t *testing.T) {
+		f := novo()
+		s, err := New(f).State(context.Background(), "/run/nginx.pid")
+		require.NoError(t, err)
+
+		assert.Nil(t, s.Running, "sem a flag o campo some, em vez de virar palpite")
+		for _, argv := range f.executados {
+			assert.NotEqual(t, "sudo", argv[0], "escalar sem --sudo contraria a DR5")
+		}
+	})
+}
