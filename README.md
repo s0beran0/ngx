@@ -1,21 +1,21 @@
 # ngx
 
-CLI em Go que torna o nginx operavel por programa: saida JSON estruturada,
-leitura por seletor, e — quando a v0.2 chegar — mudancas transacionais com
+A Go CLI that makes nginx operable by programs: structured JSON output,
+reading by selector, and — once v0.2 lands — transactional changes with
 rollback.
 
-## Dois publicos, uma ferramenta
+## Two audiences, one tool
 
-O `ngx` e feito para ser usado por **agentes de IA** e por **humanos**, e a
-saida se adapta sozinha: quando a stdout **nao** e um terminal, ela e JSON;
-quando e, ela e legivel. `--json` e `--human` forcam um dos dois.
+`ngx` is built to be used by **AI agents** and by **humans**, and the output
+adapts on its own: when stdout is **not** a terminal, it is JSON; when it is,
+it is readable. `--json` and `--human` force one of the two.
 
-Isso nao e enfeite. Um agente que le um pipe precisa de estrutura para
-decidir; uma pessoa depurando precisa de texto. A mesma invocacao serve aos
-dois sem ninguem ter que lembrar de uma flag.
+This is not decoration. An agent reading a pipe needs structure to decide; a
+person debugging needs text. The same invocation serves both without anyone
+having to remember a flag.
 
-Onde o comportamento diverge, a divergencia e regra de seguranca. O
-`--no-redact`, que desliga a ocultacao de valores sensiveis, so e aceito em
+Where the behavior diverges, the divergence is a safety rule. `--no-redact`,
+which turns off the hiding of sensitive values, is only accepted on a
 terminal:
 
 ```console
@@ -23,41 +23,40 @@ $ ngx --no-redact inspect -c nginx.conf | cat
 {"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--no-redact so e aceito quando a saida e um terminal"}],"meta":{"duration_ms":0,"target":"local"}}
 ```
 
-Um humano que pede para ver o segredo o ve na tela. Um agente lendo o pipe,
-estruturalmente, nem consegue pedir.
+A human who asks to see the secret sees it on screen. An agent reading the
+pipe, structurally, cannot even ask.
 
-## Estado atual — leia antes de tentar instalar
+## Current state — read this before trying to install
 
-Esta e a **v0.1, em desenvolvimento**, e ela e **somente leitura**. Nada aqui
-altera a configuracao do nginx.
+This is **v0.1, under development**, and it is **read-only**. Nothing here
+changes the nginx configuration.
 
-- **So ha pre-lancamentos.** O canal estavel ainda esta vazio, entao o
-  `install.sh` sem `NGX_CHANNEL=beta` responde que so existem pre-lancamentos
-  e indica o beta. As releases sao assinadas com minisign, e o instalador
-  RECUSA instalar quando nao consegue verificar a assinatura — ausencia de
-  verificacao e falha, nunca um "segui em frente". Quando o minisign nao esta
-  instalado, ele verifica com `openssl`, que existe em praticamente todo
-  servidor.
+- **There are only pre-releases.** The stable channel is still empty, so
+  `install.sh` without `NGX_CHANNEL=beta` answers that only pre-releases exist
+  and points at beta. Releases are signed with minisign, and the installer
+  REFUSES to install when it cannot verify the signature — absence of
+  verification is a failure, never a "carried on anyway". When minisign is not
+  installed, it verifies with `openssl`, which exists on practically every
+  server.
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \
     | NGX_CHANNEL=beta sh
   ```
-- **Existem cinco comandos:** `version`, `inspect`, `test`, `status` e
-  `update`. Comandos previstos no desenho (`get`, `tree`, `fmt`, `diff`,
-  `apply`) ainda nao existem. O `status` ainda nao detecta drift, entao ele
-  nunca sai com o codigo 7 previsto no desenho.
-- **O acesso remoto por SSH existe e foi exercitado contra um nginx de
-  producao real** (Oracle Linux 9, nginx 1.20.1, 132 arquivos de
-  configuracao), alem da bancada em container. Ver
-  [`docs/remoto.md`](docs/remoto.md).
-- **A saida "humana" ainda e crua:** hoje ela e o JSON dos dados formatado com
-  indentacao, e o erro como uma linha de texto. Melhorar isso e trabalho
-  pendente, nao um estilo deliberado.
+- **There are five commands:** `version`, `inspect`, `test`, `status` and
+  `update`. Commands foreseen in the design (`get`, `tree`, `fmt`, `diff`,
+  `apply`) do not exist yet. `status` does not detect drift yet, so it never
+  exits with the code 7 the design reserves for it.
+- **Remote access over SSH exists and has been exercised against a real
+  production nginx** (Oracle Linux 9, nginx 1.20.1, 132 configuration files),
+  besides the containerized test bench. See [`docs/remote.md`](docs/remote.md).
+- **The "human" output is still raw:** today it is the JSON of the data
+  formatted with indentation, and the error as a line of text. Improving this
+  is pending work, not a deliberate style.
 
-## Compilando da fonte
+## Building from source
 
-Precisa de Go 1.25 ou mais novo. Sem CGO, sem dependencia de sistema.
+Requires Go 1.25 or newer. No CGO, no system dependency.
 
 ```console
 $ make build
@@ -67,70 +66,70 @@ $ ./bin/ngx version
 {"ok":true,"command":"version","ngx_version":"0.1.0-dev","data":{"version":"0.1.0-dev"},"diagnostics":[],"meta":{"duration_ms":0,"target":"local"}}
 ```
 
-Copie `bin/ngx` para onde quiser — e um binario estatico, sem instalador.
+Copy `bin/ngx` wherever you want — it is a static binary, no installer needed.
 
-Outros alvos uteis: `make test`, `make test-race`, `make lint`, `make
-verificar` (o que o CI roda) e `make ajuda` para a lista completa.
+Other useful targets: `make test`, `make test-race`, `make lint`, `make
+verificar` (what CI runs) and `make ajuda` for the full list.
 
-### Os instaladores, quando houver release
+### The installers
 
-`install.sh` (Linux e macOS) e `install.ps1` (Windows) ja estao no
-repositorio. Enquanto nao houver release publicada e chave minisign gerada,
-eles nao tem o que instalar — mas o `--help` deles ja e a referencia correta
-das variaveis:
+`install.sh` (Linux and macOS) and `install.ps1` (Windows) are in the
+repository and work today, against the pre-releases: the stable channel is
+empty, so `NGX_CHANNEL=beta` is required. Their `--help` is the correct
+reference for the variables:
 
 ```console
 $ sh install.sh --help
-install.sh — instalador do ngx para Linux e macOS
+install.sh — the ngx installer for Linux and macOS
 ...
 ```
 
-| Variavel | Efeito |
+| Variable | Effect |
 |---|---|
-| `NGX_INSTALL_DIR` | diretorio de instalacao (`/usr/local/bin`; `%LOCALAPPDATA%\ngx\bin` no Windows) |
-| `NGX_CHANNEL` | `stable` (default) ou `beta`, que inclui `-rc`/`-beta`/`-alpha` |
-| `NGX_VERSION` | versao fixa, ex. `v0.2.0`; quando definida, a API do GitHub nao e consultada |
-| `NGX_ALLOW_UNVERIFIED` | `1` permite instalar quando a assinatura **nao pode** ser verificada; nunca ignora assinatura invalida nem checksum divergente |
+| `NGX_INSTALL_DIR` | installation directory (`/usr/local/bin`; `%LOCALAPPDATA%\ngx\bin` on Windows) |
+| `NGX_CHANNEL` | `stable` (default) or `beta`, which includes `-rc`/`-beta`/`-alpha` |
+| `NGX_VERSION` | pinned version, e.g. `v0.2.0`; when set, the GitHub API is not queried |
+| `NGX_ALLOW_UNVERIFIED` | `1` allows installing when the signature **cannot** be verified; it never ignores an invalid signature or a mismatched checksum |
 
-Nenhum dos dois chama `sudo` sozinho: se o diretorio exigir privilegio, o
-script imprime a linha exata a rodar e para. Escalar privilegio por conta
-propria dentro de algo executado via `curl | sh` e exatamente o que ninguem
-deveria aceitar rodar.
+Neither of them calls `sudo` on its own: if the directory requires privilege,
+the script prints the exact line to run and stops. Escalating privilege by
+itself inside something executed through `curl | sh` is exactly what nobody
+should agree to run.
 
-O checksum SHA256 e conferido sempre e nao tem como ser desligado.
+The SHA256 checksum is always checked and there is no way to turn it off.
 
-## Usando hoje
+## Using it today
 
 ### `ngx inspect`
 
-Le a configuracao e devolve a arvore inteira mais um resumo. O caminho vem de
-`-c`/`--config`, ou de `nginx.config` no arquivo de configuracao do proprio
-`ngx`.
+Reads the configuration and returns the whole tree plus a summary. The path
+comes from `-c`/`--config`, or from `nginx.config` in `ngx`'s own
+configuration file.
 
 ```console
 $ ./bin/ngx inspect -c internal/cli/testdata/exemplo.conf | jq -c '.data.summary'
 {"files":1,"servers":1,"locations":2,"upstreams":1}
 ```
 
-Cada no da arvore carrega `directive`, `args`, `file`, `line`, `column`, os
-offsets de byte (`span` e `head_span`) e um `id` estavel — `h.s0.l0` e a
-primeira `location` do primeiro `server` dentro do `http`. O envelope traz
-ainda `meta.config_hash`, o hash canonico da configuracao lida.
+Every node in the tree carries `directive`, `args`, `file`, `line`, `column`,
+the byte offsets (`span` and `head_span`) and a stable `id` — `h.s0.l0` is the
+first `location` of the first `server` inside `http`. The envelope also brings
+`meta.config_hash`, the canonical hash of the configuration that was read.
 
-Valores sensiveis saem redigidos por padrao:
+Sensitive values come out redacted by default:
 
 ```console
 $ ./bin/ngx inspect -c internal/cli/testdata/exemplo.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
 {"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/exemplo.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"id":"h.s0.d2"}
 ```
 
-`--combine` resolve os `include` numa arvore unica em vez de uma lista de
-arquivos.
+`--combine` resolves the `include`s into a single tree instead of a list of
+files.
 
 ### `ngx test`
 
-Roda `nginx -t` no alvo e devolve o veredito com cada diagnostico no arquivo e
-na linha que o nginx informou:
+Runs `nginx -t` on the target and returns the verdict with each diagnostic at
+the file and line nginx reported:
 
 ```console
 $ ./bin/ngx test | jq -c '.data.ok, .diagnostics[0]'
@@ -138,14 +137,16 @@ false
 {"severity":"error","code":"NGX-0224","message":"invalid number of arguments in \"listen\" directive","file":"/etc/nginx/conf.d/app.conf","line":12}
 ```
 
-Configuracao reprovada sai com **codigo 3, e o envelope completo**: reprovar e
-o resultado da pergunta que se fez, nao uma falha de infraestrutura. Falha de
-verdade — nao ha nginx no alvo, falta privilegio, a conexao caiu — sai com
-codigo 1 e o diagnostico correspondente (`NGX-0220`, `NGX-0221`, `NGX-0222`).
+A configuration that fails the check exits with **code 3, and the full
+envelope**: failing is the answer to the question that was asked, not an
+infrastructure failure. A real failure — no nginx on the target, missing
+privilege, the connection dropped — exits with code 1 and the corresponding
+diagnostic (`NGX-0220`, `NGX-0221`, `NGX-0222`).
 
 ### `ngx status`
 
-Junta o que o binario diz de si (`nginx -V`) com o estado do processo:
+Joins what the binary says about itself (`nginx -V`) with the state of the
+process:
 
 ```console
 $ ./bin/ngx status | jq -c '.data.nginx.version, .data.process'
@@ -153,31 +154,31 @@ $ ./bin/ngx status | jq -c '.data.nginx.version, .data.process'
 {"running":true,"master_pid":4242,"pid_file":"/var/run/nginx.pid"}
 ```
 
-O que o nginx nao informa **e omitido, nunca estimado**. Um build sem
-`--pid-path` nao diz onde o pidfile fica: `pid_file` e `running` somem do JSON
-e um diagnostico explica a ausencia, em vez de o `ngx` chutar um caminho ou
-reportar `running: false` — que diria, sem evidencia, que o nginx caiu. O
-mesmo vale para um pid de outro usuario, que existe mas nao pode ser
-consultado.
+What nginx does not report **is omitted, never estimated**. A build without
+`--pid-path` does not say where the pidfile lives: `pid_file` and `running`
+disappear from the JSON and a diagnostic explains the absence, instead of
+`ngx` guessing a path or reporting `running: false` — which would claim,
+without evidence, that nginx is down. The same goes for a pid owned by another
+user, which exists but cannot be queried.
 
 ### `ngx update`
 
-Atualiza o proprio `ngx` a partir das releases assinadas. Baixa, confere a
-assinatura minisign e o checksum SHA-256, e **so entao** troca o binario:
-falha de verificacao deixa o `ngx` atual intacto.
+Updates `ngx` itself from the signed releases. It downloads, checks the
+minisign signature and the SHA-256 checksum, and **only then** swaps the
+binary: a verification failure leaves the current `ngx` untouched.
 
 ```sh
-ngx update --check                  # so informa se ha versao nova
-ngx update --channel beta           # inclui pre-lancamentos
-ngx update --version v0.1.0-rc.1    # versao exata, inclusive downgrade
+ngx update --check                  # only reports whether a new version exists
+ngx update --channel beta           # includes pre-releases
+ngx update --version v0.1.0-rc.1    # exact version, downgrade included
 ```
 
-O canal vem da flag, ou de `NGX_CHANNEL`, ou e `stable`. A variavel existe
-porque o `install.sh` ja a usa: quem instalou pelo beta continua no beta sem
-repetir a flag.
+The channel comes from the flag, or from `NGX_CHANNEL`, or defaults to
+`stable`. The variable exists because `install.sh` already uses it: whoever
+installed through beta stays on beta without repeating the flag.
 
-O comando ignora `--host` de proposito. Atualizar o `ngx` e sobre a maquina
-onde ele roda; nada e instalado no servidor remoto.
+The command ignores `--host` on purpose. Updating `ngx` is about the machine
+where it runs; nothing is installed on the remote server.
 
 ### `ngx version`
 
@@ -186,9 +187,10 @@ $ ./bin/ngx version | jq -c .data
 {"version":"0.1.0-dev"}
 ```
 
-### Erros
+### Errors
 
-Erro de sintaxe na configuracao aponta arquivo e linha, e sai com codigo 3:
+A syntax error in the configuration points at file and line, and exits with
+code 3:
 
 ```console
 $ ./bin/ngx inspect -c internal/cli/testdata/invalido.conf; echo "exit=$?"
@@ -196,70 +198,71 @@ $ ./bin/ngx inspect -c internal/cli/testdata/invalido.conf; echo "exit=$?"
 exit=3
 ```
 
-| Codigo | Significado |
+| Code | Meaning |
 |---|---|
-| 0 | sucesso |
-| 1 | falha interna ou de ambiente |
-| 2 | erro de uso (flag ou comando invalido) |
-| 3 | configuracao do nginx invalida |
+| 0 | success |
+| 1 | internal or environment failure |
+| 2 | usage error (invalid flag or command) |
+| 3 | invalid nginx configuration |
 
-Os codigos 7 (drift) e 9 (hash divergente) estao reservados para os comandos
-de mutacao da v0.2.
+Codes 7 (drift) and 9 (hash mismatch) are reserved for the mutation commands
+of v0.2.
 
-### Flags globais
+### Global flags
 
 ```
--c, --config          configuracao principal do nginx
-    --json/--human    forca o formato da saida
--q, --quiet           so erros
-    --no-color        desliga cores
-    --nginx-bin       caminho do binario do nginx
-    --nginx-version   assume esta versao do nginx
-    --timeout         timeout das operacoes (default 30s)
-    --profile         perfil do arquivo de configuracao do ngx
-    --no-redact       mostra valores sensiveis (so em terminal)
+-c, --config          main nginx configuration
+    --json/--human    force the output format
+-q, --quiet           errors only
+    --no-color        turn off colors
+    --nginx-bin       path to the nginx binary
+    --nginx-version   assume this nginx version
+    --timeout         operation timeout (default 30s)
+    --profile         profile from ngx's configuration file
+    --no-redact       show sensitive values (terminal only)
 ```
 
-As flags de acesso remoto (`--host`, `--user`, `--port`, `--key`,
-`--known-hosts`, `--insecure-host-key`, `--sudo`) estao documentadas em
-[`docs/remoto.md`](docs/remoto.md).
+The remote access flags (`--host`, `--user`, `--port`, `--key`,
+`--known-hosts`, `--insecure-host-key`, `--sudo`) are documented in
+[`docs/remote.md`](docs/remote.md).
 
-`--sudo` governa a execucao do binario do nginx e vale tambem no alvo local:
-`test` e `status` executam `nginx -t` e `nginx -V` com `sudo -n` quando a flag
-esta presente. Sem ela, um comando que precise de privilegio e **reportado**,
-com a linha exata a autorizar — o `ngx` nunca repete o comando com `sudo` por
-conta propria. O `inspect` continua fora disso: ele le arquivos, e leitura
-(local ou por SFTP) nao passa por `sudo`.
+`--sudo` governs the execution of the nginx binary and applies to the local
+target as well: `test` and `status` run `nginx -t` and `nginx -V` with
+`sudo -n` when the flag is present. Without it, a command that needs privilege
+is **reported**, with the exact line to authorize — `ngx` never repeats the
+command with `sudo` on its own. `inspect` stays out of this: it reads files,
+and reading (local or over SFTP) does not go through `sudo`.
 
-## Configuracao do proprio ngx
+## ngx's own configuration
 
-`/etc/ngx/ngx.yaml` (global) e `.ngx/config.yaml` (local, relativo ao
-diretorio de trabalho). O local sobrescreve o global, chave a chave:
+`/etc/ngx/ngx.yaml` (global) and `.ngx/config.yaml` (local, relative to the
+working directory). The local one overrides the global one, key by key:
 
 ```yaml
 nginx:
   binary: /usr/sbin/nginx
   config: /etc/nginx/nginx.conf
 output:
-  format: auto      # auto, json ou human
+  format: auto      # auto, json or human
   redact:
     - ssl_certificate_key
 ```
 
-A lista de redacao ja vem preenchida com um conjunto padrao; declara-la aqui
-substitui esse conjunto.
+The redaction list already comes filled with a default set; declaring it here
+replaces that set.
 
-## Acesso remoto
+## Remote access
 
-O `ngx` opera um host remoto por SSH sem instalar nada no servidor:
+`ngx` operates a remote host over SSH without installing anything on the
+server:
 
 ```console
 $ ngx --host web1 inspect
 ```
 
-Autenticacao, verificacao de host key, privilegio e a ressalva de latencia
-estao em [`docs/remoto.md`](docs/remoto.md).
+Authentication, host key verification, privilege and the latency caveat are in
+[`docs/remote.md`](docs/remote.md).
 
-## Licenca
+## License
 
-MIT. Ver [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

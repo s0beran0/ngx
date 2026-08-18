@@ -1,99 +1,102 @@
-# Bancada de teste
+# Test bench
 
-Container descartável com `sshd` e `nginx`, usado como alvo dos testes de
-integração do caminho remoto do `ngx`. É artefato versionado do repositório:
-quem clona o projeto sobe a bancada com um comando, em Linux ou macOS, sem
-mais nada instalado além de Docker e `ssh`.
+A disposable container with `sshd` and `nginx`, used as the target of the
+integration tests for `ngx`'s remote path. It is a versioned artifact of the
+repository: whoever clones the project brings the bench up with a single
+command, on Linux or macOS, with nothing installed beyond Docker and `ssh`.
 
 ```sh
-make bancada-up      # gera a chave, constrói a imagem e sobe o container
-make bancada-smoke   # prova, uma a uma, as propriedades exigidas
-make bancada-down    # derruba o container, remove a imagem e apaga a chave
+make bancada-up      # generates the key, builds the image and starts the container
+make bancada-smoke   # proves, one by one, the required properties
+make bancada-down    # tears down the container, removes the image and deletes the key
 ```
 
-Auxiliares: `make bancada-logs` (log do `sshd`) e `make bancada-shell` (sessão
-interativa como `ngxtest`).
+Helpers: `make bancada-logs` (the `sshd` log) and `make bancada-shell` (an
+interactive session as `ngxtest`).
 
-## Como conectar
+## How to connect
 
 | | |
 |---|---|
-| Endereço | `127.0.0.1`, porta **2222** (fixa; `make BANCADA_PORTA=2223 bancada-up` para trocar) |
-| Usuário | `ngxtest`, uid 1000, **não-root** |
-| Chave privada | `test/bancada/.chave/id_ed25519` (ed25519, sem passphrase) |
-| Privilégio | `sudo -n /usr/sbin/nginx`, sem senha, **só** o nginx |
+| Address | `127.0.0.1`, port **2222** (fixed; `make BANCADA_PORTA=2223 bancada-up` to change it) |
+| User | `ngxtest`, uid 1000, **non-root** |
+| Private key | `test/bancada/.chave/id_ed25519` (ed25519, no passphrase) |
+| Privilege | `sudo -n /usr/sbin/nginx`, no password, nginx **only** |
 | nginx | 1.20.1, Oracle Linux 9 |
 
-A porta só escuta em `127.0.0.1`. A chave é **gerada** por `make bancada-up` e
-nunca entra no git (`test/bancada/.chave/` está no `.gitignore`); as chaves de
-host do container são geradas a cada subida, para que o teste de recusa por
-host key desconhecida não esbarre num `known_hosts` da execução anterior.
+The port listens on `127.0.0.1` only. The key is **generated** by
+`make bancada-up` and never enters git (`test/bancada/.chave/` is in
+`.gitignore`); the container's host keys are generated on every startup, so
+that the test for refusing an unknown host key does not trip over a
+`known_hosts` left by the previous run.
 
-## O que a bancada reproduz
+## What the bench reproduces
 
-A forma foi medida num nginx de produção real (Oracle Linux 9, nginx 1.20.1) e
-é o motivo de a imagem base ser `oraclelinux:9`: é dessa família que vem o
-layout com três diretórios de include e o nginx compilado com `--modules-path`,
-que dá o terceiro curinga sem gambiarra. O módulo `nginx` do appstream é
-desabilitado no build para valer o pacote não-modular, que é justamente o
-1.20.1 — sem isso, o dia em que o stream padrão virar 1.26 a bancada mudaria
-sozinha. O `gerar-config.sh` aborta se a versão não for 1.20.x.
+The shape was measured on a real production nginx (Oracle Linux 9, nginx
+1.20.1), and that is why the base image is `oraclelinux:9`: this is the family
+that brings the layout with three include directories and an nginx compiled
+with `--modules-path`, which gives the third wildcard without a hack. The
+`nginx` appstream module is disabled at build time so that the non-modular
+package wins, which is precisely 1.20.1 — without that, the day the default
+stream turns 1.26 the bench would change on its own. `gerar-config.sh` aborts
+if the version is not 1.20.x.
 
-**Três padrões com curinga**, que só resolvem dentro do container:
+**Three wildcard patterns**, which only resolve inside the container:
 
-| Diretiva | Contexto | Arquivos |
+| Directive | Context | Files |
 |---|---|---|
-| `include /usr/share/nginx/modules/*.conf;` | topo | 4 (pacotes `nginx-mod-*`) |
+| `include /usr/share/nginx/modules/*.conf;` | top level | 4 (`nginx-mod-*` packages) |
 | `include /etc/nginx/conf.d/*.conf;` | `http` | 112 |
 | `include /etc/nginx/default.d/*.conf;` | `server` | 12 |
 
-**130 arquivos na configuração efetiva**, contando `nginx.conf` e
-`mime.types`. O número é conferido no próprio build: `gerar-config.sh` roda
-`nginx -T` e falha se o total não bater. É o volume que torna a latência
-sequencial visível — um alvo com três arquivos passa em tudo e não prova nada.
+**130 files in the effective configuration**, counting `nginx.conf` and
+`mime.types`. The number is checked in the build itself: `gerar-config.sh`
+runs `nginx -T` and fails if the total does not match. It is the volume that
+makes sequential latency visible — a target with three files passes everything
+and proves nothing.
 
-**`nginx -T` legível só por root.** `/etc/nginx` é `0700 root:root` e os
-arquivos `0600`, então nem `nginx -T` nem uma leitura por SFTP enxergam a
-configuração como `ngxtest`. O `sudo` sem senha existe, mas restrito ao
-binário do nginx: é a armadilha da DR5, o alvo onde um cliente que escalasse
-sozinho passaria despercebido.
+**`nginx -T` readable only by root.** `/etc/nginx` is `0700 root:root` and the
+files are `0600`, so neither `nginx -T` nor a read over SFTP sees the
+configuration as `ngxtest`. Passwordless `sudo` exists, but restricted to the
+nginx binary: it is the trap from DR5, the target where a client that
+escalated on its own would go unnoticed.
 
-**Segredo dentro da configuração**, em três formas, para exercitar a redação
-ponta a ponta:
+**A secret inside the configuration**, in three forms, to exercise redaction
+end to end:
 
-- token literal no texto — `proxy_set_header Authorization "Bearer ngx-bancada-token-4f3c9a1b2e";`
-  em `conf.d/05-privado.conf`. É o único que aparece no dump do `nginx -T`, e
-  portanto o que a redação tem de pegar;
+- a literal token in the text — `proxy_set_header Authorization "Bearer ngx-bancada-token-4f3c9a1b2e";`
+  in `conf.d/05-privado.conf`. It is the only one that shows up in the
+  `nginx -T` dump, and therefore the one redaction has to catch;
 - `auth_basic_user_file /etc/nginx/secrets/htpasswd;`
-- `ssl_certificate_key /etc/nginx/secrets/tls.key;` — chave RSA de verdade,
-  gerada no build, porque o `nginx -T` carrega o par e um arquivo falso
-  quebraria o dump.
+- `ssl_certificate_key /etc/nginx/secrets/tls.key;` — a real RSA key,
+  generated at build time, because `nginx -T` loads the pair and a fake file
+  would break the dump.
 
-Nenhum desses segredos é real nem sai do container.
+None of these secrets is real, and none leaves the container.
 
-## A armadilha do glob
+## The glob trap
 
-`armadilha-local/etc/nginx/conf.d/zz-armadilha-local.conf` é um arquivo com o
-mesmo nome de diretório usado dentro do container, mas **no disco local**. Ele
-só entra numa árvore lida da bancada se o `Glob` do parser não estiver
-injetado com o sistema de arquivos remoto — o defeito que a Task R3 corrigiu.
+`armadilha-local/etc/nginx/conf.d/zz-armadilha-local.conf` is a file with the
+same directory name used inside the container, but **on the local disk**. It
+only enters a tree read from the bench if the parser's `Glob` is not injected
+with the remote filesystem — the defect Task R3 fixed.
 
-O marcador `ARMADILHA-LOCAL-NAO-DEVE-APARECER` nunca pode surgir numa
-configuração efetiva lida do container; o smoke test verifica isso, e o teste
-de integração em Go deve apontar seu sistema de arquivos local para esse
-diretório ao exercitar o caso.
+The marker `ARMADILHA-LOCAL-NAO-DEVE-APARECER` must never appear in an
+effective configuration read from the container; the smoke test verifies this,
+and the Go integration test must point its local filesystem at that directory
+when exercising the case.
 
-## Arquivos
+## Files
 
-| Arquivo | Papel |
+| File | Role |
 |---|---|
-| `Dockerfile` | imagem: Oracle Linux 9, nginx 1.20.1, `sshd`, `sudo`, usuário `ngxtest` |
-| `sshd_config.bancada` | `sshd` só por chave; `PermitRootLogin no`, sem senha, com SFTP |
-| `gerar-config.sh` | gera os 130 arquivos no build e confere o total |
-| `entrypoint.sh` | instala a chave pública, gera chaves de host, liga nginx e `sshd` |
-| `smoke.sh` | prova as propriedades acima contra o container no ar |
-| `armadilha-local/` | homônimo local para o teste do glob |
+| `Dockerfile` | image: Oracle Linux 9, nginx 1.20.1, `sshd`, `sudo`, user `ngxtest` |
+| `sshd_config.bancada` | `sshd` by key only; `PermitRootLogin no`, no password, with SFTP |
+| `gerar-config.sh` | generates the 130 files at build time and checks the total |
+| `entrypoint.sh` | installs the public key, generates host keys, starts nginx and `sshd` |
+| `smoke.sh` | proves the properties above against the running container |
+| `armadilha-local/` | local namesake for the glob test |
 
-O container é descartável e roda só local: não tem hardening, e não deveria
-ser exposto. O que ele não tem, de propósito: senha de root, login de root e
-autenticação por senha.
+The container is disposable and runs locally only: it has no hardening, and it
+should not be exposed. What it does not have, on purpose: a root password,
+root login, and password authentication.

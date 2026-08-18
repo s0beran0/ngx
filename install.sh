@@ -1,419 +1,425 @@
 #!/bin/sh
-# Instalador do ngx para Unix (Linux e macOS).
+# The ngx installer for Unix (Linux and macOS).
 #
 #   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh
 #
-# Escrito em sh POSIX de proposito: quem roda "curl | sh" pode nao ter bash,
-# e o instalador precisa funcionar antes de qualquer dependencia existir.
+# Written in POSIX sh on purpose: whoever runs "curl | sh" may not have bash,
+# and the installer has to work before any dependency exists.
 #
-# Ordem deliberada das etapas: tudo que pode falhar sem rede falha ANTES do
-# primeiro download — plataforma, diretorio de instalacao, permissao de
-# escrita e ferramentas de verificacao. Gastar o download para so entao
-# descobrir que falta permissao e desperdicio, e pior: deixa lixo no disco.
+# The order of the steps is deliberate: everything that can fail without the
+# network fails BEFORE the first download — platform, installation directory,
+# write permission and verification tools. Spending the download only to then
+# find out that permission is missing is a waste, and worse: it leaves junk on
+# disk.
 
 set -eu
 
-REPOSITORIO="s0beran0/ngx"
-URL_API="https://api.github.com/repos/${REPOSITORIO}"
-URL_RELEASES="https://github.com/${REPOSITORIO}/releases"
+REPOSITORY="s0beran0/ngx"
+API_URL="https://api.github.com/repos/${REPOSITORY}"
+RELEASES_URL="https://github.com/${REPOSITORY}/releases"
 
 # ---------------------------------------------------------------------------
-# PLACEHOLDER: CHAVE PUBLICA MINISIGN (DD2/DD3)
+# PLACEHOLDER: MINISIGN PUBLIC KEY (DD2/DD3)
 # ---------------------------------------------------------------------------
-# A chave publica do projeto AINDA NAO FOI GERADA (Task D2). O valor abaixo e
-# um placeholder proposital e NAO e uma chave: chave minisign real e uma linha
-# base64 de 56 caracteres comecando por "RW". O texto foi escrito para ser
-# impossivel de confundir com uma chave de verdade — um valor plausivel
-# passaria despercebido em revisao e chegaria a producao verificando nada.
+# The project's public key HAS NOT BEEN GENERATED YET (Task D2). The value
+# below is a deliberate placeholder and is NOT a key: a real minisign key is a
+# single base64 line of 56 characters starting with "RW". The text was written
+# to be impossible to mistake for a real key — a plausible value would slip
+# through review and reach production verifying nothing.
 #
-# Ao gerar a chave (mesma que vai para ngx-minisign.pub e para a variable
-# NGX_PUBLIC_KEY do repositorio), substitua a linha abaixo pela linha de chave
-# do arquivo .pub — a segunda linha, sem o comentario "untrusted comment:".
+# When generating the key (the same one that goes into ngx-minisign.pub and
+# into the repository's NGX_PUBLIC_KEY variable), replace the line below with
+# the key line from the .pub file — the second line, without the "untrusted
+# comment:" part.
 #
-# Enquanto o placeholder estiver aqui, o script RECUSA instalar: ausencia de
-# verificacao e falha, nunca um "segui em frente".
-CHAVE_PUBLICA_MINISIGN="RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW"
-PLACEHOLDER_CHAVE="PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2"
+# While the placeholder is here, the script REFUSES to install: absence of
+# verification is a failure, never a "carried on anyway".
+MINISIGN_PUBLIC_KEY="RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW"
+KEY_PLACEHOLDER="PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2"
 
-# Configuravel por ambiente. Sem valores default surpreendentes.
-# O default usa "-" e nao ":-": NGX_INSTALL_DIR definida e vazia quase sempre
-# vem de uma variavel que nao expandiu como a pessoa esperava, e cair no
-# /usr/local/bin nesse caso instalaria em lugar diferente do pedido.
+# Configurable through the environment. No surprising default values.
+# The default uses "-" and not ":-": NGX_INSTALL_DIR set but empty almost
+# always comes from a variable that did not expand the way the person
+# expected, and falling back to /usr/local/bin in that case would install
+# somewhere other than what was asked for.
 NGX_INSTALL_DIR="${NGX_INSTALL_DIR-/usr/local/bin}"
 NGX_CHANNEL="${NGX_CHANNEL:-stable}"
 NGX_VERSION="${NGX_VERSION:-}"
 NGX_ALLOW_UNVERIFIED="${NGX_ALLOW_UNVERIFIED:-0}"
 
-DIRETORIO_TEMPORARIO=""
-ARQUIVO_PARCIAL=""
-FERRAMENTA_HTTP=""
-FERRAMENTA_SHA256=""
-ASSINATURA_VERIFICADA=0
+TEMP_DIR=""
+PARTIAL_FILE=""
+HTTP_TOOL=""
+SHA256_TOOL=""
+SIGNATURE_CHECKED=0
 
 # ---------------------------------------------------------------------------
-# Utilidades
+# Utilities
 # ---------------------------------------------------------------------------
 
-erro() {
-    printf 'erro: %s\n' "$1" >&2
+error() {
+    printf 'error: %s\n' "$1" >&2
 }
 
-linha() {
+line() {
     printf '%s\n' "$1" >&2
 }
 
-informa() {
+inform() {
     printf '%s\n' "$1" >&2
 }
 
-limpar() {
-    if [ -n "$ARQUIVO_PARCIAL" ] && [ -e "$ARQUIVO_PARCIAL" ]; then
-        rm -f "$ARQUIVO_PARCIAL"
+cleanup() {
+    if [ -n "$PARTIAL_FILE" ] && [ -e "$PARTIAL_FILE" ]; then
+        rm -f "$PARTIAL_FILE"
     fi
-    if [ -n "$DIRETORIO_TEMPORARIO" ] && [ -d "$DIRETORIO_TEMPORARIO" ]; then
-        rm -rf "$DIRETORIO_TEMPORARIO"
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
     fi
 }
-trap limpar EXIT
-trap 'limpar; exit 130' INT
-trap 'limpar; exit 143' TERM
-trap 'limpar; exit 129' HUP
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
 
-ajuda() {
-    cat <<'FIM'
-install.sh — instalador do ngx para Linux e macOS
+show_help() {
+    cat <<'END'
+install.sh — the ngx installer for Linux and macOS
 
-USO
+USAGE
   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh
   sh install.sh [--help]
 
-VARIAVEIS DE AMBIENTE
-  NGX_INSTALL_DIR      Diretorio de instalacao. Default: /usr/local/bin
-                       Um diretorio do sistema exige privilegio; o script nunca
-                       chama sudo sozinho, so diz a linha exata a rodar.
-  NGX_CHANNEL          stable (default) ou beta. beta inclui pre-lancamentos
+ENVIRONMENT VARIABLES
+  NGX_INSTALL_DIR      Installation directory. Default: /usr/local/bin
+                       A system directory requires privilege; the script never
+                       calls sudo on its own, it only prints the exact line to
+                       run.
+  NGX_CHANNEL          stable (default) or beta. beta includes pre-releases
                        (-rc, -beta, -alpha).
-  NGX_VERSION          Versao fixa, ex: v0.2.0. Quando definida, a API do
-                       GitHub nao e consultada.
-  NGX_ALLOW_UNVERIFIED Se 1, permite instalar quando a assinatura minisign nao
-                       PODE ser verificada (minisign ausente ou chave publica
-                       ainda nao gerada). O aviso e impresso em destaque. NAO
-                       ignora assinatura invalida nem checksum divergente:
-                       esses abortam sempre, sem excecao.
+  NGX_VERSION          Pinned version, e.g. v0.2.0. When set, the GitHub API
+                       is not queried.
+  NGX_ALLOW_UNVERIFIED If 1, allows installing when the minisign signature
+                       CANNOT be verified (minisign missing or public key not
+                       generated yet). The warning is printed prominently. It
+                       does NOT ignore an invalid signature or a mismatched
+                       checksum: those always abort, no exceptions.
 
-EXEMPLOS
-  # instalacao no sistema, com privilegio
+EXAMPLES
+  # system-wide installation, with privilege
   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh
 
-  # instalacao sem privilegio, no diretorio do usuario
+  # unprivileged installation, in the user's directory
   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \
     | NGX_INSTALL_DIR=$HOME/.local/bin sh
 
-  # versao fixa
+  # pinned version
   curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \
     | NGX_VERSION=v0.2.0 sh
 
-VERIFICACAO
-  O checksum SHA256 e conferido sempre e nao tem como ser desligado.
-  A assinatura minisign do checksums.txt e conferida quando o minisign esta
-  instalado e a chave publica do projeto esta embutida neste script.
-FIM
+VERIFICATION
+  The SHA256 checksum is always checked and there is no way to turn it off.
+  The minisign signature of checksums.txt is checked when minisign is
+  installed and the project's public key is embedded in this script.
+END
 }
 
-existe() {
+have() {
     command -v "$1" >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 1 — argumentos
+# Step 1 — arguments
 # ---------------------------------------------------------------------------
 
-for argumento in "$@"; do
-    case "$argumento" in
+for argument in "$@"; do
+    case "$argument" in
         -h|--help)
-            ajuda
+            show_help
             exit 0
             ;;
         *)
-            erro "argumento desconhecido: $argumento"
-            linha ""
-            linha "rode 'sh install.sh --help' para ver as opcoes."
+            error "unknown argument: $argument"
+            line ""
+            line "run 'sh install.sh --help' to see the options."
             exit 2
             ;;
     esac
 done
 
 # ---------------------------------------------------------------------------
-# Etapa 2 — plataforma
+# Step 2 — platform
 # ---------------------------------------------------------------------------
 
-detectar_plataforma() {
-    sistema_cru="$(uname -s)"
-    arquitetura_crua="$(uname -m)"
+detect_platform() {
+    raw_system="$(uname -s)"
+    raw_arch="$(uname -m)"
 
-    case "$sistema_cru" in
-        Linux)  SISTEMA="linux" ;;
-        Darwin) SISTEMA="darwin" ;;
+    case "$raw_system" in
+        Linux)  SYSTEM="linux" ;;
+        Darwin) SYSTEM="darwin" ;;
         MINGW*|MSYS*|CYGWIN*|Windows_NT)
-            erro "este script e para Linux e macOS; o sistema detectado foi $sistema_cru"
-            linha ""
-            linha "no Windows use o instalador em PowerShell:"
-            linha "  irm https://raw.githubusercontent.com/${REPOSITORIO}/main/install.ps1 | iex"
+            error "this script is for Linux and macOS; the detected system was $raw_system"
+            line ""
+            line "on Windows use the PowerShell installer:"
+            line "  irm https://raw.githubusercontent.com/${REPOSITORY}/main/install.ps1 | iex"
             exit 1
             ;;
         *)
-            erro "sistema operacional nao suportado: $sistema_cru"
-            linha ""
-            linha "o ngx publica binarios para linux e darwin (macOS)."
-            linha "para outras plataformas, compile do fonte:"
-            linha "  git clone https://github.com/${REPOSITORIO}.git && cd ngx && make build"
+            error "unsupported operating system: $raw_system"
+            line ""
+            line "ngx publishes binaries for linux and darwin (macOS)."
+            line "for other platforms, build from source:"
+            line "  git clone https://github.com/${REPOSITORY}.git && cd ngx && make build"
             exit 1
             ;;
     esac
 
-    case "$arquitetura_crua" in
-        x86_64|amd64)   ARQUITETURA="amd64" ;;
-        aarch64|arm64)  ARQUITETURA="arm64" ;;
+    case "$raw_arch" in
+        x86_64|amd64)   ARCH="amd64" ;;
+        aarch64|arm64)  ARCH="arm64" ;;
         *)
-            erro "arquitetura nao suportada: ${sistema_cru}/${arquitetura_crua}"
-            linha ""
-            linha "o ngx publica binarios para amd64 (x86_64) e arm64 (aarch64)."
-            linha "para ${arquitetura_crua}, compile do fonte:"
-            linha "  git clone https://github.com/${REPOSITORIO}.git && cd ngx && make build"
+            error "unsupported architecture: ${raw_system}/${raw_arch}"
+            line ""
+            line "ngx publishes binaries for amd64 (x86_64) and arm64 (aarch64)."
+            line "for ${raw_arch}, build from source:"
+            line "  git clone https://github.com/${REPOSITORY}.git && cd ngx && make build"
             exit 1
             ;;
     esac
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 3 — diretorio de instalacao e permissao
+# Step 3 — installation directory and permission
 # ---------------------------------------------------------------------------
 #
-# O script NAO chama sudo. Escalar privilegio por conta propria dentro de algo
-# que se executa via "curl | sh" e exatamente o que ninguem deveria aceitar
-# rodar: quem decide elevar e a pessoa, com o comando na frente dos olhos.
+# The script does NOT call sudo. Escalating privilege on its own inside
+# something executed through "curl | sh" is exactly what nobody should agree
+# to run: the person decides to elevate, with the command in front of them.
 
-mensagem_de_privilegio() {
-    motivo="$1"
-    erro "$motivo"
-    linha ""
-    linha "rode a instalacao com privilegio:"
-    linha "  curl -fsSL https://raw.githubusercontent.com/${REPOSITORIO}/main/install.sh | sudo sh"
-    linha ""
-    linha "ou instale num diretorio seu, sem privilegio:"
-    linha "  curl -fsSL https://raw.githubusercontent.com/${REPOSITORIO}/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh"
-    linha ""
-    linha "se escolher a segunda, garanta que \$HOME/.local/bin esta no PATH."
+privilege_message() {
+    reason="$1"
+    error "$reason"
+    line ""
+    line "run the installation with privilege:"
+    line "  curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | sudo sh"
+    line ""
+    line "or install into a directory of your own, without privilege:"
+    line "  curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh"
+    line ""
+    line "if you pick the second, make sure \$HOME/.local/bin is in the PATH."
     exit 1
 }
 
-preparar_diretorio() {
+prepare_directory() {
     if [ -z "$NGX_INSTALL_DIR" ]; then
-        erro "NGX_INSTALL_DIR esta definida e vazia"
-        linha ""
-        linha "deixe a variavel indefinida para usar /usr/local/bin, ou aponte"
-        linha "para um diretorio: NGX_INSTALL_DIR=\$HOME/.local/bin"
+        error "NGX_INSTALL_DIR is set and empty"
+        line ""
+        line "leave the variable unset to use /usr/local/bin, or point it at a"
+        line "directory: NGX_INSTALL_DIR=\$HOME/.local/bin"
         exit 2
     fi
 
     if [ -e "$NGX_INSTALL_DIR" ] && [ ! -d "$NGX_INSTALL_DIR" ]; then
-        erro "$NGX_INSTALL_DIR existe e nao e um diretorio"
+        error "$NGX_INSTALL_DIR exists and is not a directory"
         exit 1
     fi
 
     if [ ! -d "$NGX_INSTALL_DIR" ]; then
         if ! mkdir -p "$NGX_INSTALL_DIR" 2>/dev/null; then
-            mensagem_de_privilegio "nao foi possivel criar o diretorio $NGX_INSTALL_DIR"
+            privilege_message "could not create the directory $NGX_INSTALL_DIR"
         fi
     fi
 
-    # A escrita real e o unico teste que nao mente: [ -w ] erra em sistema de
-    # arquivos montado somente leitura, em ACL e em container com usuario
-    # mapeado.
-    arquivo_de_teste="${NGX_INSTALL_DIR}/.ngx-teste-de-escrita.$$"
-    if ! (umask 077 && : > "$arquivo_de_teste") 2>/dev/null; then
-        mensagem_de_privilegio "sem permissao de escrita em $NGX_INSTALL_DIR"
+    # Actually writing is the only test that does not lie: [ -w ] gets it
+    # wrong on a read-only mounted filesystem, on ACLs and in a container with
+    # a mapped user.
+    test_file="${NGX_INSTALL_DIR}/.ngx-write-test.$$"
+    if ! (umask 077 && : > "$test_file") 2>/dev/null; then
+        privilege_message "no write permission in $NGX_INSTALL_DIR"
     fi
-    rm -f "$arquivo_de_teste"
+    rm -f "$test_file"
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 4 — ferramentas e verificacao (antes de baixar)
+# Step 4 — tools and verification (before downloading)
 # ---------------------------------------------------------------------------
 
-escolher_ferramenta_http() {
-    if existe curl; then
-        FERRAMENTA_HTTP="curl"
-    elif existe wget; then
-        FERRAMENTA_HTTP="wget"
+choose_http_tool() {
+    if have curl; then
+        HTTP_TOOL="curl"
+    elif have wget; then
+        HTTP_TOOL="wget"
     else
-        erro "nem curl nem wget foram encontrados"
-        linha ""
-        linha "instale um dos dois e rode de novo. em Debian/Ubuntu:"
-        linha "  apt-get install -y curl"
+        error "neither curl nor wget was found"
+        line ""
+        line "install one of them and run again. on Debian/Ubuntu:"
+        line "  apt-get install -y curl"
         exit 1
     fi
 }
 
-escolher_ferramenta_sha256() {
-    if existe sha256sum; then
-        FERRAMENTA_SHA256="sha256sum"
-    elif existe shasum; then
-        FERRAMENTA_SHA256="shasum"
+choose_sha256_tool() {
+    if have sha256sum; then
+        SHA256_TOOL="sha256sum"
+    elif have shasum; then
+        SHA256_TOOL="shasum"
     else
-        erro "nenhuma ferramenta de SHA256 encontrada (sha256sum ou shasum)"
-        linha ""
-        linha "o checksum e obrigatorio e nao tem como ser desligado: instalar"
-        linha "um binario sem conferir o hash aceitaria qualquer download"
-        linha "corrompido ou trocado no caminho."
-        linha ""
-        linha "em Debian/Ubuntu: apt-get install -y coreutils"
-        linha "em Alpine:        apk add coreutils"
+        error "no SHA256 tool found (sha256sum or shasum)"
+        line ""
+        line "the checksum is mandatory and there is no way to turn it off:"
+        line "installing a binary without checking the hash would accept any"
+        line "download that came corrupted or was swapped along the way."
+        line ""
+        line "on Debian/Ubuntu: apt-get install -y coreutils"
+        line "on Alpine:        apk add coreutils"
         exit 1
     fi
 }
 
-# Decide, ANTES de baixar, se a assinatura podera ser verificada. Sao tres
-# desfechos, e nenhum deles e silencioso:
-#   - da para verificar          -> segue, e a assinatura sera conferida
-#   - nao da, sem autorizacao    -> aborta aqui, dizendo por que e como resolver
-#   - nao da, com autorizacao    -> segue com aviso em destaque
-# openssl_verifica_ed25519 diz se este openssl consegue fazer as duas contas
-# que a assinatura minisign exige. Nao basta existir openssl: o LibreSSL que a
-# Apple distribui, por exemplo, nao tem BLAKE2b. Testar a capacidade e mais
-# confiavel que ler numero de versao.
-openssl_verifica_ed25519() {
-    existe openssl || return 1
+# Decides, BEFORE downloading, whether the signature can be verified. There
+# are three outcomes, and none of them is silent:
+#   - it can be verified       -> carry on, and the signature will be checked
+#   - it cannot, unauthorized  -> abort here, saying why and how to fix it
+#   - it cannot, authorized    -> carry on with a prominent warning
+# openssl_can_verify_ed25519 says whether this openssl can do the two
+# computations a minisign signature requires. It is not enough for openssl to
+# exist: the LibreSSL Apple ships, for instance, has no BLAKE2b. Testing the
+# capability is more reliable than reading a version number.
+openssl_can_verify_ed25519() {
+    have openssl || return 1
     printf x | openssl dgst -blake2b512 >/dev/null 2>&1 || return 1
     openssl list -public-key-algorithms 2>/dev/null | grep -qi ed25519 || return 1
     return 0
 }
 
-# verificar_assinatura_com_openssl reimplementa a verificacao do minisign.
+# verify_signature_with_openssl reimplements minisign's verification.
 #
-# Formato, para quem for mexer: a chave publica e base64 de 2 bytes de
-# algoritmo + 8 de key id + 32 da chave Ed25519; a assinatura, na segunda linha
-# do .minisig, e base64 de 2 + 8 + 64 bytes de assinatura. O algoritmo "ED"
-# significa pre-hasheado: assina-se o BLAKE2b-512 do arquivo, nao o arquivo.
+# The format, for whoever comes to touch this: the public key is base64 of 2
+# algorithm bytes + 8 of key id + 32 of the Ed25519 key; the signature, on the
+# second line of the .minisig, is base64 of 2 + 8 + 64 signature bytes. The
+# "ED" algorithm means pre-hashed: what is signed is the file's BLAKE2b-512,
+# not the file.
 #
-# O prefixo DER embutido abaixo transforma os 32 bytes crus numa chave publica
-# que o openssl aceita. Ele e fixo para Ed25519.
-verificar_assinatura_com_openssl() {
-    caminho_assinatura="$1"
-    tmp_verif="$(mktemp -d)" || { erro "nao foi possivel criar diretorio temporario"; exit 1; }
+# The DER prefix embedded below turns the 32 raw bytes into a public key
+# openssl accepts. It is fixed for Ed25519.
+verify_signature_with_openssl() {
+    signature_path="$1"
+    tmp_verify="$(mktemp -d)" || { error "could not create temporary directory"; exit 1; }
 
-    printf %s "$CHAVE_PUBLICA_MINISIGN" | openssl base64 -d -A 2>/dev/null \
-        | tail -c 32 > "${tmp_verif}/pub.raw"
-    # 302a300506032b6570032100, em octal para nao depender de xxd.
-    printf '\060\052\060\005\006\003\053\145\160\003\041\000' > "${tmp_verif}/pub.der"
-    cat "${tmp_verif}/pub.raw" >> "${tmp_verif}/pub.der"
+    printf %s "$MINISIGN_PUBLIC_KEY" | openssl base64 -d -A 2>/dev/null \
+        | tail -c 32 > "${tmp_verify}/pub.raw"
+    # 302a300506032b6570032100, in octal so as not to depend on xxd.
+    printf '\060\052\060\005\006\003\053\145\160\003\041\000' > "${tmp_verify}/pub.der"
+    cat "${tmp_verify}/pub.raw" >> "${tmp_verify}/pub.der"
 
-    sed -n 2p "$caminho_assinatura" | openssl base64 -d -A 2>/dev/null \
-        | tail -c 64 > "${tmp_verif}/sig.bin"
+    sed -n 2p "$signature_path" | openssl base64 -d -A 2>/dev/null \
+        | tail -c 64 > "${tmp_verify}/sig.bin"
 
-    openssl dgst -blake2b512 -binary "$CAMINHO_CHECKSUMS" > "${tmp_verif}/digest.bin" 2>/dev/null
+    openssl dgst -blake2b512 -binary "$CHECKSUMS_PATH" > "${tmp_verify}/digest.bin" 2>/dev/null
 
-    if ! openssl pkeyutl -verify -pubin -inkey "${tmp_verif}/pub.der" -keyform DER \
-        -rawin -in "${tmp_verif}/digest.bin" -sigfile "${tmp_verif}/sig.bin" >/dev/null 2>&1; then
-        rm -rf "$tmp_verif"
-        erro "a assinatura de checksums.txt NAO confere (verificada com openssl)"
-        linha ""
-        linha "o arquivo baixado nao foi assinado pela chave do projeto. isso"
-        linha "nao e erro de rede: e um artefato que nao deveria existir."
-        linha ""
-        linha "nada foi instalado. nao contorne este erro."
+    if ! openssl pkeyutl -verify -pubin -inkey "${tmp_verify}/pub.der" -keyform DER \
+        -rawin -in "${tmp_verify}/digest.bin" -sigfile "${tmp_verify}/sig.bin" >/dev/null 2>&1; then
+        rm -rf "$tmp_verify"
+        error "the signature of checksums.txt does NOT check out (verified with openssl)"
+        line ""
+        line "the downloaded file was not signed by the project's key. this is"
+        line "not a network error: it is an artifact that should not exist."
+        line ""
+        line "nothing was installed. do not work around this error."
         exit 1
     fi
 
-    rm -rf "$tmp_verif"
-    informa "assinatura conferida (via openssl; minisign nao esta instalado)."
+    rm -rf "$tmp_verify"
+    inform "signature checked (via openssl; minisign is not installed)."
 }
 
-avaliar_verificacao_de_assinatura() {
-    motivo=""
+assess_signature_verification() {
+    reason=""
 
-    if [ "$CHAVE_PUBLICA_MINISIGN" = "$PLACEHOLDER_CHAVE" ]; then
-        motivo="a chave publica minisign do projeto ainda nao foi gerada e este script carrega um placeholder"
-    elif existe minisign; then
-        VERIFICADOR="minisign"
-    elif openssl_verifica_ed25519; then
-        # A maioria dos servidores nao tem minisign, e exigir que instalem um
-        # pacote so para instalar o ngx e atrito que empurra todo mundo para o
-        # NGX_ALLOW_UNVERIFIED -- ou seja, a exigencia de seguranca acabaria
-        # produzindo menos verificacao, nao mais.
+    if [ "$MINISIGN_PUBLIC_KEY" = "$KEY_PLACEHOLDER" ]; then
+        reason="the project's minisign public key has not been generated yet and this script carries a placeholder"
+    elif have minisign; then
+        VERIFIER="minisign"
+    elif openssl_can_verify_ed25519; then
+        # Most servers do not have minisign, and requiring them to install a
+        # package just to install ngx is friction that pushes everyone toward
+        # NGX_ALLOW_UNVERIFIED -- that is, the security requirement would end
+        # up producing less verification, not more.
         #
-        # A assinatura minisign e Ed25519 sobre BLAKE2b-512 (modo pre-hasheado
-        # "ED"), e openssl 3 faz as duas coisas. Verificado numa Oracle Linux 9
-        # real, que nao tem minisign e tem openssl.
-        VERIFICADOR="openssl"
+        # A minisign signature is Ed25519 over BLAKE2b-512 (pre-hashed "ED"
+        # mode), and openssl 3 does both. Verified on a real Oracle Linux 9,
+        # which has no minisign and does have openssl.
+        VERIFIER="openssl"
     else
-        motivo="nem o minisign nem um openssl com Ed25519 e BLAKE2b estao disponiveis"
+        reason="neither minisign nor an openssl with Ed25519 and BLAKE2b is available"
     fi
 
-    if [ -z "$motivo" ]; then
-        ASSINATURA_VERIFICADA=1
+    if [ -z "$reason" ]; then
+        SIGNATURE_CHECKED=1
         return 0
     fi
 
     if [ "$NGX_ALLOW_UNVERIFIED" = "1" ]; then
-        ASSINATURA_VERIFICADA=0
-        linha ""
-        linha "############################################################"
-        linha "# AVISO: INSTALANDO SEM VERIFICAR A ASSINATURA"
-        linha "#"
-        linha "# $motivo."
-        linha "#"
-        linha "# NGX_ALLOW_UNVERIFIED=1 esta definida, entao a instalacao"
-        linha "# segue. O checksum SHA256 ainda sera conferido, mas ele so"
-        linha "# protege contra download corrompido: nao protege contra um"
-        linha "# release publicado por quem tenha comprometido a conta do"
-        linha "# GitHub, porque nesse caso o checksum viria adulterado junto."
-        linha "############################################################"
-        linha ""
+        SIGNATURE_CHECKED=0
+        line ""
+        line "############################################################"
+        line "# WARNING: INSTALLING WITHOUT VERIFYING THE SIGNATURE"
+        line "#"
+        line "# $reason."
+        line "#"
+        line "# NGX_ALLOW_UNVERIFIED=1 is set, so the installation carries"
+        line "# on. The SHA256 checksum will still be checked, but it only"
+        line "# protects against a corrupted download: it does not protect"
+        line "# against a release published by whoever has compromised the"
+        line "# GitHub account, because in that case the checksum would come"
+        line "# tampered with as well."
+        line "############################################################"
+        line ""
         return 0
     fi
 
-    erro "a assinatura do release nao pode ser verificada"
-    linha ""
-    linha "motivo: $motivo."
-    linha ""
-    linha "o ngx roda como root em servidores que servem trafego. instalar um"
-    linha "binario sem verificar de onde ele veio nao e um detalhe de higiene."
-    linha "por isso o script para aqui em vez de seguir em frente."
-    linha ""
-    linha "como resolver:"
-    if [ "$CHAVE_PUBLICA_MINISIGN" = "$PLACEHOLDER_CHAVE" ]; then
-        linha "  a chave publica ainda nao existe — nao ha o que instalar do seu"
-        linha "  lado. acompanhe ${URL_RELEASES} e use uma versao"
-        linha "  deste script publicada depois da primeira release assinada."
+    error "the release signature could not be verified"
+    line ""
+    line "reason: $reason."
+    line ""
+    line "ngx runs as root on servers that serve traffic. installing a binary"
+    line "without verifying where it came from is not a hygiene detail."
+    line "that is why the script stops here instead of carrying on."
+    line ""
+    line "how to fix it:"
+    if [ "$MINISIGN_PUBLIC_KEY" = "$KEY_PLACEHOLDER" ]; then
+        line "  the public key does not exist yet — there is nothing you can do"
+        line "  on your side. follow ${RELEASES_URL} and use a version"
+        line "  of this script published after the first signed release."
     else
-        linha "  instale o minisign OU um openssl 3 e rode de novo:"
-        linha "    Debian/Ubuntu:   apt-get install -y minisign"
-        linha "    Alpine:          apk add minisign"
-        linha "    RHEL/Oracle/Fed: dnf install -y openssl"
-        linha "    macOS:           brew install minisign"
+        line "  install minisign OR an openssl 3 and run again:"
+        line "    Debian/Ubuntu:   apt-get install -y minisign"
+        line "    Alpine:          apk add minisign"
+        line "    RHEL/Oracle/Fed: dnf install -y openssl"
+        line "    macOS:           brew install minisign"
     fi
-    linha ""
-    linha "se voce aceita o risco de forma consciente, e so nesse caso:"
-    linha "  NGX_ALLOW_UNVERIFIED=1 sh install.sh"
+    line ""
+    line "if you accept the risk knowingly, and only in that case:"
+    line "  NGX_ALLOW_UNVERIFIED=1 sh install.sh"
     exit 1
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 5 — resolucao da versao
+# Step 5 — version resolution
 # ---------------------------------------------------------------------------
 
-# Baixa uma URL para um arquivo e imprime o codigo HTTP no stdout.
-baixar_para() {
+# Downloads a URL into a file and prints the HTTP code on stdout.
+download_to() {
     url="$1"
-    destino="$2"
+    target="$2"
 
-    if [ "$FERRAMENTA_HTTP" = "curl" ]; then
+    if [ "$HTTP_TOOL" = "curl" ]; then
         curl --proto '=https' --tlsv1.2 -sSL \
             --connect-timeout 15 --retry 2 --retry-delay 1 \
-            -o "$destino" -w '%{http_code}' "$url" 2>/dev/null || printf '000'
+            -o "$target" -w '%{http_code}' "$url" 2>/dev/null || printf '000'
     else
-        if wget -q --timeout=15 --tries=3 -O "$destino" "$url" 2>/dev/null; then
+        if wget -q --timeout=15 --tries=3 -O "$target" "$url" 2>/dev/null; then
             printf '200'
         else
             printf '000'
@@ -421,280 +427,280 @@ baixar_para() {
     fi
 }
 
-falha_de_release() {
-    codigo="$1"
-    onde="$2"
+release_failure() {
+    code="$1"
+    where="$2"
 
-    case "$codigo" in
+    case "$code" in
         404)
-            erro "nenhuma release encontrada para ${REPOSITORIO} (${onde} respondeu 404)"
-            linha ""
-            linha "as duas causas possiveis:"
-            linha "  1. o projeto ainda nao publicou nenhuma release. confira em"
-            linha "     ${URL_RELEASES}"
+            error "no release found for ${REPOSITORY} (${where} answered 404)"
+            line ""
+            line "the two possible causes:"
+            line "  1. the project has not published any release yet. check at"
+            line "     ${RELEASES_URL}"
             if [ -n "$NGX_VERSION" ]; then
-                linha "  2. a versao pedida, ${NGX_VERSION}, nao existe. o nome da tag"
-                linha "     inclui o 'v' inicial: NGX_VERSION=v0.1.0, nao 0.1.0."
+                line "  2. the requested version, ${NGX_VERSION}, does not exist. the"
+                line "     tag name includes the leading 'v': NGX_VERSION=v0.1.0, not 0.1.0."
             else
-                linha "  2. so existem pre-lancamentos. tente o canal beta:"
-                linha "     NGX_CHANNEL=beta sh install.sh"
+                line "  2. only pre-releases exist. try the beta channel:"
+                line "     NGX_CHANNEL=beta sh install.sh"
             fi
             ;;
         403|429)
-            erro "a API do GitHub recusou a consulta (HTTP ${codigo}) — provavel limite de requisicoes por IP"
-            linha ""
-            linha "o limite anonimo e por hora e por endereco. duas saidas:"
-            linha "  - espere e tente de novo, ou"
-            linha "  - fixe a versao, que dispensa a consulta a API:"
-            linha "      NGX_VERSION=v0.1.0 sh install.sh"
+            error "the GitHub API refused the query (HTTP ${code}) — likely a per-IP rate limit"
+            line ""
+            line "the anonymous limit is per hour and per address. two ways out:"
+            line "  - wait and try again, or"
+            line "  - pin the version, which skips the API query:"
+            line "      NGX_VERSION=v0.1.0 sh install.sh"
             ;;
         000)
-            erro "nao foi possivel falar com ${onde}"
-            linha ""
-            linha "verifique a conexao de rede, o DNS e se ha proxy exigindo"
-            linha "configuracao (https_proxy). nenhum arquivo foi escrito."
+            error "could not talk to ${where}"
+            line ""
+            line "check the network connection, DNS and whether a proxy requires"
+            line "configuration (https_proxy). no file was written."
             ;;
         *)
-            erro "resposta inesperada de ${onde}: HTTP ${codigo}"
-            linha ""
-            linha "confira o estado do servico em https://www.githubstatus.com"
+            error "unexpected response from ${where}: HTTP ${code}"
+            line ""
+            line "check the service status at https://www.githubstatus.com"
             ;;
     esac
     exit 1
 }
 
-# Extrai o primeiro "tag_name" de um JSON de release. Sem jq: o instalador nao
-# pode depender de ferramenta que a maquina talvez nao tenha.
-primeira_tag() {
+# Extracts the first "tag_name" from a release JSON. No jq: the installer
+# cannot depend on a tool the machine may not have.
+first_tag() {
     tr ',' '\n' < "$1" \
         | grep -m 1 '"tag_name"' \
         | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//'
 }
 
-resolver_versao() {
+resolve_version() {
     if [ -n "$NGX_VERSION" ]; then
-        VERSAO="$NGX_VERSION"
+        VERSION="$NGX_VERSION"
         return 0
     fi
 
     case "$NGX_CHANNEL" in
-        stable) url_consulta="${URL_API}/releases/latest" ;;
-        beta)   url_consulta="${URL_API}/releases?per_page=1" ;;
+        stable) query_url="${API_URL}/releases/latest" ;;
+        beta)   query_url="${API_URL}/releases?per_page=1" ;;
         *)
-            erro "canal desconhecido: $NGX_CHANNEL"
-            linha ""
-            linha "os valores aceitos sao 'stable' (default) e 'beta'."
+            error "unknown channel: $NGX_CHANNEL"
+            line ""
+            line "the accepted values are 'stable' (default) and 'beta'."
             exit 2
             ;;
     esac
 
-    resposta="${DIRETORIO_TEMPORARIO}/release.json"
-    codigo="$(baixar_para "$url_consulta" "$resposta")"
+    response="${TEMP_DIR}/release.json"
+    code="$(download_to "$query_url" "$response")"
 
-    if [ "$codigo" != "200" ]; then
-        falha_de_release "$codigo" "a API do GitHub"
+    if [ "$code" != "200" ]; then
+        release_failure "$code" "the GitHub API"
     fi
 
-    VERSAO="$(primeira_tag "$resposta")"
+    VERSION="$(first_tag "$response")"
 
-    if [ -z "$VERSAO" ]; then
-        erro "a API do GitHub respondeu, mas nenhuma release foi encontrada no canal ${NGX_CHANNEL}"
-        linha ""
+    if [ -z "$VERSION" ]; then
+        error "the GitHub API answered, but no release was found in the ${NGX_CHANNEL} channel"
+        line ""
         if [ "$NGX_CHANNEL" = "beta" ]; then
-            linha "o canal beta lista todas as releases, inclusive pre-lancamentos,"
-            linha "e a lista veio vazia: o projeto ainda nao publicou nenhuma."
-            linha "confira em ${URL_RELEASES}"
+            line "the beta channel lists every release, pre-releases included,"
+            line "and the list came back empty: the project has not published any."
+            line "check at ${RELEASES_URL}"
         else
-            linha "confira em ${URL_RELEASES}. se o projeto so publicou"
-            linha "pre-lancamentos ate agora, use: NGX_CHANNEL=beta sh install.sh"
+            line "check at ${RELEASES_URL}. if the project has only published"
+            line "pre-releases so far, use: NGX_CHANNEL=beta sh install.sh"
         fi
         exit 1
     fi
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 6 — download e verificacao
+# Step 6 — download and verification
 # ---------------------------------------------------------------------------
 
-sha256_de() {
-    if [ "$FERRAMENTA_SHA256" = "sha256sum" ]; then
+sha256_of() {
+    if [ "$SHA256_TOOL" = "sha256sum" ]; then
         sha256sum "$1" | cut -d ' ' -f 1
     else
         shasum -a 256 "$1" | cut -d ' ' -f 1
     fi
 }
 
-baixar_artefatos() {
-    # O goreleaser deriva o nome do arquivo da versao sem o "v" inicial
-    # (name_template usa .Version, que ja vem sem prefixo).
-    versao_sem_v="${VERSAO#v}"
-    NOME_ARQUIVO="ngx_${versao_sem_v}_${SISTEMA}_${ARQUITETURA}.tar.gz"
-    base_download="${URL_RELEASES}/download/${VERSAO}"
+download_artifacts() {
+    # goreleaser derives the file name from the version without the leading
+    # "v" (name_template uses .Version, which already comes without prefix).
+    version_no_v="${VERSION#v}"
+    FILE_NAME="ngx_${version_no_v}_${SYSTEM}_${ARCH}.tar.gz"
+    download_base="${RELEASES_URL}/download/${VERSION}"
 
-    CAMINHO_TARBALL="${DIRETORIO_TEMPORARIO}/${NOME_ARQUIVO}"
-    CAMINHO_CHECKSUMS="${DIRETORIO_TEMPORARIO}/checksums.txt"
+    TARBALL_PATH="${TEMP_DIR}/${FILE_NAME}"
+    CHECKSUMS_PATH="${TEMP_DIR}/checksums.txt"
 
-    informa "baixando ngx ${VERSAO} para ${SISTEMA}/${ARQUITETURA}..."
+    inform "downloading ngx ${VERSION} for ${SYSTEM}/${ARCH}..."
 
-    codigo="$(baixar_para "${base_download}/${NOME_ARQUIVO}" "$CAMINHO_TARBALL")"
-    if [ "$codigo" != "200" ]; then
-        if [ "$codigo" = "404" ]; then
-            # O GitHub responde 404 tanto para tag inexistente quanto para
-            # arquivo ausente numa release que existe. Nao da para distinguir
-            # os dois pelo codigo, entao a mensagem cobre os dois em vez de
-            # afirmar o que nao foi verificado.
-            erro "nao foi possivel baixar ${NOME_ARQUIVO} da release ${VERSAO} (HTTP 404)"
-            linha ""
-            linha "as duas causas possiveis:"
-            linha "  1. a release ${VERSAO} nao existe. o nome da tag inclui o 'v'"
-            linha "     inicial: NGX_VERSION=v0.1.0, nao 0.1.0."
-            linha "  2. a release existe mas nao publica o artefato de"
-            linha "     ${SISTEMA}/${ARQUITETURA}."
-            linha ""
-            linha "confira o que existe em:"
-            linha "  ${URL_RELEASES}/tag/${VERSAO}"
+    code="$(download_to "${download_base}/${FILE_NAME}" "$TARBALL_PATH")"
+    if [ "$code" != "200" ]; then
+        if [ "$code" = "404" ]; then
+            # GitHub answers 404 both for a nonexistent tag and for a missing
+            # file in a release that does exist. There is no way to tell the
+            # two apart by the code, so the message covers both instead of
+            # asserting something that was not verified.
+            error "could not download ${FILE_NAME} from release ${VERSION} (HTTP 404)"
+            line ""
+            line "the two possible causes:"
+            line "  1. release ${VERSION} does not exist. the tag name includes"
+            line "     the leading 'v': NGX_VERSION=v0.1.0, not 0.1.0."
+            line "  2. the release exists but does not publish the artifact for"
+            line "     ${SYSTEM}/${ARCH}."
+            line ""
+            line "check what exists at:"
+            line "  ${RELEASES_URL}/tag/${VERSION}"
             exit 1
         fi
-        falha_de_release "$codigo" "o download da release"
+        release_failure "$code" "the release download"
     fi
 
-    codigo="$(baixar_para "${base_download}/checksums.txt" "$CAMINHO_CHECKSUMS")"
-    if [ "$codigo" != "200" ]; then
-        erro "a release ${VERSAO} nao publica checksums.txt (HTTP ${codigo})"
-        linha ""
-        linha "sem o checksum nao ha como conferir o download, e instalar sem"
-        linha "conferir nao e uma opcao. confira a release em:"
-        linha "  ${URL_RELEASES}/tag/${VERSAO}"
+    code="$(download_to "${download_base}/checksums.txt" "$CHECKSUMS_PATH")"
+    if [ "$code" != "200" ]; then
+        error "release ${VERSION} does not publish checksums.txt (HTTP ${code})"
+        line ""
+        line "without the checksum there is no way to check the download, and"
+        line "installing without checking is not an option. check the release at:"
+        line "  ${RELEASES_URL}/tag/${VERSION}"
         exit 1
     fi
 }
 
-verificar_assinatura() {
-    if [ "$ASSINATURA_VERIFICADA" != "1" ]; then
+verify_signature() {
+    if [ "$SIGNATURE_CHECKED" != "1" ]; then
         return 0
     fi
 
-    caminho_assinatura="${CAMINHO_CHECKSUMS}.minisig"
-    codigo="$(baixar_para "${URL_RELEASES}/download/${VERSAO}/checksums.txt.minisig" "$caminho_assinatura")"
+    signature_path="${CHECKSUMS_PATH}.minisig"
+    code="$(download_to "${RELEASES_URL}/download/${VERSION}/checksums.txt.minisig" "$signature_path")"
 
-    if [ "$codigo" != "200" ]; then
-        erro "a release ${VERSAO} nao publica checksums.txt.minisig (HTTP ${codigo})"
-        linha ""
-        linha "a chave publica esta neste script, entao a assinatura era"
-        linha "esperada. uma release assinada que perde a assinatura e sinal de"
-        linha "problema no processo de publicacao — nao de algo a contornar."
-        linha ""
-        linha "confira a release em ${URL_RELEASES}/tag/${VERSAO}"
+    if [ "$code" != "200" ]; then
+        error "release ${VERSION} does not publish checksums.txt.minisig (HTTP ${code})"
+        line ""
+        line "the public key is in this script, so the signature was expected."
+        line "a signed release that loses its signature is a sign of trouble in"
+        line "the publishing process — not of something to work around."
+        line ""
+        line "check the release at ${RELEASES_URL}/tag/${VERSION}"
         exit 1
     fi
 
-    if [ "$VERIFICADOR" = "openssl" ]; then
-        verificar_assinatura_com_openssl "$caminho_assinatura"
+    if [ "$VERIFIER" = "openssl" ]; then
+        verify_signature_with_openssl "$signature_path"
         return 0
     fi
 
-    if ! minisign -V -m "$CAMINHO_CHECKSUMS" -x "$caminho_assinatura" \
-        -P "$CHAVE_PUBLICA_MINISIGN" >/dev/null 2>&1; then
-        erro "a assinatura minisign de checksums.txt NAO confere"
-        linha ""
-        linha "o arquivo baixado nao foi assinado pela chave do projeto. isso"
-        linha "nao e erro de rede: e um artefato que nao deveria existir."
-        linha ""
-        linha "nada foi instalado. nao contorne este erro."
+    if ! minisign -V -m "$CHECKSUMS_PATH" -x "$signature_path" \
+        -P "$MINISIGN_PUBLIC_KEY" >/dev/null 2>&1; then
+        error "the minisign signature of checksums.txt does NOT check out"
+        line ""
+        line "the downloaded file was not signed by the project's key. this is"
+        line "not a network error: it is an artifact that should not exist."
+        line ""
+        line "nothing was installed. do not work around this error."
         exit 1
     fi
 
-    informa "assinatura minisign conferida."
+    inform "minisign signature checked."
 }
 
-verificar_checksum() {
-    esperado="$(grep -F "  ${NOME_ARQUIVO}" "$CAMINHO_CHECKSUMS" 2>/dev/null \
+verify_checksum() {
+    expected="$(grep -F "  ${FILE_NAME}" "$CHECKSUMS_PATH" 2>/dev/null \
         | head -n 1 | cut -d ' ' -f 1)"
 
-    if [ -z "$esperado" ]; then
-        erro "checksums.txt nao lista ${NOME_ARQUIVO}"
-        linha ""
-        linha "o arquivo de checksums da release ${VERSAO} nao cobre o artefato"
-        linha "baixado. nada foi instalado."
+    if [ -z "$expected" ]; then
+        error "checksums.txt does not list ${FILE_NAME}"
+        line ""
+        line "the checksum file of release ${VERSION} does not cover the"
+        line "downloaded artifact. nothing was installed."
         exit 1
     fi
 
-    obtido="$(sha256_de "$CAMINHO_TARBALL")"
+    got="$(sha256_of "$TARBALL_PATH")"
 
-    if [ "$esperado" != "$obtido" ]; then
-        erro "o SHA256 de ${NOME_ARQUIVO} nao confere"
-        linha ""
-        linha "  esperado: ${esperado}"
-        linha "  obtido:   ${obtido}"
-        linha ""
-        linha "o download veio corrompido ou foi alterado no caminho. nada foi"
-        linha "instalado. tente de novo; se persistir, nao instale este arquivo."
+    if [ "$expected" != "$got" ]; then
+        error "the SHA256 of ${FILE_NAME} does not match"
+        line ""
+        line "  expected: ${expected}"
+        line "  got:      ${got}"
+        line ""
+        line "the download came corrupted or was altered along the way. nothing"
+        line "was installed. try again; if it persists, do not install this file."
         exit 1
     fi
 
-    informa "checksum SHA256 conferido."
+    inform "SHA256 checksum verified."
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 7 — instalacao
+# Step 7 — installation
 # ---------------------------------------------------------------------------
 
-instalar() {
-    diretorio_extraido="${DIRETORIO_TEMPORARIO}/extraido"
-    mkdir -p "$diretorio_extraido"
+install_binary() {
+    extracted_dir="${TEMP_DIR}/extracted"
+    mkdir -p "$extracted_dir"
 
-    if ! tar -xzf "$CAMINHO_TARBALL" -C "$diretorio_extraido" 2>/dev/null; then
-        erro "nao foi possivel extrair ${NOME_ARQUIVO}"
-        linha ""
-        linha "o checksum conferia, entao o arquivo chegou intacto: o problema"
-        linha "esta na extracao. verifique se o tar desta maquina suporta gzip."
+    if ! tar -xzf "$TARBALL_PATH" -C "$extracted_dir" 2>/dev/null; then
+        error "could not extract ${FILE_NAME}"
+        line ""
+        line "the checksum matched, so the file arrived intact: the problem is"
+        line "in the extraction. check whether this machine's tar supports gzip."
         exit 1
     fi
 
-    if [ ! -f "${diretorio_extraido}/ngx" ]; then
-        erro "o binario ngx nao foi encontrado dentro de ${NOME_ARQUIVO}"
+    if [ ! -f "${extracted_dir}/ngx" ]; then
+        error "the ngx binary was not found inside ${FILE_NAME}"
         exit 1
     fi
 
-    # Copiar para o destino final e so entao renomear: o mv dentro do mesmo
-    # sistema de arquivos e atomico, entao nunca existe um instante em que
-    # $NGX_INSTALL_DIR/ngx esta pela metade. Um cp direto por cima do binario
-    # deixaria essa janela aberta.
-    ARQUIVO_PARCIAL="${NGX_INSTALL_DIR}/.ngx.novo.$$"
-    cp "${diretorio_extraido}/ngx" "$ARQUIVO_PARCIAL"
-    chmod 0755 "$ARQUIVO_PARCIAL"
-    mv -f "$ARQUIVO_PARCIAL" "${NGX_INSTALL_DIR}/ngx"
-    ARQUIVO_PARCIAL=""
+    # Copy to the final destination and only then rename: mv within the same
+    # filesystem is atomic, so there is never a moment when
+    # $NGX_INSTALL_DIR/ngx is half written. A direct cp over the binary would
+    # leave that window open.
+    PARTIAL_FILE="${NGX_INSTALL_DIR}/.ngx.new.$$"
+    cp "${extracted_dir}/ngx" "$PARTIAL_FILE"
+    chmod 0755 "$PARTIAL_FILE"
+    mv -f "$PARTIAL_FILE" "${NGX_INSTALL_DIR}/ngx"
+    PARTIAL_FILE=""
 
-    informa "ngx ${VERSAO} instalado em ${NGX_INSTALL_DIR}/ngx"
+    inform "ngx ${VERSION} installed at ${NGX_INSTALL_DIR}/ngx"
 
     case ":${PATH}:" in
         *":${NGX_INSTALL_DIR}:"*)
-            informa "rode 'ngx version' para conferir."
+            inform "run 'ngx version' to check."
             ;;
         *)
-            informa ""
-            informa "atencao: ${NGX_INSTALL_DIR} nao esta no PATH."
-            informa "acrescente a linha abaixo ao seu ~/.profile ou ~/.zshrc:"
-            informa "  export PATH=\"${NGX_INSTALL_DIR}:\$PATH\""
+            inform ""
+            inform "warning: ${NGX_INSTALL_DIR} is not in the PATH."
+            inform "add the line below to your ~/.profile or ~/.zshrc:"
+            inform "  export PATH=\"${NGX_INSTALL_DIR}:\$PATH\""
             ;;
     esac
 }
 
 # ---------------------------------------------------------------------------
-# Fluxo
+# Flow
 # ---------------------------------------------------------------------------
 
-detectar_plataforma
-preparar_diretorio
-escolher_ferramenta_http
-escolher_ferramenta_sha256
-avaliar_verificacao_de_assinatura
+detect_platform
+prepare_directory
+choose_http_tool
+choose_sha256_tool
+assess_signature_verification
 
-DIRETORIO_TEMPORARIO="$(mktemp -d "${TMPDIR:-/tmp}/ngx-install.XXXXXX")"
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ngx-install.XXXXXX")"
 
-resolver_versao
-baixar_artefatos
-verificar_assinatura
-verificar_checksum
-instalar
+resolve_version
+download_artifacts
+verify_signature
+verify_checksum
+install_binary

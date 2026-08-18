@@ -1,20 +1,20 @@
 <#
-    Instalador do ngx para Windows.
+    The ngx installer for Windows.
 
         irm https://raw.githubusercontent.com/s0beran0/ngx/main/install.ps1 | iex
 
-    Equivalente do install.sh, com as diferencas que a plataforma impoe:
-    baixa .zip em vez de .tar.gz, instala em %LOCALAPPDATA%\ngx\bin (gravavel
-    sem elevacao, ao contrario de /usr/local/bin no Unix) e acrescenta o
-    diretorio ao PATH do usuario.
+    The equivalent of install.sh, with the differences the platform imposes:
+    it downloads a .zip instead of a .tar.gz, installs into
+    %LOCALAPPDATA%\ngx\bin (writable without elevation, unlike /usr/local/bin
+    on Unix) and adds the directory to the user's PATH.
 
-    Ordem deliberada das etapas: tudo que pode falhar sem rede falha ANTES do
-    primeiro download — arquitetura, diretorio, permissao de escrita e
-    ferramentas de verificacao.
+    The order of the steps is deliberate: everything that can fail without the
+    network fails BEFORE the first download — architecture, directory, write
+    permission and verification tools.
 
-    Este arquivo e escrito para ser executado tambem via "irm | iex", entao
-    nao usa #Requires (que so vale para arquivo em disco) nem
-    $MyInvocation.MyCommand.Path (que e nulo nesse modo).
+    This file is written to be executed through "irm | iex" as well, so it
+    uses neither #Requires (which only applies to a file on disk) nor
+    $MyInvocation.MyCommand.Path (which is null in that mode).
 #>
 
 param(
@@ -23,295 +23,299 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-# O medidor de progresso do Invoke-WebRequest custa mais que o download em si
-# no PowerShell 5.1, e polui a saida de quem esta lendo o resultado.
+# The Invoke-WebRequest progress meter costs more than the download itself on
+# PowerShell 5.1, and it pollutes the output for whoever is reading the result.
 $ProgressPreference = 'SilentlyContinue'
 
-$Repositorio  = 's0beran0/ngx'
-$UrlApi       = "https://api.github.com/repos/$Repositorio"
-$UrlReleases  = "https://github.com/$Repositorio/releases"
+$Repository  = 's0beran0/ngx'
+$ApiUrl      = "https://api.github.com/repos/$Repository"
+$ReleasesUrl = "https://github.com/$Repository/releases"
 
 # ---------------------------------------------------------------------------
-# PLACEHOLDER: CHAVE PUBLICA MINISIGN (DD2/DD3)
+# PLACEHOLDER: MINISIGN PUBLIC KEY (DD2/DD3)
 # ---------------------------------------------------------------------------
-# A chave publica do projeto AINDA NAO FOI GERADA (Task D2). O valor abaixo e
-# um placeholder proposital e NAO e uma chave: chave minisign real e uma linha
-# base64 de 56 caracteres comecando por "RW". O texto foi escrito para ser
-# impossivel de confundir com uma chave de verdade — um valor plausivel
-# passaria despercebido em revisao e chegaria a producao verificando nada.
+# The project's public key HAS NOT BEEN GENERATED YET (Task D2). The value
+# below is a deliberate placeholder and is NOT a key: a real minisign key is a
+# single base64 line of 56 characters starting with "RW". The text was written
+# to be impossible to mistake for a real key — a plausible value would slip
+# through review and reach production verifying nothing.
 #
-# Ao gerar a chave, substitua a linha abaixo pela linha de chave do arquivo
-# ngx-minisign.pub (a segunda linha, sem o "untrusted comment:").
+# When generating the key, replace the line below with the key line from the
+# ngx-minisign.pub file (the second line, without the "untrusted comment:").
 #
-# Enquanto o placeholder estiver aqui, o script RECUSA instalar: ausencia de
-# verificacao e falha, nunca um "segui em frente".
-$ChavePublicaMinisign = 'RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW'
-$PlaceholderChave     = 'PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2'
+# While the placeholder is here, the script REFUSES to install: absence of
+# verification is a failure, never a "carried on anyway".
+$MinisignPublicKey = 'RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW'
+$KeyPlaceholder    = 'PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2'
 
-function Show-Ajuda {
+function Show-Help {
     @'
-install.ps1 - instalador do ngx para Windows
+install.ps1 - the ngx installer for Windows
 
-USO
+USAGE
   irm https://raw.githubusercontent.com/s0beran0/ngx/main/install.ps1 | iex
   .\install.ps1 [-Help]
 
-VARIAVEIS DE AMBIENTE
-  NGX_INSTALL_DIR       Diretorio de instalacao.
+ENVIRONMENT VARIABLES
+  NGX_INSTALL_DIR       Installation directory.
                         Default: %LOCALAPPDATA%\ngx\bin
-                        Um diretorio como C:\Program Files exige PowerShell
-                        como administrador; o script detecta antes de baixar
-                        e diz o que fazer, sem tentar elevar sozinho.
-  NGX_CHANNEL           stable (default) ou beta. beta inclui pre-lancamentos.
-  NGX_VERSION           Versao fixa, ex: v0.2.0. Quando definida, a API do
-                        GitHub nao e consultada.
-  NGX_ALLOW_UNVERIFIED  Se 1, permite instalar quando a assinatura minisign
-                        nao PODE ser verificada (minisign ausente ou chave
-                        publica ainda nao gerada). NAO ignora assinatura
-                        invalida nem checksum divergente: esses abortam
-                        sempre, sem excecao.
+                        A directory such as C:\Program Files requires
+                        PowerShell as administrator; the script detects that
+                        before downloading and says what to do, without trying
+                        to elevate on its own.
+  NGX_CHANNEL           stable (default) or beta. beta includes pre-releases.
+  NGX_VERSION           Pinned version, e.g. v0.2.0. When set, the GitHub API
+                        is not queried.
+  NGX_ALLOW_UNVERIFIED  If 1, allows installing when the minisign signature
+                        CANNOT be verified (minisign missing or public key
+                        not generated yet). It does NOT ignore an invalid
+                        signature or a mismatched checksum: those always
+                        abort, no exceptions.
 
-EXEMPLOS
+EXAMPLES
   $env:NGX_VERSION='v0.2.0'; irm https://raw.githubusercontent.com/s0beran0/ngx/main/install.ps1 | iex
-  $env:NGX_INSTALL_DIR='D:\ferramentas\bin'; .\install.ps1
+  $env:NGX_INSTALL_DIR='D:\tools\bin'; .\install.ps1
 
-VERIFICACAO
-  O checksum SHA256 e conferido sempre e nao tem como ser desligado.
-  A assinatura minisign do checksums.txt e conferida quando o minisign esta
-  instalado e a chave publica do projeto esta embutida neste script.
+VERIFICATION
+  The SHA256 checksum is always checked and there is no way to turn it off.
+  The minisign signature of checksums.txt is checked when minisign is
+  installed and the project's public key is embedded in this script.
 '@ | Write-Host
 }
 
-function Escreve-Linha {
-    param([string] $Texto = '')
-    # Write-Host e deliberado: a saida deste script e para uma pessoa lendo o
-    # terminal, e o pipeline nao deve carregar texto de diagnostico.
-    Write-Host $Texto
+function Write-Line {
+    param([string] $Text = '')
+    # Write-Host is deliberate: this script's output is for a person reading
+    # the terminal, and the pipeline should not carry diagnostic text.
+    Write-Host $Text
 }
 
-# Aborta com "throw", nao com "exit". No fluxo documentado — irm | iex — o
-# script roda no escopo da sessao interativa, e ali "exit" encerra o proprio
-# PowerShell: a janela fecha e a pessoa nunca le a mensagem que acabou de ser
-# impressa. O throw interrompe a execucao, mantem a sessao viva e, quando o
-# script e chamado por arquivo (powershell -File), ainda produz codigo de
-# saida diferente de zero para automacao.
-function Falha {
+# Aborts with "throw", not with "exit". In the documented flow — irm | iex —
+# the script runs in the scope of the interactive session, and there "exit"
+# closes PowerShell itself: the window closes and the person never reads the
+# message that was just printed. throw stops execution, keeps the session
+# alive and, when the script is called from a file (powershell -File), still
+# produces a non-zero exit code for automation.
+function Fail {
     param(
-        [string]   $Mensagem,
-        [string[]] $Detalhes = @()
+        [string]   $Message,
+        [string[]] $Details = @()
     )
-    Write-Host "erro: $Mensagem" -ForegroundColor Red
-    foreach ($linha in $Detalhes) { Write-Host $linha }
-    throw "instalacao abortada: $Mensagem"
+    Write-Host "error: $Message" -ForegroundColor Red
+    foreach ($entry in $Details) { Write-Host $entry }
+    throw "installation aborted: $Message"
 }
 
 if ($Help) {
-    Show-Ajuda
+    Show-Help
     return
 }
 
 if ($PSVersionTable.PSVersion.Major -lt 5) {
-    Falha "este script exige PowerShell 5.1 ou mais novo (encontrado $($PSVersionTable.PSVersion))" @(
+    Fail "this script requires PowerShell 5.1 or newer (found $($PSVersionTable.PSVersion))" @(
         '',
-        'o Windows 10 e o Windows Server 2016 ja trazem a versao 5.1.',
-        'em versoes anteriores, instale o Windows Management Framework 5.1 ou',
-        'o PowerShell 7: https://aka.ms/powershell'
+        'Windows 10 and Windows Server 2016 already ship version 5.1.',
+        'on earlier versions, install Windows Management Framework 5.1 or',
+        'PowerShell 7: https://aka.ms/powershell'
     )
 }
 
-# O PowerShell 5.1 negocia TLS 1.0 por padrao em algumas instalacoes, e o
-# GitHub recusa. No PowerShell 7 o default ja e adequado e mexer nisso e
-# desnecessario.
+# PowerShell 5.1 negotiates TLS 1.0 by default on some installations, and
+# GitHub refuses it. On PowerShell 7 the default is already fine and touching
+# this is unnecessary.
 if ($PSVersionTable.PSVersion.Major -lt 6) {
     try {
         [Net.ServicePointManager]::SecurityProtocol =
             [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {
-        # Se a plataforma nao expuser Tls12, o download falha adiante com uma
-        # mensagem propria; nao ha o que fazer aqui.
+        # If the platform does not expose Tls12, the download fails later with
+        # a message of its own; there is nothing to do here.
     }
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 1 - arquitetura
+# Step 1 - architecture
 # ---------------------------------------------------------------------------
 
-function Get-Arquitetura {
-    # PROCESSOR_ARCHITECTURE reporta x86 quando um PowerShell 32 bits roda num
-    # Windows 64 bits; nesse caso a arquitetura real esta em
-    # PROCESSOR_ARCHITEW6432. Ignorar isso instalaria o binario errado.
-    $arquitetura = $env:PROCESSOR_ARCHITEW6432
-    if ([string]::IsNullOrEmpty($arquitetura)) {
-        $arquitetura = $env:PROCESSOR_ARCHITECTURE
+function Get-Architecture {
+    # PROCESSOR_ARCHITECTURE reports x86 when a 32-bit PowerShell runs on a
+    # 64-bit Windows; in that case the real architecture is in
+    # PROCESSOR_ARCHITEW6432. Ignoring this would install the wrong binary.
+    $architecture = $env:PROCESSOR_ARCHITEW6432
+    if ([string]::IsNullOrEmpty($architecture)) {
+        $architecture = $env:PROCESSOR_ARCHITECTURE
     }
 
-    switch ($arquitetura) {
+    switch ($architecture) {
         'AMD64' { return 'amd64' }
         'ARM64' { return 'arm64' }
         default {
-            Falha "arquitetura nao suportada: $arquitetura" @(
+            Fail "unsupported architecture: $architecture" @(
                 '',
-                'o ngx publica binarios para amd64 (x64) e arm64.',
-                'para outras arquiteturas, compile do fonte:',
-                "  git clone https://github.com/$Repositorio.git; cd ngx; go build ./cmd/ngx"
+                'ngx publishes binaries for amd64 (x64) and arm64.',
+                'for other architectures, build from source:',
+                "  git clone https://github.com/$Repository.git; cd ngx; go build ./cmd/ngx"
             )
         }
     }
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 2 - diretorio de instalacao e permissao
+# Step 2 - installation directory and permission
 # ---------------------------------------------------------------------------
 
-function Falha-DePrivilegio {
-    param([string] $Motivo, [string] $Diretorio)
+function Fail-Privilege {
+    param([string] $Reason, [string] $Directory)
 
-    Falha $Motivo @(
+    Fail $Reason @(
         '',
-        'abra o PowerShell como administrador e rode a instalacao de novo:',
-        '  clique com o botao direito no PowerShell > "Executar como administrador"',
+        'open PowerShell as administrator and run the installation again:',
+        '  right-click PowerShell > "Run as administrator"',
         '',
-        'ou deixe NGX_INSTALL_DIR indefinida: o default e %LOCALAPPDATA%\ngx\bin,',
-        'que e gravavel sem elevacao. para limpar a variavel nesta sessao:',
+        'or leave NGX_INSTALL_DIR unset: the default is %LOCALAPPDATA%\ngx\bin,',
+        'which is writable without elevation. to clear the variable in this session:',
         "  Remove-Item Env:NGX_INSTALL_DIR",
         '',
-        "o diretorio pedido foi: $Diretorio",
+        "the requested directory was: $Directory",
         '',
-        'este script nao tenta elevar privilegio sozinho: quem decide elevar e',
-        'voce, com o comando na frente dos olhos.'
+        'this script does not try to elevate privilege on its own: you are the',
+        'one who decides to elevate, with the command in front of you.'
     )
 }
 
-function Prepara-Diretorio {
-    $diretorio = $env:NGX_INSTALL_DIR
+function Prepare-Directory {
+    $directory = $env:NGX_INSTALL_DIR
 
-    if ([string]::IsNullOrEmpty($diretorio)) {
+    if ([string]::IsNullOrEmpty($directory)) {
         if ([string]::IsNullOrEmpty($env:LOCALAPPDATA)) {
-            Falha 'LOCALAPPDATA nao esta definida e NGX_INSTALL_DIR tambem nao' @(
+            Fail 'LOCALAPPDATA is not set and neither is NGX_INSTALL_DIR' @(
                 '',
-                'aponte o diretorio explicitamente:',
+                'point at the directory explicitly:',
                 "  `$env:NGX_INSTALL_DIR='C:\ngx\bin'"
             )
         }
-        $diretorio = Join-Path $env:LOCALAPPDATA 'ngx\bin'
+        $directory = Join-Path $env:LOCALAPPDATA 'ngx\bin'
     }
 
-    if (Test-Path -LiteralPath $diretorio -PathType Leaf) {
-        Falha "$diretorio existe e nao e um diretorio"
+    if (Test-Path -LiteralPath $directory -PathType Leaf) {
+        Fail "$directory exists and is not a directory"
     }
 
-    if (-not (Test-Path -LiteralPath $diretorio)) {
+    if (-not (Test-Path -LiteralPath $directory)) {
         try {
-            New-Item -ItemType Directory -Path $diretorio -Force | Out-Null
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
         } catch {
-            Falha-DePrivilegio "nao foi possivel criar o diretorio $diretorio" $diretorio
+            Fail-Privilege "could not create the directory $directory" $directory
         }
     }
 
-    # A escrita real e o unico teste que nao mente: Test-Path nao diz nada
-    # sobre permissao, e o ACL efetivo de um diretorio protegido so aparece na
-    # hora de gravar.
-    $arquivoDeTeste = Join-Path $diretorio ".ngx-teste-de-escrita-$PID"
+    # Actually writing is the only test that does not lie: Test-Path says
+    # nothing about permission, and the effective ACL of a protected directory
+    # only shows up at write time.
+    $testFile = Join-Path $directory ".ngx-write-test-$PID"
     try {
-        [System.IO.File]::WriteAllText($arquivoDeTeste, 'ngx')
-        Remove-Item -LiteralPath $arquivoDeTeste -Force
+        [System.IO.File]::WriteAllText($testFile, 'ngx')
+        Remove-Item -LiteralPath $testFile -Force
     } catch {
-        Falha-DePrivilegio "sem permissao de escrita em $diretorio" $diretorio
+        Fail-Privilege "no write permission in $directory" $directory
     }
 
-    return $diretorio
+    return $directory
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 3 - verificacao (antes de baixar)
+# Step 3 - verification (before downloading)
 # ---------------------------------------------------------------------------
 
-function Existe-Comando {
-    param([string] $Nome)
-    return [bool] (Get-Command $Nome -ErrorAction SilentlyContinue)
+function Test-CommandExists {
+    param([string] $Name)
+    return [bool] (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-# Tres desfechos, nenhum silencioso: da para verificar; nao da e nao ha
-# autorizacao (aborta); nao da e ha autorizacao explicita (segue com aviso).
-function Avalia-VerificacaoDeAssinatura {
-    $motivo = ''
+# Three outcomes, none of them silent: it can be verified; it cannot and there
+# is no authorization (abort); it cannot and there is explicit authorization
+# (carry on with a warning).
+function Assess-SignatureVerification {
+    $reason = ''
 
-    if ($ChavePublicaMinisign -eq $PlaceholderChave) {
-        $motivo = 'a chave publica minisign do projeto ainda nao foi gerada e este script carrega um placeholder'
-    } elseif (-not (Existe-Comando 'minisign')) {
-        $motivo = 'o minisign nao esta instalado nesta maquina'
+    if ($MinisignPublicKey -eq $KeyPlaceholder) {
+        $reason = "the project's minisign public key has not been generated yet and this script carries a placeholder"
+    } elseif (-not (Test-CommandExists 'minisign')) {
+        $reason = 'minisign is not installed on this machine'
     }
 
-    if ($motivo -eq '') {
+    if ($reason -eq '') {
         return $true
     }
 
     if ($env:NGX_ALLOW_UNVERIFIED -eq '1') {
-        Escreve-Linha ''
+        Write-Line ''
         Write-Host '############################################################' -ForegroundColor Yellow
-        Write-Host '# AVISO: INSTALANDO SEM VERIFICAR A ASSINATURA'              -ForegroundColor Yellow
+        Write-Host '# WARNING: INSTALLING WITHOUT VERIFYING THE SIGNATURE'       -ForegroundColor Yellow
         Write-Host '#'                                                          -ForegroundColor Yellow
-        Write-Host "# $motivo."                                                 -ForegroundColor Yellow
+        Write-Host "# $reason."                                                 -ForegroundColor Yellow
         Write-Host '#'                                                          -ForegroundColor Yellow
-        Write-Host '# NGX_ALLOW_UNVERIFIED=1 esta definida, entao a instalacao'  -ForegroundColor Yellow
-        Write-Host '# segue. O checksum SHA256 ainda sera conferido, mas ele so' -ForegroundColor Yellow
-        Write-Host '# protege contra download corrompido: nao protege contra um' -ForegroundColor Yellow
-        Write-Host '# release publicado por quem tenha comprometido a conta do'  -ForegroundColor Yellow
-        Write-Host '# GitHub, porque nesse caso o checksum viria adulterado.'    -ForegroundColor Yellow
+        Write-Host '# NGX_ALLOW_UNVERIFIED=1 is set, so the installation'        -ForegroundColor Yellow
+        Write-Host '# carries on. The SHA256 checksum will still be checked,'    -ForegroundColor Yellow
+        Write-Host '# but it only protects against a corrupted download: it'     -ForegroundColor Yellow
+        Write-Host '# does not protect against a release published by whoever'   -ForegroundColor Yellow
+        Write-Host '# compromised the GitHub account, because in that case the'  -ForegroundColor Yellow
+        Write-Host '# checksum would come tampered with as well.'                -ForegroundColor Yellow
         Write-Host '############################################################' -ForegroundColor Yellow
-        Escreve-Linha ''
+        Write-Line ''
         return $false
     }
 
-    $detalhes = @(
+    $details = @(
         '',
-        "motivo: $motivo.",
+        "reason: $reason.",
         '',
-        'o ngx opera a configuracao de um servidor que serve trafego. instalar',
-        'um binario sem verificar de onde ele veio nao e um detalhe de higiene.',
-        'por isso o script para aqui em vez de seguir em frente.',
+        'ngx operates the configuration of a server that serves traffic.',
+        'installing a binary without verifying where it came from is not a',
+        'hygiene detail. that is why the script stops here instead of carrying',
+        'on.',
         '',
-        'como resolver:'
+        'how to fix it:'
     )
 
-    if ($ChavePublicaMinisign -eq $PlaceholderChave) {
-        $detalhes += @(
-            '  a chave publica ainda nao existe - nao ha o que instalar do seu',
-            "  lado. acompanhe $UrlReleases e use uma versao deste script",
-            '  publicada depois da primeira release assinada.'
+    if ($MinisignPublicKey -eq $KeyPlaceholder) {
+        $details += @(
+            '  the public key does not exist yet - there is nothing you can do',
+            "  on your side. follow $ReleasesUrl and use a version of this",
+            '  script published after the first signed release.'
         )
     } else {
-        $detalhes += @(
-            '  instale o minisign e rode de novo:',
+        $details += @(
+            '  install minisign and run again:',
             '    winget install jedisct1.minisign',
-            '    ou baixe de https://github.com/jedisct1/minisign/releases'
+            '    or download it from https://github.com/jedisct1/minisign/releases'
         )
     }
 
-    $detalhes += @(
+    $details += @(
         '',
-        'se voce aceita o risco de forma consciente, e so nesse caso:',
+        'if you accept the risk knowingly, and only in that case:',
         "  `$env:NGX_ALLOW_UNVERIFIED='1'"
     )
 
-    Falha 'a assinatura do release nao pode ser verificada' $detalhes
+    Fail 'the release signature could not be verified' $details
 }
 
 # ---------------------------------------------------------------------------
-# Etapa 4 - rede
+# Step 4 - network
 # ---------------------------------------------------------------------------
 
-# O tipo da excecao muda entre PowerShell 5.1 (WebException) e 7
-# (HttpRequestException), e o codigo HTTP fica em lugares diferentes. Esta
-# funcao devolve 0 quando nao foi possivel determinar.
-function Get-CodigoHttp {
-    param($Erro)
+# The exception type changes between PowerShell 5.1 (WebException) and 7
+# (HttpRequestException), and the HTTP code lives in different places. This
+# function returns 0 when it could not be determined.
+function Get-HttpCode {
+    param($ErrorRecord)
 
     try {
-        $resposta = $Erro.Exception.Response
-        if ($null -eq $resposta) { return 0 }
+        $response = $ErrorRecord.Exception.Response
+        if ($null -eq $response) { return 0 }
 
-        $status = $resposta.StatusCode
+        $status = $response.StatusCode
         if ($null -eq $status) { return 0 }
 
         return [int] $status
@@ -320,131 +324,131 @@ function Get-CodigoHttp {
     }
 }
 
-function Falha-DeRelease {
-    param([int] $Codigo, [string] $Onde, [string] $Versao = '')
+function Fail-Release {
+    param([int] $Code, [string] $Where, [string] $Version = '')
 
-    switch ($Codigo) {
+    switch ($Code) {
         404 {
-            $detalhes = @(
+            $details = @(
                 '',
-                'as duas causas possiveis:',
-                '  1. o projeto ainda nao publicou nenhuma release. confira em',
-                "     $UrlReleases"
+                'the two possible causes:',
+                '  1. the project has not published any release yet. check at',
+                "     $ReleasesUrl"
             )
-            if ($Versao -ne '') {
-                $detalhes += @(
-                    "  2. a versao pedida, $Versao, nao existe. o nome da tag inclui",
-                    '     o "v" inicial: v0.1.0, nao 0.1.0.'
+            if ($Version -ne '') {
+                $details += @(
+                    "  2. the requested version, $Version, does not exist. the tag",
+                    '     name includes the leading "v": v0.1.0, not 0.1.0.'
                 )
             } else {
-                $detalhes += @(
-                    '  2. so existem pre-lancamentos. tente o canal beta:',
+                $details += @(
+                    '  2. only pre-releases exist. try the beta channel:',
                     "     `$env:NGX_CHANNEL='beta'"
                 )
             }
-            Falha "nenhuma release encontrada para $Repositorio ($Onde respondeu 404)" $detalhes
+            Fail "no release found for $Repository ($Where answered 404)" $details
         }
         403 {
-            Falha "a API do GitHub recusou a consulta (HTTP 403) - provavel limite de requisicoes por IP" @(
+            Fail "the GitHub API refused the query (HTTP 403) - likely a per-IP rate limit" @(
                 '',
-                'o limite anonimo e por hora e por endereco. duas saidas:',
-                '  - espere e tente de novo, ou',
-                '  - fixe a versao, que dispensa a consulta a API:',
+                'the anonymous limit is per hour and per address. two ways out:',
+                '  - wait and try again, or',
+                '  - pin the version, which skips the API query:',
                 "      `$env:NGX_VERSION='v0.1.0'"
             )
         }
         429 {
-            Falha "a API do GitHub recusou a consulta (HTTP 429) - limite de requisicoes" @(
+            Fail "the GitHub API refused the query (HTTP 429) - rate limit" @(
                 '',
-                'espere alguns minutos, ou fixe a versao para dispensar a API:',
+                'wait a few minutes, or pin the version to skip the API:',
                 "  `$env:NGX_VERSION='v0.1.0'"
             )
         }
         0 {
-            Falha "nao foi possivel falar com $Onde" @(
+            Fail "could not talk to $Where" @(
                 '',
-                'verifique a conexao de rede, o DNS e se ha proxy exigindo',
-                'configuracao. nenhum arquivo foi escrito.'
+                'check the network connection, DNS and whether a proxy requires',
+                'configuration. no file was written.'
             )
         }
         default {
-            Falha "resposta inesperada de ${Onde}: HTTP $Codigo" @(
+            Fail "unexpected response from ${Where}: HTTP $Code" @(
                 '',
-                'confira o estado do servico em https://www.githubstatus.com'
+                'check the service status at https://www.githubstatus.com'
             )
         }
     }
 }
 
-function Baixa-Arquivo {
-    param([string] $Url, [string] $Destino)
+function Download-File {
+    param([string] $Url, [string] $Destination)
 
     try {
-        Invoke-WebRequest -Uri $Url -OutFile $Destino -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -ErrorAction Stop
         return 200
     } catch {
-        return (Get-CodigoHttp $_)
+        return (Get-HttpCode $_)
     }
 }
 
-# Set-StrictMode transforma o acesso a uma propriedade inexistente em erro de
-# execucao. Uma resposta da API fora do formato esperado explodiria com um
-# stack trace do PowerShell em vez da mensagem util deste script.
-function Get-PropriedadeTexto {
-    param($Objeto, [string] $Nome)
+# Set-StrictMode turns access to a nonexistent property into a runtime error.
+# An API response outside the expected shape would blow up with a PowerShell
+# stack trace instead of this script's useful message.
+function Get-TextProperty {
+    param($Object, [string] $Name)
 
-    if ($null -eq $Objeto) { return '' }
-    $propriedade = $Objeto.PSObject.Properties[$Nome]
-    if ($null -eq $propriedade -or $null -eq $propriedade.Value) { return '' }
-    return [string] $propriedade.Value
+    if ($null -eq $Object) { return '' }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) { return '' }
+    return [string] $property.Value
 }
 
-function Resolve-Versao {
+function Resolve-Version {
     if (-not [string]::IsNullOrEmpty($env:NGX_VERSION)) {
         return $env:NGX_VERSION
     }
 
-    $canal = $env:NGX_CHANNEL
-    if ([string]::IsNullOrEmpty($canal)) { $canal = 'stable' }
+    $channel = $env:NGX_CHANNEL
+    if ([string]::IsNullOrEmpty($channel)) { $channel = 'stable' }
 
-    switch ($canal) {
-        'stable' { $url = "$UrlApi/releases/latest" }
-        'beta'   { $url = "$UrlApi/releases?per_page=1" }
+    switch ($channel) {
+        'stable' { $url = "$ApiUrl/releases/latest" }
+        'beta'   { $url = "$ApiUrl/releases?per_page=1" }
         default  {
-            Falha "canal desconhecido: $canal" @(
+            Fail "unknown channel: $channel" @(
                 '',
-                "os valores aceitos sao 'stable' (default) e 'beta'."
+                "the accepted values are 'stable' (default) and 'beta'."
             )
         }
     }
 
     try {
-        $resposta = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
+        $response = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
     } catch {
-        Falha-DeRelease (Get-CodigoHttp $_) 'a API do GitHub'
+        Fail-Release (Get-HttpCode $_) 'the GitHub API'
     }
 
-    # O canal beta devolve uma lista; @() normaliza o caso de um elemento so,
-    # que o PowerShell 5.1 entrega como objeto solto.
-    if ($canal -eq 'beta') {
-        $lista = @($resposta)
-        if ($lista.Count -eq 0) {
-            Falha "a API do GitHub respondeu, mas nenhuma release foi encontrada no canal beta" @(
+    # The beta channel returns a list; @() normalizes the single-element case,
+    # which PowerShell 5.1 hands over as a bare object.
+    if ($channel -eq 'beta') {
+        $list = @($response)
+        if ($list.Count -eq 0) {
+            Fail "the GitHub API answered, but no release was found in the beta channel" @(
                 '',
-                'o canal beta lista todas as releases, inclusive pre-lancamentos,',
-                'e a lista veio vazia: o projeto ainda nao publicou nenhuma.',
-                "confira em $UrlReleases"
+                'the beta channel lists every release, pre-releases included,',
+                'and the list came back empty: the project has not published any.',
+                "check at $ReleasesUrl"
             )
         }
-        $resposta = $lista[0]
+        $response = $list[0]
     }
 
-    $tag = Get-PropriedadeTexto $resposta 'tag_name'
+    $tag = Get-TextProperty $response 'tag_name'
     if ([string]::IsNullOrEmpty($tag)) {
-        Falha "a API do GitHub respondeu, mas nenhuma release foi encontrada no canal $canal" @(
+        Fail "the GitHub API answered, but no release was found in the $channel channel" @(
             '',
-            "confira em $UrlReleases. se o projeto so publicou pre-lancamentos",
-            "ate agora, use: `$env:NGX_CHANNEL='beta'"
+            "check at $ReleasesUrl. if the project has only published",
+            "pre-releases so far, use: `$env:NGX_CHANNEL='beta'"
         )
     }
 
@@ -452,242 +456,245 @@ function Resolve-Versao {
 }
 
 # ---------------------------------------------------------------------------
-# Fluxo
+# Flow
 # ---------------------------------------------------------------------------
 
-$arquitetura = Get-Arquitetura
-$diretorio   = Prepara-Diretorio
+$architecture = Get-Architecture
+$directory    = Prepare-Directory
 
-if (-not (Existe-Comando 'Expand-Archive')) {
-    Falha 'o cmdlet Expand-Archive nao esta disponivel' @(
+if (-not (Test-CommandExists 'Expand-Archive')) {
+    Fail 'the Expand-Archive cmdlet is not available' @(
         '',
-        'ele vem no PowerShell 5.0 e mais novos. atualize o PowerShell:',
+        'it ships with PowerShell 5.0 and newer. update PowerShell:',
         '  https://aka.ms/powershell'
     )
 }
 
-$verificaAssinatura = Avalia-VerificacaoDeAssinatura
-$versao             = Resolve-Versao
+$verifySignature = Assess-SignatureVerification
+$version         = Resolve-Version
 
-$diretorioTemporario = Join-Path ([System.IO.Path]::GetTempPath()) ("ngx-install-" + [System.Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $diretorioTemporario -Force | Out-Null
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ngx-install-" + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
 try {
-    # O goreleaser deriva o nome do arquivo da versao sem o "v" inicial.
-    $versaoSemV   = $versao -replace '^v', ''
-    $nomeArquivo  = "ngx_${versaoSemV}_windows_${arquitetura}.zip"
-    $baseDownload = "$UrlReleases/download/$versao"
+    # goreleaser derives the file name from the version without the leading "v".
+    $versionNoV   = $version -replace '^v', ''
+    $fileName     = "ngx_${versionNoV}_windows_${architecture}.zip"
+    $downloadBase = "$ReleasesUrl/download/$version"
 
-    $caminhoZip       = Join-Path $diretorioTemporario $nomeArquivo
-    $caminhoChecksums = Join-Path $diretorioTemporario 'checksums.txt'
-    $caminhoAssinatura = Join-Path $diretorioTemporario 'checksums.txt.minisig'
+    $zipPath       = Join-Path $tempDir $fileName
+    $checksumsPath = Join-Path $tempDir 'checksums.txt'
+    $signaturePath = Join-Path $tempDir 'checksums.txt.minisig'
 
-    Escreve-Linha "baixando ngx $versao para windows/$arquitetura..."
+    Write-Line "downloading ngx $version for windows/$architecture..."
 
-    $codigo = Baixa-Arquivo "$baseDownload/$nomeArquivo" $caminhoZip
-    if ($codigo -ne 200) {
-        if ($codigo -eq 404) {
-            # O GitHub responde 404 tanto para tag inexistente quanto para
-            # arquivo ausente numa release que existe. Nao da para distinguir
-            # pelo codigo, entao a mensagem cobre os dois em vez de afirmar o
-            # que nao foi verificado.
-            Falha "nao foi possivel baixar $nomeArquivo da release $versao (HTTP 404)" @(
+    $code = Download-File "$downloadBase/$fileName" $zipPath
+    if ($code -ne 200) {
+        if ($code -eq 404) {
+            # GitHub answers 404 both for a nonexistent tag and for a missing
+            # file in a release that does exist. There is no way to tell them
+            # apart by the code, so the message covers both instead of
+            # asserting something that was not verified.
+            Fail "could not download $fileName from release $version (HTTP 404)" @(
                 '',
-                'as duas causas possiveis:',
-                "  1. a release $versao nao existe. o nome da tag inclui o 'v'",
-                '     inicial: v0.1.0, nao 0.1.0.',
-                "  2. a release existe mas nao publica o artefato de windows/$arquitetura.",
+                'the two possible causes:',
+                "  1. release $version does not exist. the tag name includes the",
+                "     leading 'v': v0.1.0, not 0.1.0.",
+                "  2. the release exists but does not publish the artifact for windows/$architecture.",
                 '',
-                'confira o que existe em:',
-                "  $UrlReleases/tag/$versao"
+                'check what exists at:',
+                "  $ReleasesUrl/tag/$version"
             )
         }
-        Falha-DeRelease $codigo 'o download da release' $versao
+        Fail-Release $code 'the release download' $version
     }
 
-    $codigo = Baixa-Arquivo "$baseDownload/checksums.txt" $caminhoChecksums
-    if ($codigo -ne 200) {
-        Falha "a release $versao nao publica checksums.txt (HTTP $codigo)" @(
+    $code = Download-File "$downloadBase/checksums.txt" $checksumsPath
+    if ($code -ne 200) {
+        Fail "release $version does not publish checksums.txt (HTTP $code)" @(
             '',
-            'sem o checksum nao ha como conferir o download, e instalar sem',
-            'conferir nao e uma opcao. confira a release em:',
-            "  $UrlReleases/tag/$versao"
+            'without the checksum there is no way to check the download, and',
+            'installing without checking is not an option. check the release at:',
+            "  $ReleasesUrl/tag/$version"
         )
     }
 
-    if ($verificaAssinatura) {
-        $codigo = Baixa-Arquivo "$baseDownload/checksums.txt.minisig" $caminhoAssinatura
-        if ($codigo -ne 200) {
-            Falha "a release $versao nao publica checksums.txt.minisig (HTTP $codigo)" @(
+    if ($verifySignature) {
+        $code = Download-File "$downloadBase/checksums.txt.minisig" $signaturePath
+        if ($code -ne 200) {
+            Fail "release $version does not publish checksums.txt.minisig (HTTP $code)" @(
                 '',
-                'a chave publica esta neste script, entao a assinatura era',
-                'esperada. uma release assinada que perde a assinatura e sinal',
-                'de problema no processo de publicacao - nao de algo a contornar.',
+                'the public key is in this script, so the signature was',
+                'expected. a signed release that loses its signature is a sign',
+                'of trouble in the publishing process - not of something to',
+                'work around.',
                 '',
-                "confira a release em $UrlReleases/tag/$versao"
+                "check the release at $ReleasesUrl/tag/$version"
             )
         }
 
-        # O codigo de saida do minisign e o que importa, e ele fica em
-        # $LASTEXITCODE por ser executavel externo, nao cmdlet.
+        # The minisign exit code is what matters, and it lives in
+        # $LASTEXITCODE because minisign is an external executable, not a
+        # cmdlet.
         #
-        # O ErrorActionPreference volta para Continue durante a chamada: com
-        # 'Stop', qualquer linha que um executavel externo escreva em stderr
-        # vira NativeCommandError e aborta o script com uma mensagem do
-        # PowerShell, engolindo a nossa. Aqui quem decide e o codigo de saida.
-        $preferenciaAnterior = $ErrorActionPreference
+        # ErrorActionPreference goes back to Continue during the call: with
+        # 'Stop', any line an external executable writes to stderr becomes a
+        # NativeCommandError and aborts the script with a PowerShell message,
+        # swallowing ours. Here the exit code is what decides.
+        $previousPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & minisign -V -q -m $caminhoChecksums -x $caminhoAssinatura -P $ChavePublicaMinisign | Out-Null
-        $codigoMinisign = $LASTEXITCODE
-        $ErrorActionPreference = $preferenciaAnterior
+        & minisign -V -q -m $checksumsPath -x $signaturePath -P $MinisignPublicKey | Out-Null
+        $minisignCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousPreference
 
-        if ($codigoMinisign -ne 0) {
-            Falha 'a assinatura minisign de checksums.txt NAO confere' @(
+        if ($minisignCode -ne 0) {
+            Fail 'the minisign signature of checksums.txt does NOT check out' @(
                 '',
-                'o arquivo baixado nao foi assinado pela chave do projeto. isso',
-                'nao e erro de rede: e um artefato que nao deveria existir.',
+                'the downloaded file was not signed by the project key. this is',
+                'not a network error: it is an artifact that should not exist.',
                 '',
-                'nada foi instalado. nao contorne este erro.'
+                'nothing was installed. do not work around this error.'
             )
         }
 
-        Escreve-Linha 'assinatura minisign conferida.'
+        Write-Line 'minisign signature checked.'
     }
 
-    # O checksums.txt do goreleaser tem uma linha "<sha256>  <arquivo>" por
-    # artefato, no formato do sha256sum: dois espacos entre hash e nome.
-    $esperado = ''
-    foreach ($linha in (Get-Content -LiteralPath $caminhoChecksums)) {
-        $partes = $linha -split '\s+', 2
-        if ($partes.Count -eq 2 -and $partes[1].Trim() -eq $nomeArquivo) {
-            $esperado = $partes[0].Trim()
+    # goreleaser's checksums.txt has one "<sha256>  <file>" line per artifact,
+    # in the sha256sum format: two spaces between hash and name.
+    $expected = ''
+    foreach ($entry in (Get-Content -LiteralPath $checksumsPath)) {
+        $parts = $entry -split '\s+', 2
+        if ($parts.Count -eq 2 -and $parts[1].Trim() -eq $fileName) {
+            $expected = $parts[0].Trim()
             break
         }
     }
 
-    if ($esperado -eq '') {
-        Falha "checksums.txt nao lista $nomeArquivo" @(
+    if ($expected -eq '') {
+        Fail "checksums.txt does not list $fileName" @(
             '',
-            "o arquivo de checksums da release $versao nao cobre o artefato",
-            'baixado. nada foi instalado.'
+            "the checksum file of release $version does not cover the",
+            'downloaded artifact. nothing was installed.'
         )
     }
 
-    $obtido = (Get-FileHash -LiteralPath $caminhoZip -Algorithm SHA256).Hash
+    $got = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
 
-    # -ine: o Get-FileHash devolve maiusculas e o sha256sum minusculas.
-    if ($esperado -ine $obtido) {
-        Falha "o SHA256 de $nomeArquivo nao confere" @(
+    # -ine: Get-FileHash returns uppercase and sha256sum lowercase.
+    if ($expected -ine $got) {
+        Fail "the SHA256 of $fileName does not match" @(
             '',
-            "  esperado: $esperado",
-            "  obtido:   $obtido",
+            "  expected: $expected",
+            "  got:      $got",
             '',
-            'o download veio corrompido ou foi alterado no caminho. nada foi',
-            'instalado. tente de novo; se persistir, nao instale este arquivo.'
+            'the download came corrupted or was altered along the way. nothing',
+            'was installed. try again; if it persists, do not install this file.'
         )
     }
 
-    Escreve-Linha 'checksum SHA256 conferido.'
+    Write-Line 'SHA256 checksum verified.'
 
-    $diretorioExtraido = Join-Path $diretorioTemporario 'extraido'
-    Expand-Archive -LiteralPath $caminhoZip -DestinationPath $diretorioExtraido -Force
+    $extractedDir = Join-Path $tempDir 'extracted'
+    Expand-Archive -LiteralPath $zipPath -DestinationPath $extractedDir -Force
 
-    $origem = Join-Path $diretorioExtraido 'ngx.exe'
-    if (-not (Test-Path -LiteralPath $origem -PathType Leaf)) {
-        Falha "o binario ngx.exe nao foi encontrado dentro de $nomeArquivo"
+    $source = Join-Path $extractedDir 'ngx.exe'
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        Fail "the ngx.exe binary was not found inside $fileName"
     }
 
-    # Copiar para o destino final e so entao renomear: assim nunca existe um
-    # instante em que ngx.exe esta pela metade no diretorio de instalacao.
-    $destino        = Join-Path $diretorio 'ngx.exe'
-    $destinoParcial = Join-Path $diretorio ".ngx.novo.$PID.exe"
+    # Copy to the final destination and only then rename: that way there is
+    # never a moment when ngx.exe is half written in the installation
+    # directory.
+    $destination        = Join-Path $directory 'ngx.exe'
+    $partialDestination = Join-Path $directory ".ngx.new.$PID.exe"
     try {
-        Copy-Item -LiteralPath $origem -Destination $destinoParcial -Force
-        Move-Item -LiteralPath $destinoParcial -Destination $destino -Force
+        Copy-Item -LiteralPath $source -Destination $partialDestination -Force
+        Move-Item -LiteralPath $partialDestination -Destination $destination -Force
     } catch {
-        if (Test-Path -LiteralPath $destinoParcial) {
-            Remove-Item -LiteralPath $destinoParcial -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $partialDestination) {
+            Remove-Item -LiteralPath $partialDestination -Force -ErrorAction SilentlyContinue
         }
-        Falha "nao foi possivel escrever $destino" @(
+        Fail "could not write $destination" @(
             '',
-            'se o ngx estiver em execucao, o Windows trava o arquivo. feche o',
-            'processo e rode de novo.',
+            'if ngx is running, Windows locks the file. close the process and',
+            'run again.',
             '',
-            "detalhe: $($_.Exception.Message)"
+            "detail: $($_.Exception.Message)"
         )
     }
 
-    Escreve-Linha "ngx $versao instalado em $destino"
+    Write-Line "ngx $version installed at $destination"
 
-    # PATH do usuario: escopo User, que nao exige elevacao.
+    # The user's PATH: User scope, which does not require elevation.
     #
-    # A leitura e a escrita passam pelo registro em vez de
-    # [Environment]::GetEnvironmentVariable/SetEnvironmentVariable porque essa
-    # API expande as variaveis embutidas no valor. Um PATH que contenha
-    # "%USERPROFILE%\bin" volta da API ja expandido para o caminho literal, e
-    # grava-lo de volta destroi a referencia — a pessoa perde a portabilidade
-    # do proprio PATH por causa de uma instalacao. Lendo com
-    # DoNotExpandEnvironmentNames e regravando com o mesmo tipo (ExpandString),
-    # o valor original e preservado.
-    $chaveAmbiente = 'HKCU:\Environment'
-    $pathDoUsuario = ''
-    $tipoDoValor   = [Microsoft.Win32.RegistryValueKind]::ExpandString
-    $leituraOk     = $false
+    # Reading and writing go through the registry instead of
+    # [Environment]::GetEnvironmentVariable/SetEnvironmentVariable because
+    # that API expands the variables embedded in the value. A PATH containing
+    # "%USERPROFILE%\bin" comes back from the API already expanded into the
+    # literal path, and writing it back destroys the reference — the person
+    # loses the portability of their own PATH because of one installation.
+    # Reading with DoNotExpandEnvironmentNames and writing back with the same
+    # kind (ExpandString) preserves the original value.
+    $environmentKey = 'HKCU:\Environment'
+    $userPath       = ''
+    $valueKind      = [Microsoft.Win32.RegistryValueKind]::ExpandString
+    $readOk         = $false
 
     try {
-        $chave = Get-Item -LiteralPath $chaveAmbiente
-        $valor = $chave.GetValue(
+        $key   = Get-Item -LiteralPath $environmentKey
+        $value = $key.GetValue(
             'Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-        if ($null -ne $valor) { $pathDoUsuario = [string] $valor }
-        if ($pathDoUsuario -ne '') { $tipoDoValor = $chave.GetValueKind('Path') }
-        $leituraOk = $true
+        if ($null -ne $value) { $userPath = [string] $value }
+        if ($userPath -ne '') { $valueKind = $key.GetValueKind('Path') }
+        $readOk = $true
     } catch {
-        $leituraOk = $false
+        $readOk = $false
     }
 
-    $jaEstaNoPath = $false
-    foreach ($parte in ($pathDoUsuario -split ';')) {
-        if ($parte.Trim() -ne '' -and $parte.Trim().TrimEnd('\') -ieq $diretorio.TrimEnd('\')) {
-            $jaEstaNoPath = $true
+    $alreadyInPath = $false
+    foreach ($part in ($userPath -split ';')) {
+        if ($part.Trim() -ne '' -and $part.Trim().TrimEnd('\') -ieq $directory.TrimEnd('\')) {
+            $alreadyInPath = $true
             break
         }
     }
 
-    if ($jaEstaNoPath) {
-        Escreve-Linha "rode 'ngx version' para conferir."
-    } elseif (-not $leituraOk) {
-        Escreve-Linha ''
-        Escreve-Linha 'atencao: nao foi possivel ler o PATH do seu usuario, entao ele nao'
-        Escreve-Linha 'foi alterado. acrescente o diretorio manualmente:'
-        Escreve-Linha "  $diretorio"
+    if ($alreadyInPath) {
+        Write-Line "run 'ngx version' to check."
+    } elseif (-not $readOk) {
+        Write-Line ''
+        Write-Line "warning: your user PATH could not be read, so it was not"
+        Write-Line 'changed. add the directory manually:'
+        Write-Line "  $directory"
     } else {
         try {
-            $novoPath = if ($pathDoUsuario.Trim() -eq '') {
-                $diretorio
+            $newPath = if ($userPath.Trim() -eq '') {
+                $directory
             } else {
-                "$($pathDoUsuario.TrimEnd(';'));$diretorio"
+                "$($userPath.TrimEnd(';'));$directory"
             }
-            Set-ItemProperty -LiteralPath $chaveAmbiente -Name 'Path' -Value $novoPath -Type $tipoDoValor
-            Escreve-Linha ''
-            Escreve-Linha "$diretorio foi acrescentado ao PATH do seu usuario."
-            Escreve-Linha 'abra um terminal novo para a mudanca valer - a janela atual'
-            Escreve-Linha 'continua com o PATH antigo.'
+            Set-ItemProperty -LiteralPath $environmentKey -Name 'Path' -Value $newPath -Type $valueKind
+            Write-Line ''
+            Write-Line "$directory was added to your user PATH."
+            Write-Line 'open a new terminal for the change to take effect - the current'
+            Write-Line 'window keeps the old PATH.'
         } catch {
-            Escreve-Linha ''
-            Escreve-Linha "atencao: nao foi possivel alterar o PATH do usuario ($($_.Exception.Message))."
-            Escreve-Linha 'o ngx foi instalado; so o PATH ficou por fazer. acrescente:'
-            Escreve-Linha "  $diretorio"
+            Write-Line ''
+            Write-Line "warning: could not change the user PATH ($($_.Exception.Message))."
+            Write-Line 'ngx was installed; only the PATH was left undone. add:'
+            Write-Line "  $directory"
         }
     }
 
-    Escreve-Linha ''
-    Escreve-Linha 'nota sobre Windows: o nginx para Windows e distribuido como build beta'
-    Escreve-Linha 'pelo proprio nginx.org e nao e instalado por gerenciador de pacotes.'
-    Escreve-Linha 'aponte o ngx para o diretorio desempacotado com -c, por exemplo:'
-    Escreve-Linha '  ngx -c C:\nginx-1.31.3\conf\nginx.conf inspect'
+    Write-Line ''
+    Write-Line 'a note about Windows: nginx for Windows is distributed as a beta build'
+    Write-Line 'by nginx.org itself and is not installed by a package manager.'
+    Write-Line 'point ngx at the unpacked directory with -c, for example:'
+    Write-Line '  ngx -c C:\nginx-1.31.3\conf\nginx.conf inspect'
 }
 finally {
-    if (Test-Path -LiteralPath $diretorioTemporario) {
-        Remove-Item -LiteralPath $diretorioTemporario -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $tempDir) {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
