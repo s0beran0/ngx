@@ -18,6 +18,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/s0beran0/ngx/internal/output"
 )
@@ -124,12 +125,30 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 	}
 
 	endereco := net.JoinHostPort(host, strconv.Itoa(porta))
-	cliente, err := ssh.Dial("tcp", endereco, &ssh.ClientConfig{
+	conf := &ssh.ClientConfig{
 		User:            usuario,
 		Auth:            auth.Metodos,
 		HostKeyCallback: verificar,
 		Timeout:         timeout,
-	})
+	}
+	cliente, err := ssh.Dial("tcp", endereco, conf)
+
+	// Um servidor costuma oferecer varios tipos de chave de host e o cliente
+	// escolhe um. Se o known_hosts registrou o host por outro tipo, a
+	// verificacao falha sem que nada esteja errado -- e o proprio `ssh`
+	// resolve isso restringindo a negociacao aos tipos que ja conhece.
+	//
+	// Nao da para restringir antes de saber quais sao, e descobrir exige o
+	// erro. Entao a segunda tentativa acontece so aqui, so quando o
+	// desfecho foi exatamente esse, e so uma vez. Nao ha afrouxamento: a
+	// mesma verificacao roda de novo, apenas sobre um algoritmo que o
+	// known_hosts cobre.
+	if err != nil {
+		if tipos := tiposRegistrados(err); len(tipos) > 0 {
+			conf.HostKeyAlgorithms = tipos
+			cliente, err = ssh.Dial("tcp", endereco, conf)
+		}
+	}
 
 	// A conexao com o ssh-agent so serve durante o handshake; depois dele e
 	// um socket aberto sem uso. O erro de fechar nao vira diagnostico porque
@@ -456,4 +475,26 @@ func erroSessaoSFTP(usuario, endereco string, causa error) error {
 		},
 		Err: causa,
 	}
+}
+
+// tiposRegistrados devolve os tipos de chave que o known_hosts tem para o
+// host, e apenas quando a falha foi "apresentou um tipo que nao consta".
+// Devolve nada para chave genuinamente alterada ou host desconhecido: nesses
+// casos repetir o handshake seria contornar a verificacao, nao ajusta-la.
+func tiposRegistrados(err error) []string {
+	var chave *knownhosts.KeyError
+	if !errors.As(err, &chave) || len(chave.Want) == 0 {
+		return nil
+	}
+
+	tipos := make([]string, 0, len(chave.Want))
+	vistos := map[string]bool{}
+	for i := range chave.Want {
+		t := chave.Want[i].Key.Type()
+		if !vistos[t] {
+			vistos[t] = true
+			tipos = append(tipos, t)
+		}
+	}
+	return tipos
 }

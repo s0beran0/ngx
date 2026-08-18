@@ -52,6 +52,12 @@ O `ngx` usa o `known_hosts` do usuário e **recusa** host desconhecido ou cuja c
 
 A ordem de resolução é: flags explícitas vencem; o que faltar vem do `~/.ssh/config` para aquele host; a autenticação tenta o `ssh-agent` antes de qualquer arquivo de chave.
 
+*Correções medidas contra um nginx de produção real* (Oracle Linux 9, VPN), todas de casos em que o `ngx` recusava conexão que o `ssh` fazia:
+
+1. **Um único método de chave pública.** Oferecer `ssh-agent` e arquivo como métodos separados falha: assim que o primeiro se esgota sem autenticar, o seguinte não salva. O OpenSSH oferece tudo num método só. Sem isso, qualquer pessoa com chaves no agente que não servissem para aquele host ficava sem conectar.
+2. **Busca pelas chaves padrão do `~/.ssh`.** O `ssh` tenta `id_rsa`, `id_ecdsa` e `id_ed25519` por conta própria — é o que faz `ssh web1` funcionar sem configuração. Sem isso, a promessa desta decisão (`ngx --host web1` funciona para quem já tem `ssh web1`) era falsa: no host medido a chave que autenticava era `~/.ssh/id_rsa`, fora do `~/.ssh/config` e fora do agente.
+3. **Chave nomeada em `--key` vem primeiro** (abaixo).
+
 *Exceção medida contra servidor real:* quando o usuário nomeia a chave em `--key`, ela é oferecida **antes** do `ssh-agent`. O `MaxAuthTries` padrão do sshd é 6; cada chave carregada no `ssh-agent` gasta uma tentativa, e um desenvolvedor costuma ter várias. Com o agente na frente, a chave explicitamente pedida nunca chegava a ser oferecida e a conexão morria com `no supported methods remain` — mensagem que não aponta para a causa. É o mesmo problema que `IdentitiesOnly=yes` resolve no `ssh`. Sem `--key`, a ordem original vale.
 
 *Por quê:* com o `ssh-agent`, a chave privada nunca é lida pelo `ngx` — ele envia o desafio e recebe a assinatura. Menos código nosso tocando material de chave é menos superfície para errar. E ler o `~/.ssh/config` significa que `ngx --host web1 inspect` funciona para quem já tem `ssh web1` funcionando, sem reconfigurar nada.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -109,6 +110,10 @@ type ambienteAuth struct {
 	lerEnv          func(string) string
 	stdinEhTerminal func() bool
 	lerSegredo      func(prompt string) (string, error)
+	// home existe injetado para o teste nao depender do HOME de quem roda a
+	// suite: a busca por chave padrao le ~/.ssh, e um teste que enxergasse a
+	// chave real do desenvolvedor passaria na maquina dele e falharia no CI.
+	home func() (string, error)
 }
 
 func ambienteAuthPadrao() ambienteAuth {
@@ -117,6 +122,7 @@ func ambienteAuthPadrao() ambienteAuth {
 		lerEnv:          os.Getenv,
 		stdinEhTerminal: func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
 		lerSegredo:      lerSegredoDoTerminal,
+		home:            os.UserHomeDir,
 	}
 }
 
@@ -163,20 +169,71 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 	// porque a chave privada nunca e lida pelo ngx.
 	chaveExplicita := opts.KeyPath != ""
 
+	// TODAS as chaves entram num UNICO metodo de chave publica, e a ordem
+	// dentro dele e que decide a preferencia.
+	//
+	// Medido contra um servidor real: com o ssh-agent carregado, oferecer
+	// agente e arquivo como metodos SEPARADOS falhava, enquanto o `ssh`
+	// conectava com as mesmas chaves. Assim que o primeiro metodo de chave
+	// publica se esgota sem autenticar, o seguinte nao salva. O OpenSSH nao
+	// sofre disso porque oferece tudo num metodo so -- e agora o ngx tambem.
+	//
+	// A ordem: chave nomeada em --key primeiro, porque o usuario a nomeou;
+	// depois o ssh-agent, preferivel porque a chave privada nunca e lida por
+	// nos; e por fim as chaves padrao do ~/.ssh, que sao o que faz
+	// `ngx --host web1` funcionar para quem ja tem `ssh web1`.
+	assinantes := []func() ([]ssh.Signer, error){}
+
 	if chaveExplicita {
 		metodo, diag := metodoChave(opts, amb)
-		adicionar(MetodoChave, metodo, diag)
+		if diag != nil {
+			diags = append(diags, *diag)
+		}
+		if metodo != nil {
+			assinantes = append(assinantes, metodo)
+			auth.Nomes = append(auth.Nomes, MetodoChave)
+		}
 	}
 
-	metodo, fechar, diag := metodoSSHAgent(amb)
-	if fechar != nil {
-		auth.fechar = append(auth.fechar, fechar)
+	if fonte, fechar, diag := assinantesDoAgente(amb); diag != nil || fonte != nil {
+		if diag != nil {
+			diags = append(diags, *diag)
+		}
+		if fechar != nil {
+			auth.fechar = append(auth.fechar, fechar)
+		}
+		if fonte != nil {
+			assinantes = append(assinantes, fonte)
+			auth.Nomes = append(auth.Nomes, MetodoSSHAgent)
+		}
 	}
-	adicionar(MetodoSSHAgent, metodo, diag)
 
 	if !chaveExplicita {
 		metodo, diag := metodoChave(opts, amb)
-		adicionar(MetodoChave, metodo, diag)
+		if diag != nil {
+			diags = append(diags, *diag)
+		}
+		if metodo != nil {
+			assinantes = append(assinantes, metodo)
+			auth.Nomes = append(auth.Nomes, MetodoChave)
+		}
+	}
+
+	if len(assinantes) > 0 {
+		auth.Metodos = append(auth.Metodos, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+			todos := []ssh.Signer{}
+			for _, fonte := range assinantes {
+				ss, err := fonte()
+				if err != nil {
+					// Uma fonte que falha nao derruba as outras: um
+					// ssh-agent que morreu no meio nao pode impedir a
+					// chave do disco de ser oferecida.
+					continue
+				}
+				todos = append(todos, ss...)
+			}
+			return todos, nil
+		}))
 	}
 
 	adicionar(MetodoSenha, metodoSenha(opts, amb), nil)
@@ -198,14 +255,14 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 //
 // Nao alcancar o ssh-agent devolve (nil, nil, aviso). E o caso mais comum em
 // maquina sem agente rodando e nao tem nada de errado.
-func metodoSSHAgent(amb ambienteAuth) (ssh.AuthMethod, func() error, *output.Diagnostic) {
+func assinantesDoAgente(amb ambienteAuth) (fonteAssinantes, func() error, *output.Diagnostic) {
 	conn, err := amb.conectarAgente()
 	if err != nil {
 		d := avisoSSHAgentAusente(err)
 		return nil, nil, &d
 	}
 	cliente := agent.NewClient(conn)
-	return ssh.PublicKeysCallback(cliente.Signers), conn.Close, nil
+	return cliente.Signers, conn.Close, nil
 }
 
 // metodoChave le a chave privada apontada por opts.KeyPath.
@@ -220,9 +277,24 @@ func metodoSSHAgent(amb ambienteAuth) (ssh.AuthMethod, func() error, *output.Dia
 // O terceiro caso e o que mantem o ngx utilizavel por um agente de IA: rodando
 // sob pipe, ele falha rapido em vez de parar esperando uma digitacao que nunca
 // vira.
-func metodoChave(opts SSHOptions, amb ambienteAuth) (ssh.AuthMethod, *output.Diagnostic) {
+// ChavesPadrao sao os arquivos de identidade que o OpenSSH tenta quando
+// ninguem indica um. A ordem e a dele. O `ssh` procurar por conta propria e
+// justamente o que faz `ssh web1` funcionar sem configuracao, e a DR2 promete
+// que `ngx --host web1` funcione para quem ja tem isso — entao o ngx procura
+// tambem.
+//
+// Medido contra um servidor real: a chave que autenticava era ~/.ssh/id_rsa,
+// fora do ~/.ssh/config e fora do ssh-agent, que so tinha certificados de
+// outro sistema. Sem esta busca o ngx falhava onde o ssh conectava.
+//
+// Nao entra id_dsa: o OpenSSH desabilitou DSA por padrao, e oferecer uma
+// chave que o servidor recusa so gasta uma das poucas tentativas do
+// MaxAuthTries.
+var ChavesPadrao = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
+
+func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
 	if opts.KeyPath == "" {
-		return nil, nil
+		return metodoChavesPadrao(amb)
 	}
 
 	pem, err := os.ReadFile(opts.KeyPath)
@@ -233,7 +305,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (ssh.AuthMethod, *output.Dia
 
 	signer, err := ssh.ParsePrivateKey(pem)
 	if err == nil {
-		return ssh.PublicKeys(signer), nil
+		return assinantesFixos(signer), nil
 	}
 
 	var faltaPassphrase *ssh.PassphraseMissingError
@@ -250,7 +322,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (ssh.AuthMethod, *output.Dia
 				fmt.Sprintf("a passphrase de %s nao abre a chave (%v)", EnvPassphraseChaveSSH, err))
 			return nil, &d
 		}
-		return ssh.PublicKeys(signer), nil
+		return assinantesFixos(signer), nil
 	}
 
 	if !amb.stdinEhTerminal() {
@@ -261,7 +333,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (ssh.AuthMethod, *output.Dia
 		return nil, &d
 	}
 
-	return ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+	return func() ([]ssh.Signer, error) {
 		passphrase, err := amb.lerSegredo(fmt.Sprintf("passphrase da chave %s: ", opts.KeyPath))
 		if err != nil {
 			return nil, fmt.Errorf("nao foi possivel ler a passphrase de %s: %w", opts.KeyPath, err)
@@ -271,7 +343,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (ssh.AuthMethod, *output.Dia
 			return nil, fmt.Errorf("a passphrase informada nao abre a chave %s: %w", opts.KeyPath, err)
 		}
 		return []ssh.Signer{signer}, nil
-	}), nil
+	}, nil
 }
 
 // metodoSenha e o ultimo recurso da ordem.
@@ -384,4 +456,50 @@ func destinoLegivel(opts SSHOptions) string {
 	default:
 		return "o destino"
 	}
+}
+
+// metodoChavesPadrao monta um metodo com as chaves padrao que existem no
+// disco e abrem sem passphrase.
+//
+// Sem passphrase de proposito: aqui o usuario nao pediu chave nenhuma, entao
+// perguntar senha de um arquivo que ele nem citou seria intrusivo, e sob pipe
+// — que e como um agente de IA roda isto — nao ha a quem perguntar. Chave
+// protegida por passphrase continua acessivel pelo ssh-agent, que e o
+// caminho recomendado, ou por --key explicito.
+func metodoChavesPadrao(amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
+	if amb.home == nil {
+		return nil, nil
+	}
+	home, err := amb.home()
+	if err != nil {
+		return nil, nil
+	}
+
+	signers := []ssh.Signer{}
+	for _, nome := range ChavesPadrao {
+		pem, err := os.ReadFile(filepath.Join(home, ".ssh", nome))
+		if err != nil {
+			continue
+		}
+		signer, err := ssh.ParsePrivateKey(pem)
+		if err != nil {
+			continue
+		}
+		signers = append(signers, signer)
+	}
+
+	if len(signers) == 0 {
+		return nil, nil
+	}
+	return assinantesFixos(signers...), nil
+}
+
+// fonteAssinantes entrega chaves para o handshake. E uma funcao, e nao uma
+// lista pronta, porque o ssh-agent pode ganhar chaves depois de o ngx comecar
+// e porque uma chave com passphrase so deve pedir a senha se realmente chegar
+// a vez dela.
+type fonteAssinantes func() ([]ssh.Signer, error)
+
+func assinantesFixos(ss ...ssh.Signer) fonteAssinantes {
+	return func() ([]ssh.Signer, error) { return ss, nil }
 }

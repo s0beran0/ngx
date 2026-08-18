@@ -113,7 +113,16 @@ func TestMontarAutenticacaoChaveNomeadaVemAntesDoAgente(t *testing.T) {
 
 	require.Equal(t, []string{MetodoChave, MetodoSSHAgent, MetodoSenha}, auth.Nomes,
 		"chave nomeada em --key precede o ssh-agent para nao esbarrar no MaxAuthTries")
-	require.Len(t, auth.Metodos, len(auth.Nomes))
+
+	// Duas fontes de chave, UM metodo de chave publica (mais o de senha).
+	//
+	// Medido contra servidor real: oferecer agente e arquivo como metodos
+	// separados falha quando o agente tem chaves e nenhuma serve -- assim que
+	// o primeiro metodo de chave publica se esgota, o seguinte nao salva, e o
+	// ngx recusava conexao que o `ssh` fazia. O OpenSSH oferece tudo num
+	// metodo so; este require e o que impede a separacao de voltar.
+	require.Len(t, auth.Metodos, 2,
+		"todas as chaves precisam caber num unico metodo de chave publica")
 	require.NotNil(t, diags)
 	require.Empty(t, diags)
 }

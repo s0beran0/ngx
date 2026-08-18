@@ -42,6 +42,12 @@ const (
 	// CodigoKnownHostsAusente: o arquivo known_hosts nao existe.
 	CodigoKnownHostsAusente = "NGX-0204"
 
+	// CodigoAlgoritmoNaoRegistrado: o host esta no known_hosts, mas so com
+	// chaves de outro tipo. Nao e ataque nem primeiro acesso -- e negociacao
+	// de algoritmo. Merece codigo proprio justamente para nao ser confundido
+	// com NGX-0202, cuja mensagem fala em interceptacao.
+	CodigoAlgoritmoNaoRegistrado = "NGX-0207"
+
 	// CodigoAvisoHostKeyInsegura: --insecure-host-key foi usado e a
 	// verificacao foi pulada.
 	CodigoAvisoHostKeyInsegura = "NGX-0211"
@@ -145,6 +151,23 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 	var chave *knownhosts.KeyError
 	if errors.As(err, &chave) {
 		if len(chave.Want) > 0 {
+			// Want preenchido nao significa, sozinho, que a chave mudou.
+			//
+			// Um servidor costuma oferecer varios tipos de chave de host
+			// (ed25519, ecdsa, rsa) e o cliente negocia um deles. Se o
+			// known_hosts registrou o host por OUTRO tipo, a biblioteca ve
+			// uma chave que nao consta e devolve o mesmo KeyError de chave
+			// alterada -- e o ngx acusaria ataque de interceptacao onde nao
+			// houve nada. Medido contra um servidor real: known_hosts com
+			// ssh-ed25519, servidor negociando ecdsa-sha2-nistp256.
+			//
+			// A distincao e o TIPO. Se nenhuma chave registrada tem o tipo
+			// da apresentada, o que houve foi escolha de algoritmo, nao
+			// troca de chave. Se ha registro do mesmo tipo e os bytes
+			// diferem, ai sim mudou.
+			if !registraTipo(chave.Want, key.Type()) {
+				return erroAlgoritmoNaoRegistrado(caminho, endereco, key, chave, err)
+			}
 			return erroChaveAlterada(caminho, endereco, key, chave, err)
 		}
 		return erroHostDesconhecido(caminho, endereco, key, err)
@@ -307,4 +330,65 @@ func serializarChave(key ssh.PublicKey) string {
 		return "(nenhuma)"
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+}
+
+// registraTipo diz se alguma das chaves conhecidas para o host usa o mesmo
+// algoritmo da apresentada. E o que separa "a chave mudou" de "negociamos um
+// algoritmo que voce nunca registrou".
+func registraTipo(want []knownhosts.KnownKey, tipo string) bool {
+	for i := range want {
+		if want[i].Key.Type() == tipo {
+			return true
+		}
+	}
+	return false
+}
+
+// erroAlgoritmoNaoRegistrado cobre o host conhecido cuja chave apresentada e
+// de um tipo que o known_hosts nao registra. Recusar continua certo -- nao ha
+// como verificar o que nao se conhece --, mas dizer "pode ser ataque" seria
+// mentira, e mentira num aviso de seguranca gasta a credibilidade do aviso
+// que importa.
+func erroAlgoritmoNaoRegistrado(
+	caminho, endereco string,
+	apresentada ssh.PublicKey,
+	chave *knownhosts.KeyError,
+	err error,
+) error {
+	tipos := make([]string, 0, len(chave.Want))
+	vistos := map[string]bool{}
+	for i := range chave.Want {
+		t := chave.Want[i].Key.Type()
+		if !vistos[t] {
+			vistos[t] = true
+			tipos = append(tipos, t)
+		}
+	}
+
+	return &output.Error{
+		Code: output.ExitInvalidConfig,
+		Diag: output.Diagnostic{
+			Severity: output.SeverityError,
+			Code:     CodigoAlgoritmoNaoRegistrado,
+			Message: fmt.Sprintf(
+				"o host %s e conhecido, mas so com chave do tipo %s, e ele apresentou "+
+					"uma do tipo %s. Isto NAO indica ataque: o servidor oferece varios "+
+					"tipos de chave e o tipo negociado nao esta no seu known_hosts. "+
+					"Registre-o com: ssh-keyscan -t %s %s >> %s",
+				endereco, strings.Join(tipos, ", "), apresentada.Type(),
+				apresentada.Type(), hostDe(endereco), caminho),
+			File: chave.Want[0].Filename,
+			Line: chave.Want[0].Line,
+		},
+		Err: err,
+	}
+}
+
+// hostDe devolve so o host de um "host:porta", para montar a linha de
+// ssh-keyscan que a mensagem sugere.
+func hostDe(endereco string) string {
+	if h, _, err := net.SplitHostPort(endereco); err == nil {
+		return h
+	}
+	return endereco
 }
