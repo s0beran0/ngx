@@ -3,11 +3,15 @@
 `ngx` reads and inspects the configuration of a remote server over SSH.
 Nothing is installed on the other side.
 
-> **State.** The remote path is implemented and covered by tests, but **it has
-> not been exercised against a production server by this project**. The
-> latency numbers quoted at the end come from the measurement that motivated
-> the design, not from a run of `ngx`. Treat this page as documentation of
-> something new, not of something that has been run.
+> **State.** The remote path is implemented, covered by tests, and **has been
+> exercised against a real production nginx** — Oracle Linux 9, nginx 1.20.1,
+> 132 configuration files — as well as against a throwaway container. That run
+> is where several of the behaviours documented here came from: the
+> authentication order, the privileged-read fallback, and the host-key
+> diagnostics were all corrected because of what it found.
+>
+> What is *not* yet proven: Windows as the client, and any target that is not
+> Linux with OpenSSH.
 
 ## Minimal usage
 

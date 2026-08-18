@@ -267,7 +267,7 @@ A maior parte era redundante: restricoes globais que **ja estao no CLAUDE.md**
 que o agente carrega, e requisitos que **ja estao no brief** que ele vai ler.
 
 **Nao repita no dispatch o que o CLAUDE.md ja diz.** Commits sem mencao a IA,
-comentarios em portugues sem acentuacao, zero CGO, listas JSON como `[]` —
+comentarios e saida em ingles, zero CGO, listas JSON como `[]` —
 tudo isso ja chega ao agente. Repetir custa a cada turno dele.
 
 #### Template de dispatch (alvo: 300-400 tokens)

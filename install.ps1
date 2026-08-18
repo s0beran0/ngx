@@ -32,7 +32,12 @@ $ApiUrl      = "https://api.github.com/repos/$Repository"
 $ReleasesUrl = "https://github.com/$Repository/releases"
 
 # ---------------------------------------------------------------------------
-# PLACEHOLDER: MINISIGN PUBLIC KEY (DD2/DD3)
+# MINISIGN PUBLIC KEY (DD2/DD3) — real key, already generated.
+#
+# The placeholder constant below is kept on purpose: it is what the script
+# compares against to decide whether verification is possible at all. A fork
+# that has not generated its own key still gets a refusal instead of a silent
+# install.
 # ---------------------------------------------------------------------------
 # The project's public key HAS NOT BEEN GENERATED YET (Task D2). The value
 # below is a deliberate placeholder and is NOT a key: a real minisign key is a

@@ -27,7 +27,12 @@ Confundir os dois leva a implementar a coisa errada.
 ## Convenções
 
 - Go 1.25, zero CGO, binário estático.
-- Comentários de código em português, sem acentuação.
+- **Tudo que sai do repositório é em inglês**: comentários de código,
+  mensagens de diagnóstico, textos de `--help`, README e `docs/`. É projeto
+  open source e quem contribui ou consome a saída não fala necessariamente
+  português. Sem acentuação em comentário de código.
+- Os planos e specs em `docs/superpowers/` **ficam em português**: são registro
+  de decisão deste projeto, não documentação de usuário.
 - **Mensagens de commit nunca mencionam Claude, IA ou co-autoria.** Sem trailer
   `Co-Authored-By`, sem "Generated with". Autoria exclusiva do Eduardo.
 - Nenhuma menção a SEA Tecnologia em código, licença ou documentação.
