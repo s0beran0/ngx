@@ -42,10 +42,12 @@ builds:
       # No release, o workflow aborta antes de compilar se a variable estiver
       # vazia — um release sem chave embutida seria pior que nenhum release.
       #
-      # PENDENTE: a variavel output.PublicKey ainda nao existe em
-      # internal/output/envelope.go (Task D2, Step 2). Enquanto nao existir, o
-      # linker ignora este -X em silencio e o binario sai sem chave.
-      - -X github.com/s0beran0/ngx/internal/output.PublicKey={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
+      # O simbolo e internal/update.ChavePublica, que e quem o `ngx update`
+      # de fato consulta. Apontar para outro lugar nao daria erro nenhum: o
+      # linker ignora -X contra simbolo inexistente, o build passa e o binario
+      # sai sem chave. Foi o que quase aconteceu -- o alvo original era
+      # internal/output.PublicKey, que nao existe e nada leria.
+      - -X github.com/s0beran0/ngx/internal/update.ChavePublica={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
 
 archives:
   - id: ngx

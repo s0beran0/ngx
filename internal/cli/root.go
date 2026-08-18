@@ -12,6 +12,7 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 	"github.com/s0beran0/ngx/internal/settings"
 	"github.com/s0beran0/ngx/internal/transport"
+	"github.com/s0beran0/ngx/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -317,7 +318,24 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			env := ctx.NovoEnvelope("version")
-			env.Data = map[string]string{"version": output.Version}
+			dados := map[string]string{"version": output.Version}
+
+			// A chave publica embutida sai aqui por dois motivos. Quem usa
+			// consegue conferir contra a chave publicada do projeto antes de
+			// confiar num `ngx update`. E o build consegue PROVAR que o
+			// `-ldflags -X` funcionou: contra simbolo inexistente o linker
+			// ignora em silencio e o binario sai sem chave, mas o valor
+			// continua aparecendo no `strings` porque o Go grava os ldflags
+			// no build info -- entao so perguntar ao binario em execucao
+			// distingue os dois casos.
+			//
+			// Campo indisponivel e omitido: binario sem chave nao mostra o
+			// campo, em vez de mostrar vazio.
+			if update.ChavePublica != "" && update.ChavePublica != update.PlaceholderChavePublica {
+				dados["update_public_key"] = update.ChavePublica
+			}
+
+			env.Data = dados
 			return ctx.Renderer.Render(env)
 		},
 	}

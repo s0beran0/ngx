@@ -92,6 +92,37 @@ jobs:
             -m "$ensaio" -x "$ensaio.minisig"
           minisign -V -m "$ensaio" -x "$ensaio.minisig" -P "$NGX_PUBLIC_KEY"
 
+      # DD6: prova que a chave publica REALMENTE chega ao binario, antes de
+      # publicar qualquer coisa.
+      #
+      # `-ldflags -X` contra simbolo inexistente nao da erro: o linker ignora,
+      # o build passa, e sai um binario com a chave vazia -- uma release
+      # "assinada" cujo `ngx update` nao verifica assinatura nenhuma, sem
+      # nenhum sinal. Ja aconteceu neste repo: o alvo apontava para
+      # internal/output.PublicKey, que nunca existiu.
+      #
+      # Procurar a chave com `strings` NAO funciona, e essa foi a primeira
+      # tentativa: o Go grava os proprios ldflags na secao de build info, entao
+      # o valor aparece no binario mesmo quando o -X foi ignorado. A unica
+      # forma de distinguir e perguntar ao binario EM EXECUCAO, que so mostra
+      # `update_public_key` quando a variavel foi de fato preenchida.
+      - name: prova que a chave publica foi embutida
+        env:
+          NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
+        run: |
+          go build -ldflags \
+            "-X github.com/s0beran0/ngx/internal/update.ChavePublica=$NGX_PUBLIC_KEY" \
+            -o /tmp/ngx-prova ./cmd/ngx
+          embutida=$(/tmp/ngx-prova version --json | jq -r '.data.update_public_key // ""')
+          if [ "$embutida" != "$NGX_PUBLIC_KEY" ]; then
+            echo "ABORTADO: a chave publica nao chegou ao binario." >&2
+            echo "O -X foi ignorado em silencio -- confira se o simbolo" >&2
+            echo "internal/update.ChavePublica ainda existe com esse nome." >&2
+            echo "Publicar assim entregaria uma release que nao verifica nada." >&2
+            exit 1
+          fi
+          echo "chave publica embutida e conferida no artefato"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"

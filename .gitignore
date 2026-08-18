@@ -11,3 +11,7 @@ test/bancada/.chave/
 bin/
 cover.out
 cover.html
+
+# chave PRIVADA minisign: nunca no repositorio
+ngx-minisign.key
+*.key
