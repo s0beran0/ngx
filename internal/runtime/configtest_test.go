@@ -39,7 +39,7 @@ func TestTestConfigRejectedIsNotAnError(t *testing.T) {
 
 	d := res.Diagnostics[0]
 	assert.Equal(t, output.SeverityError, d.Severity)
-	assert.Equal(t, CodigoTesteConfig, d.Code)
+	assert.Equal(t, CodeConfigTest, d.Code)
 	assert.Equal(t, `unknown directive "foo"`, d.Message)
 	assert.Equal(t, "/etc/nginx/conf.d/a.conf", d.File)
 	assert.Equal(t, 3, d.Line)
@@ -56,7 +56,7 @@ func TestTestConfigWarningDoesNotChangeTheVerdict(t *testing.T) {
 	assert.Equal(t, output.SeverityWarning, res.Diagnostics[0].Severity)
 	// Severity never goes into the code: warning and error share the code
 	// and are told apart by the severity field.
-	assert.Equal(t, CodigoTesteConfig, res.Diagnostics[0].Code)
+	assert.Equal(t, CodeConfigTest, res.Diagnostics[0].Code)
 }
 
 // The same text, coming from two different transports, produces the same
@@ -93,7 +93,7 @@ func TestParseDiagnosticosWithoutLocation(t *testing.T) {
 
 // An unknown level must not become info: underrating what is not recognized
 // hides exactly the new case.
-func TestParseDiagnosticosUnknownLevelBecomesError(t *testing.T) {
+func TestParseDiagnosticsUnknownLevelBecomesError(t *testing.T) {
 	diags := ParseDiagnostics("nginx: [xyz] something unexpected")
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)

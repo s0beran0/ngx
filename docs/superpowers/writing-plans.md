@@ -60,7 +60,7 @@ care taken on the first pass, and no one checked that mechanism.
 When a fix introduces structure that didn't exist — a cache, a type of error,
 a goroutine, a lock — treat the re-review as a complete review, in the most
 capable, and ask for explicit judgment on the new logic. Do not use re-review
-cheap scopado, which only checks items off a list.
+a cheap scoped review that only ticks items off a list.
 
 *Cost avoided:* the fix that corrected five findings in `Parse` introduced a date
 race and silent file truncation. The truncation was worse than the
@@ -269,20 +269,20 @@ All of this already reaches the agent. Repeating costs each of his turns.
 ```
 <one sentence: what to do and where>
 
-## Escopo
-UM defeito/tarefa. Pare quando <condicao verificavel: a suite passar, o teste
-X ficar verde> e commite. Referencia de ~N chamadas de ferramenta: se passar
-disso sem terminar, pare, grave o estado no relatorio e reporte — nao
-continue. Diga no relatorio quantas chamadas usou.
+## Scope
+ONE defect/task. Stop when <verifiable condition: the suite passes, test X
+turns green> and commit. Budget of about N tool calls: if you go past that
+without finishing, stop, record the state in the report and report back — do
+not keep going. Say in the report how many calls you used.
 
-## Arquivos
+## Files
 <exact paths. Say what does NOT need reading.>
 
 ## What to do
 <only what the brief does not cover, or what changed since it was written>
 
-## Ao terminar
-`go test ./... -race` (sem -v). Commite. Relatorio em <caminho>.
+## When you finish
+`go test ./... -race` (without -v). Commit. Report at <path>.
 Final response: STATUS, commit, one line of test output, one line per item.
 ```
 

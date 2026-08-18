@@ -114,7 +114,7 @@ func validateIfExpressions(path string, src []byte) ParseErrors {
 			File:    path,
 			Line:    name.Line,
 			Message: fmt.Sprintf("directive \"if\" with expression %q: the expression must be parenthesized and cannot be empty", strings.Join(args, " ")),
-			Classe:  RefusalInvalidIfExpression,
+			Class:   RefusalInvalidIfExpression,
 			Token:   name.Raw,
 		})
 	}

@@ -20,7 +20,7 @@ terminal:
 
 ```console
 $ ngx --no-redact inspect -c nginx.conf | cat
-{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--no-redact so e aceito quando a saida e um terminal"}],"meta":{"duration_ms":0,"target":"local"}}
+{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--no-redact is only accepted when the output is a terminal"}],"meta":{"duration_ms":0,"target":"local"}}
 ```
 
 A human who asks to see the secret sees it on screen. An agent reading the
@@ -69,7 +69,7 @@ $ ./bin/ngx version
 Copy `bin/ngx` wherever you want — it is a static binary, no installer needed.
 
 Other useful targets: `make test`, `make test-race`, `make lint`, `make
-verificar` (what CI runs) and `make ajuda` for the full list.
+verify` (what CI runs) and `make help` for the full list.
 
 ### The installers
 
@@ -107,7 +107,7 @@ comes from `-c`/`--config`, or from `nginx.config` in `ngx`'s own
 configuration file.
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/exemplo.conf | jq -c '.data.summary'
+$ ./bin/ngx inspect -c internal/cli/testdata/example.conf | jq -c '.data.summary'
 {"files":1,"servers":1,"locations":2,"upstreams":1}
 ```
 
@@ -119,8 +119,8 @@ first `location` of the first `server` inside `http`. The envelope also brings
 Sensitive values come out redacted by default:
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/exemplo.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
-{"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/exemplo.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"id":"h.s0.d2"}
+$ ./bin/ngx inspect -c internal/cli/testdata/example.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
+{"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/example.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"id":"h.s0.d2"}
 ```
 
 `--combine` resolves the `include`s into a single tree instead of a list of
@@ -193,8 +193,8 @@ A syntax error in the configuration points at file and line, and exits with
 code 3:
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/invalido.conf; echo "exit=$?"
-{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0003","message":"internal/cli/testdata/invalido.conf:5: unexpected end of file, expecting \"}\" in internal/cli/testdata/invalido.conf:5","file":"internal/cli/testdata/invalido.conf","line":5}],"meta":{"duration_ms":0,"target":"local"}}
+$ ./bin/ngx inspect -c internal/cli/testdata/invalid.conf; echo "exit=$?"
+{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0003","message":"internal/cli/testdata/invalid.conf:5: unexpected end of file, expecting \"}\" in internal/cli/testdata/invalid.conf:5","file":"internal/cli/testdata/invalid.conf","line":5}],"meta":{"duration_ms":0,"target":"local"}}
 exit=3
 ```
 

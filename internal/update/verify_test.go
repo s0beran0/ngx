@@ -50,7 +50,7 @@ func TestVerifyRejectsMismatchedChecksum(t *testing.T) {
 
 	err := Verify([]byte("swapped"), checksums, sig, keyText(t, pub), "ngx_linux_amd64.tar.gz")
 
-	assert.Equal(t, CodigoChecksumDivergente, codeOf(t, err))
+	assert.Equal(t, CodeChecksumMismatch, codeOf(t, err))
 	assert.Contains(t, err.Error(), "ngx_linux_amd64.tar.gz")
 }
 
@@ -68,7 +68,7 @@ func TestVerifyRejectsInvalidSignatureBeforeLookingAtChecksum(t *testing.T) {
 
 	err := Verify([]byte("anything"), checksums, sig, keyText(t, otherPub), "ngx_linux_amd64.tar.gz")
 
-	assert.Equal(t, CodigoAssinaturaInvalida, codeOf(t, err))
+	assert.Equal(t, CodeInvalidSignature, codeOf(t, err))
 }
 
 func TestVerifyRejectsSignatureOfOtherContent(t *testing.T) {
@@ -78,7 +78,7 @@ func TestVerifyRejectsSignatureOfOtherContent(t *testing.T) {
 
 	err := Verify([]byte("content"), checksums, sig, keyText(t, pub), "a.tar.gz")
 
-	assert.Equal(t, CodigoAssinaturaInvalida, codeOf(t, err))
+	assert.Equal(t, CodeInvalidSignature, codeOf(t, err))
 }
 
 func TestVerifyRejectsWithoutPublicKey(t *testing.T) {
@@ -91,7 +91,7 @@ func TestVerifyRejectsWithoutPublicKey(t *testing.T) {
 
 	err := Verify([]byte("x"), checksums, sig, "", "a.tar.gz")
 
-	assert.Equal(t, CodigoSemChavePublica, codeOf(t, err))
+	assert.Equal(t, CodeNoPublicKey, codeOf(t, err))
 	assert.Contains(t, err.Error(), "without an embedded public verification key")
 	assert.Contains(t, err.Error(), "cannot update itself")
 }
@@ -101,7 +101,7 @@ func TestVerifyRejectsWhitespaceOnlyKey(t *testing.T) {
 	checksums := checksumsFor(map[string][]byte{"a.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, checksums)
 
-	assert.Equal(t, CodigoSemChavePublica,
+	assert.Equal(t, CodeNoPublicKey,
 		codeOf(t, Verify([]byte("x"), checksums, sig, "   \n\t ", "a.tar.gz")))
 }
 
@@ -114,7 +114,7 @@ func TestVerifyRejectsPlaceholderKey(t *testing.T) {
 
 	err := Verify([]byte("x"), checksums, sig, PublicKeyPlaceholder, "a.tar.gz")
 
-	assert.Equal(t, CodigoChavePlaceholder, codeOf(t, err))
+	assert.Equal(t, CodePlaceholderKey, codeOf(t, err))
 }
 
 func TestVerifyRejectsMalformedKey(t *testing.T) {
@@ -124,7 +124,7 @@ func TestVerifyRejectsMalformedKey(t *testing.T) {
 
 	err := Verify([]byte("x"), checksums, sig, "this is not a key", "a.tar.gz")
 
-	assert.Equal(t, CodigoChaveInvalida, codeOf(t, err))
+	assert.Equal(t, CodeInvalidKey, codeOf(t, err))
 }
 
 func TestVerifyRejectsFileMissingFromChecksums(t *testing.T) {
@@ -134,7 +134,7 @@ func TestVerifyRejectsFileMissingFromChecksums(t *testing.T) {
 
 	err := Verify([]byte("x"), checksums, sig, keyText(t, pub), "ngx_linux_arm64.tar.gz")
 
-	assert.Equal(t, CodigoChecksumAusente, codeOf(t, err))
+	assert.Equal(t, CodeChecksumMissing, codeOf(t, err))
 	assert.Contains(t, err.Error(), "ngx_linux_arm64.tar.gz")
 }
 
@@ -147,7 +147,7 @@ func TestVerifyDoesNotAcceptKeyFromAnotherPair(t *testing.T) {
 
 	err := Verify(artifact, checksums, sig, keyText(t, strangePub), "a.tar.gz")
 
-	assert.Equal(t, CodigoAssinaturaInvalida, codeOf(t, err))
+	assert.Equal(t, CodeInvalidSignature, codeOf(t, err))
 }
 
 func TestChecksumForGoreleaserFormat(t *testing.T) {

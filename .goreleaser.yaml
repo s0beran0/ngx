@@ -1,8 +1,8 @@
-# Configuracao do goreleaser para o ngx.
+# Goreleaser configuration for ngx.
 #
-# O release e disparado por tag (ver .github/workflows/release.yml). O canal
-# sai do proprio semver (DD1): "v0.2.0" e stable, "v0.2.0-rc.1" e pre-release.
-# Nao ha branch de release para manter em sincronia.
+# The release is triggered by a tag (see .github/workflows/release.yml). The
+# channel comes out of the semver itself (DD1): "v0.2.0" is stable,
+# "v0.2.0-rc.1" is a pre-release. There is no release branch to keep in sync.
 version: 2
 project_name: ngx
 
@@ -15,12 +15,12 @@ builds:
     main: ./cmd/ngx
     binary: ngx
     env:
-      # Binario estatico, sem cgo. Mesma regra do CI: uma dependencia que
-      # exigisse cgo quebraria o cross-compile das seis plataformas.
+      # Static binary, no cgo. Same rule as CI: a dependency that required
+      # cgo would break the cross-compile of the six platforms.
       - CGO_ENABLED=0
     flags:
-      # Tira o caminho da maquina de build do binario: sem isso o mesmo commit
-      # produz binarios diferentes conforme o diretorio do runner.
+      # Strips the build machine's path out of the binary: without it the same
+      # commit produces different binaries depending on the runner's directory.
       - -trimpath
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
@@ -28,52 +28,55 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/s0beran0/ngx/internal/output.Version={{ .Version }}
-      # ATENCAO: PONTO DE EMBUTIR A CHAVE PUBLICA (DD3).
+      # ATTENTION: THIS IS WHERE THE PUBLIC KEY GETS EMBEDDED (DD3).
       #
-      # A chave publica minisign entra aqui, no build, e nunca e baixada em
-      # tempo de execucao — uma chave que o proprio "ngx update" busca na rede
-      # nao protege contra nada, porque quem controla o servidor entrega a
-      # chave dele junto com o binario dele.
+      # The minisign public key enters here, at build time, and is never
+      # downloaded at run time -- a key that "ngx update" fetches from the
+      # network itself protects against nothing, because whoever controls the
+      # server hands over their own key along with their own binary.
       #
-      # O valor vem da variable de repositorio NGX_PUBLIC_KEY (variable, nao
-      # secret: chave publica e publica por definicao). O default vazio e
-      # deliberado e vale so para build local/snapshot: binario sem chave faz
-      # o "ngx update" recusar atualizar, em vez de aceitar sem verificacao.
-      # No release, o workflow aborta antes de compilar se a variable estiver
-      # vazia — um release sem chave embutida seria pior que nenhum release.
+      # The value comes from the repository variable NGX_PUBLIC_KEY (a
+      # variable, not a secret: a public key is public by definition). The
+      # empty default is deliberate and only valid for a local/snapshot build:
+      # a binary with no key makes "ngx update" refuse to update, instead of
+      # accepting without verification. On a release, the workflow aborts
+      # before compiling if the variable is empty -- a release with no embedded
+      # key would be worse than no release at all.
       #
-      # O simbolo e internal/update.ChavePublica, que e quem o `ngx update`
-      # de fato consulta. Apontar para outro lugar nao daria erro nenhum: o
-      # linker ignora -X contra simbolo inexistente, o build passa e o binario
-      # sai sem chave. Foi o que quase aconteceu -- o alvo original era
-      # internal/output.PublicKey, que nao existe e nada leria.
-      - -X github.com/s0beran0/ngx/internal/update.ChavePublica={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
+      # The symbol is internal/update.PublicKey, which is what `ngx update`
+      # actually consults. Pointing it anywhere else would raise no error: the
+      # linker ignores -X against a non-existent symbol, the build passes and
+      # the binary ships with no key. That is what almost happened -- the
+      # original target was internal/output.PublicKey, which does not exist and
+      # would have read nothing.
+      - -X github.com/s0beran0/ngx/internal/update.PublicKey={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
 
 archives:
   - id: ngx
     formats: [tar.gz]
-    # Windows recebe .zip: e o que a plataforma abre sem ferramenta extra, e
-    # o que o install.ps1 espera.
+    # Windows gets .zip: it is what the platform opens with no extra tool, and
+    # what install.ps1 expects.
     format_overrides:
       - goos: windows
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      # Um arquivo listado aqui que nao exista no repositorio faz o goreleaser
-      # abortar. Por isso so o LICENSE por enquanto: acrescente README.md a
-      # esta lista quando o arquivo existir na raiz.
+      # A file listed here that does not exist in the repository makes
+      # goreleaser abort. Hence only the LICENSE for now: add README.md to this
+      # list once the file exists at the root.
       - LICENSE
 
 checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-# Assinar apenas o checksums.txt e suficiente: ele cobre todos os artefatos
-# por hash, entao uma assinatura protege o conjunto inteiro (DD2).
+# Signing checksums.txt alone is enough: it covers every artifact by hash, so
+# one signature protects the whole set (DD2).
 #
-# A chave privada vive fora do GitHub e chega ao runner como secret; o caminho
-# do arquivo temporario vem em MINISIGN_KEY_FILE e a senha em MINISIGN_PASSWORD,
-# entregue pelo stdin porque o minisign nao le senha de variavel de ambiente.
+# The private key lives outside GitHub and reaches the runner as a secret; the
+# path of the temporary file comes in MINISIGN_KEY_FILE and the password in
+# MINISIGN_PASSWORD, delivered over stdin because minisign does not read the
+# password from an environment variable.
 signs:
   - id: minisign
     cmd: minisign
@@ -90,18 +93,19 @@ signs:
     stdin: "{{ .Env.MINISIGN_PASSWORD }}"
 
 release:
-  # Marca a release como pre-release quando a tag tem sufixo de pre-lancamento
-  # (-beta, -rc, -alpha). E o que separa o canal beta do stable (DD1).
+  # Marks the release as a pre-release when the tag carries a pre-release
+  # suffix (-beta, -rc, -alpha). It is what separates the beta channel from the
+  # stable channel (DD1).
   prerelease: auto
   draft: false
   footer: |
     ---
 
-    ### Verificando o download
+    ### Verifying the download
 
-    Os artefatos sao cobertos por `checksums.txt`, e o `checksums.txt` e
-    assinado com minisign. A chave publica esta versionada no repositorio,
-    em `ngx-minisign.pub`, e e a mesma embutida no binario.
+    The artifacts are covered by `checksums.txt`, and `checksums.txt` is signed
+    with minisign. The public key is versioned in the repository, in
+    `ngx-minisign.pub`, and it is the same one embedded in the binary.
 
     ```sh
     minisign -Vm checksums.txt -p ngx-minisign.pub

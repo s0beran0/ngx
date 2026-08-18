@@ -6,26 +6,26 @@ repository: whoever clones the project brings the bench up with a single
 command, on Linux or macOS, with nothing installed beyond Docker and `ssh`.
 
 ```sh
-make bancada-up      # generates the key, builds the image and starts the container
-make bancada-smoke   # proves, one by one, the required properties
-make bancada-down    # tears down the container, removes the image and deletes the key
+make bench-up      # generates the key, builds the image and starts the container
+make bench-smoke   # proves, one by one, the required properties
+make bench-down    # tears down the container, removes the image and deletes the key
 ```
 
-Helpers: `make bancada-logs` (the `sshd` log) and `make bancada-shell` (an
+Helpers: `make bench-logs` (the `sshd` log) and `make bench-shell` (an
 interactive session as `ngxtest`).
 
 ## How to connect
 
 | | |
 |---|---|
-| Address | `127.0.0.1`, port **2222** (fixed; `make BANCADA_PORTA=2223 bancada-up` to change it) |
+| Address | `127.0.0.1`, port **2222** (fixed; `make BENCH_PORT=2223 bench-up` to change it) |
 | User | `ngxtest`, uid 1000, **non-root** |
-| Private key | `test/bancada/.chave/id_ed25519` (ed25519, no passphrase) |
+| Private key | `test/bench/.key/id_ed25519` (ed25519, no passphrase) |
 | Privilege | `sudo -n /usr/sbin/nginx`, no password, nginx **only** |
 | nginx | 1.20.1, Oracle Linux 9 |
 
 The port listens on `127.0.0.1` only. The key is **generated** by
-`make bancada-up` and never enters git (`test/bancada/.chave/` is in
+`make bench-up` and never enters git (`test/bench/.key/` is in
 `.gitignore`); the container's host keys are generated on every startup, so
 that the test for refusing an unknown host key does not trip over a
 `known_hosts` left by the previous run.
@@ -38,7 +38,7 @@ that brings the layout with three include directories and an nginx compiled
 with `--modules-path`, which gives the third wildcard without a hack. The
 `nginx` appstream module is disabled at build time so that the non-modular
 package wins, which is precisely 1.20.1 — without that, the day the default
-stream turns 1.26 the bench would change on its own. `gerar-config.sh` aborts
+stream turns 1.26 the bench would change on its own. `generate-config.sh` aborts
 if the version is not 1.20.x.
 
 **Three wildcard patterns**, which only resolve inside the container:
@@ -50,7 +50,7 @@ if the version is not 1.20.x.
 | `include /etc/nginx/default.d/*.conf;` | `server` | 12 |
 
 **130 files in the effective configuration**, counting `nginx.conf` and
-`mime.types`. The number is checked in the build itself: `gerar-config.sh`
+`mime.types`. The number is checked in the build itself: `generate-config.sh`
 runs `nginx -T` and fails if the total does not match. It is the volume that
 makes sequential latency visible — a target with three files passes everything
 and proves nothing.
@@ -64,8 +64,8 @@ escalated on its own would go unnoticed.
 **A secret inside the configuration**, in three forms, to exercise redaction
 end to end:
 
-- a literal token in the text — `proxy_set_header Authorization "Bearer ngx-bancada-token-4f3c9a1b2e";`
-  in `conf.d/05-privado.conf`. It is the only one that shows up in the
+- a literal token in the text — `proxy_set_header Authorization "Bearer ngx-bench-token-4f3c9a1b2e";`
+  in `conf.d/05-private.conf`. It is the only one that shows up in the
   `nginx -T` dump, and therefore the one redaction has to catch;
 - `auth_basic_user_file /etc/nginx/secrets/htpasswd;`
 - `ssl_certificate_key /etc/nginx/secrets/tls.key;` — a real RSA key,
@@ -76,12 +76,12 @@ None of these secrets is real, and none leaves the container.
 
 ## The glob trap
 
-`armadilha-local/etc/nginx/conf.d/zz-armadilha-local.conf` is a file with the
+`local-trap/etc/nginx/conf.d/zz-local-trap.conf` is a file with the
 same directory name used inside the container, but **on the local disk**. It
 only enters a tree read from the bench if the parser's `Glob` is not injected
 with the remote filesystem — the defect Task R3 fixed.
 
-The marker `ARMADILHA-LOCAL-NAO-DEVE-APARECER` must never appear in an
+The marker `LOCAL-TRAP-MUST-NOT-APPEAR` must never appear in an
 effective configuration read from the container; the smoke test verifies this,
 and the Go integration test must point its local filesystem at that directory
 when exercising the case.
@@ -91,11 +91,11 @@ when exercising the case.
 | File | Role |
 |---|---|
 | `Dockerfile` | image: Oracle Linux 9, nginx 1.20.1, `sshd`, `sudo`, user `ngxtest` |
-| `sshd_config.bancada` | `sshd` by key only; `PermitRootLogin no`, no password, with SFTP |
-| `gerar-config.sh` | generates the 130 files at build time and checks the total |
+| `sshd_config.bench` | `sshd` by key only; `PermitRootLogin no`, no password, with SFTP |
+| `generate-config.sh` | generates the 130 files at build time and checks the total |
 | `entrypoint.sh` | installs the public key, generates host keys, starts nginx and `sshd` |
 | `smoke.sh` | proves the properties above against the running container |
-| `armadilha-local/` | local namesake for the glob test |
+| `local-trap/` | local namesake for the glob test |
 
 The container is disposable and runs locally only: it has no hardening, and it
 should not be exposed. What it does not have, on purpose: a root password,

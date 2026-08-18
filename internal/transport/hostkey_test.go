@@ -73,7 +73,7 @@ func TestHostKeyMatchingKeyProducesNoDiagnostic(t *testing.T) {
 	key := generateKey(t)
 	path := writeKnownHosts(t, knownHostsLine(key))
 
-	callback, diags, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	callback, diags, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.NoError(t, err)
 	require.NotNil(t, diags, "the list of diagnostics is never nil")
 	assert.Empty(t, diags, "the happy path warns about nothing")
@@ -87,9 +87,9 @@ func TestHostKeyUnknownHostRefusesAndTeachesHowToAdd(t *testing.T) {
 	recorded := generateKey(t)
 	// The file exists and has entries, just not for this host.
 	path := writeKnownHosts(t,
-		knownhosts.Line([]string{"outro.exemplo"}, recorded))
+		knownhosts.Line([]string{"other.example"}, recorded))
 
-	callback, _, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	callback, _, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.NoError(t, err)
 
 	presented := generateKey(t)
@@ -110,7 +110,7 @@ func TestHostKeyChangedKeyReportsPossibleAttack(t *testing.T) {
 	recorded := generateKey(t)
 	path := writeKnownHosts(t, knownHostsLine(recorded))
 
-	callback, _, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	callback, _, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.NoError(t, err)
 
 	presented := generateKey(t)
@@ -142,12 +142,12 @@ func TestHostKeyUnknownAndChangedAreDistinguishable(t *testing.T) {
 	presented := generateKey(t)
 
 	unknownPath := writeKnownHosts(t,
-		knownhosts.Line([]string{"outro.exemplo"}, recorded))
+		knownhosts.Line([]string{"other.example"}, recorded))
 	changedPath := writeKnownHosts(t, knownHostsLine(recorded))
 
-	unknownCallback, _, err := VerificadorHostKey(SSHOptions{KnownHostsPath: unknownPath})
+	unknownCallback, _, err := HostKeyVerifier(SSHOptions{KnownHostsPath: unknownPath})
 	require.NoError(t, err)
-	changedCallback, _, err := VerificadorHostKey(SSHOptions{KnownHostsPath: changedPath})
+	changedCallback, _, err := HostKeyVerifier(SSHOptions{KnownHostsPath: changedPath})
 	require.NoError(t, err)
 
 	unknownDiag := diagnosticOf(t, unknownCallback(testHost, remoteAddr(), presented))
@@ -187,7 +187,7 @@ func TestHostKeyRevokedKeyHasItsOwnOutcome(t *testing.T) {
 		knownHostsLine(valid),
 		"@revoked "+knownHostsLine(revoked))
 
-	callback, _, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	callback, _, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.NoError(t, err)
 
 	diag := diagnosticOf(t, callback(testHost, remoteAddr(), revoked))
@@ -209,7 +209,7 @@ func TestHostKeyRevokedKeyHasItsOwnOutcome(t *testing.T) {
 func TestHostKeyMissingKnownHostsHasItsOwnOutcome(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_hosts")
 
-	callback, diags, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	callback, diags, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.Error(t, err, "with no file there is nothing to compare; ngx refuses")
 	assert.Nil(t, callback)
 	assert.Empty(t, diags)
@@ -235,7 +235,7 @@ func TestHostKeyUnreadableKnownHostsIsNotAMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	require.NoError(t, os.Mkdir(path, 0o700))
 
-	_, _, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
+	_, _, err := HostKeyVerifier(SSHOptions{Host: "10.0.0.9", KnownHostsPath: path})
 	require.Error(t, err)
 
 	diag := diagnosticOf(t, err)
@@ -247,7 +247,7 @@ func TestHostKeyUnreadableKnownHostsIsNotAMissingFile(t *testing.T) {
 // --- The DR1 escape hatch ---
 
 func TestHostKeyInsecureAcceptsAnyKeyButWarns(t *testing.T) {
-	callback, diags, err := VerificadorHostKey(SSHOptions{
+	callback, diags, err := HostKeyVerifier(SSHOptions{
 		Host:            "10.0.0.9",
 		InsecureHostKey: true,
 	})
@@ -271,9 +271,9 @@ func TestHostKeyInsecureAcceptsAnyKeyButWarns(t *testing.T) {
 func TestHostKeyInsecureIgnoresMissingKnownHosts(t *testing.T) {
 	// The escape hatch serves precisely whoever does not have the host
 	// recorded: it cannot trip over the missing file before taking effect.
-	callback, diags, err := VerificadorHostKey(SSHOptions{
+	callback, diags, err := HostKeyVerifier(SSHOptions{
 		Host:            "10.0.0.9",
-		KnownHostsPath:  filepath.Join(t.TempDir(), "nao-existe"),
+		KnownHostsPath:  filepath.Join(t.TempDir(), "does-not-exist"),
 		InsecureHostKey: true,
 	})
 	require.NoError(t, err)
@@ -288,20 +288,20 @@ func TestHostKeyRefusalsUseDocumentedExitCode(t *testing.T) {
 	presented := generateKey(t)
 
 	withOtherKey := writeKnownHosts(t, knownHostsLine(recorded))
-	withoutHost := writeKnownHosts(t, knownhosts.Line([]string{"outro.exemplo"}, recorded))
+	withoutHost := writeKnownHosts(t, knownhosts.Line([]string{"other.example"}, recorded))
 	withRevoked := writeKnownHosts(t, "@revoked "+knownHostsLine(presented))
 
 	refuse := func(t *testing.T, path string) error {
 		t.Helper()
-		callback, _, err := VerificadorHostKey(SSHOptions{KnownHostsPath: path})
+		callback, _, err := HostKeyVerifier(SSHOptions{KnownHostsPath: path})
 		require.NoError(t, err)
 		return callback(testHost, remoteAddr(), presented)
 	}
 
 	cases := map[string]error{
 		"host desconhecido": refuse(t, withoutHost),
-		"chave alterada":    refuse(t, withOtherKey),
-		"chave revogada":    refuse(t, withRevoked),
+		"changed key":       refuse(t, withOtherKey),
+		"revoked key":       refuse(t, withRevoked),
 	}
 
 	seen := map[string]string{}
@@ -318,8 +318,8 @@ func TestHostKeyRefusalsUseDocumentedExitCode(t *testing.T) {
 	}
 
 	// Adding the missing known_hosts, that is four distinct codes.
-	_, _, err := VerificadorHostKey(SSHOptions{
-		KnownHostsPath: filepath.Join(t.TempDir(), "nao-existe"),
+	_, _, err := HostKeyVerifier(SSHOptions{
+		KnownHostsPath: filepath.Join(t.TempDir(), "does-not-exist"),
 	})
 	seen[diagnosticOf(t, err).Code] = "known_hosts ausente"
 	assert.Len(t, seen, 4, "the four refusal outcomes are distinguishable by code")

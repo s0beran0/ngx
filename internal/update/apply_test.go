@@ -85,7 +85,7 @@ func TestApplyRejectsEmptyBinary(t *testing.T) {
 
 	err := Apply(path, nil)
 
-	assert.Equal(t, CodigoArtefatoInvalido, codeOf(t, err))
+	assert.Equal(t, CodeInvalidArtifact, codeOf(t, err))
 	assert.Equal(t, "old", contentOf(t, path))
 }
 
@@ -104,7 +104,7 @@ func TestApplyWithoutDirectoryPermissionExplainsWhatIsMissing(t *testing.T) {
 
 	err := Apply(path, []byte("new"))
 
-	assert.Equal(t, CodigoPermissao, codeOf(t, err))
+	assert.Equal(t, CodePermission, codeOf(t, err))
 	assert.Contains(t, err.Error(), dir)
 	assert.Contains(t, err.Error(), "privilege")
 	assert.Equal(t, "old", contentOf(t, path), "the current binary has to stay intact")
@@ -178,7 +178,7 @@ func TestSwapByRenameFollowsTheDD5Sequence(t *testing.T) {
 func TestSwapByRenameIgnoresFailureRemovingTheOld(t *testing.T) {
 	// On Windows the removal of the .old fails because the file is still in
 	// use by the running process. That is expected and must not abort the
-	// update: the cleanup is left to LimparResiduo, on the next run.
+	// update: the cleanup is left to CleanLeftovers, on the next run.
 	path := testBinary(t, "old ngx", 0o755)
 	reg := &recordedOps{failAt: "remove ngx.old"}
 
@@ -198,7 +198,7 @@ func TestSwapByRenameRestoresWhenTheThirdStepFails(t *testing.T) {
 
 	err := swapByRename(reg.ops(), path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Equal(t, CodeSwapFailed, codeOf(t, err))
 	assert.Contains(t, err.Error(), "restored")
 	require.FileExists(t, path)
 	assert.Equal(t, "old ngx", contentOf(t, path))
@@ -212,7 +212,7 @@ func TestSwapByRenameDoesNotTouchTheBinaryWhenTheSecondStepFails(t *testing.T) {
 
 	err := swapByRename(reg.ops(), path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Equal(t, CodeSwapFailed, codeOf(t, err))
 	assert.Equal(t, "old ngx", contentOf(t, path))
 	assert.NoFileExists(t, path+".new")
 }
@@ -237,7 +237,7 @@ func TestSwapByRenameSaysWhereTheBinaryIsWhenEvenTheRestoreFails(t *testing.T) {
 
 	err := swapByRename(ops, path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Equal(t, CodeSwapFailed, codeOf(t, err))
 	assert.Contains(t, err.Error(), path+oldSuffix)
 	assert.Contains(t, err.Error(), "by hand")
 	// The old content still exists, even if under another name.
@@ -269,32 +269,32 @@ func TestSwapByRenameWithoutPermissionExplainsTheDirectory(t *testing.T) {
 
 	err := swapByRename(realOps(), path, []byte("new"), 0o755)
 
-	assert.Equal(t, CodigoPermissao, codeOf(t, err))
+	assert.Equal(t, CodePermission, codeOf(t, err))
 	assert.Equal(t, "old", contentOf(t, path))
 }
 
 func TestWriteErrorSeparatesPermissionFromOtherFailures(t *testing.T) {
 	err := writeError(fs.ErrPermission, "/opt/ngx/bin/ngx")
-	assert.Equal(t, CodigoPermissao, codeOf(t, err))
+	assert.Equal(t, CodePermission, codeOf(t, err))
 	assert.Contains(t, err.Error(), filepath.FromSlash("/opt/ngx/bin"))
 
 	err = writeError(errors.New("disk full"), "/opt/ngx/bin/ngx")
-	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Equal(t, CodeSwapFailed, codeOf(t, err))
 }
 
-func TestLimparResiduoRemovesTheOld(t *testing.T) {
+func TestCleanLeftoversRemovesTheOld(t *testing.T) {
 	path := testBinary(t, "ngx", 0o755)
 	require.NoError(t, os.WriteFile(path+oldSuffix, []byte("orphan"), 0o755))
 
-	LimparResiduo(path)
+	CleanLeftovers(path)
 
 	assert.NoFileExists(t, path+oldSuffix)
 	assert.FileExists(t, path)
 }
 
-func TestLimparResiduoIsSilentWhenThereIsNothing(t *testing.T) {
+func TestCleanLeftoversIsSilentWhenThereIsNothing(t *testing.T) {
 	// It returns no error and does not panic: an orphan that does not exist,
 	// or an empty path at startup, are not the user's problem.
-	LimparResiduo(filepath.Join(t.TempDir(), "ngx"))
-	LimparResiduo("")
+	CleanLeftovers(filepath.Join(t.TempDir(), "ngx"))
+	CleanLeftovers("")
 }

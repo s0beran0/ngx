@@ -54,7 +54,7 @@ const (
 	CodeInsecureHostKeyWarning = "NGX-0211"
 )
 
-// VerificadorHostKey builds the ngx ssh.HostKeyCallback according to DR1: the
+// HostKeyVerifier builds the ngx ssh.HostKeyCallback according to DR1: the
 // server key is checked against the user's known_hosts and any divergence
 // refuses the connection.
 //
@@ -69,7 +69,7 @@ const (
 // callback, for two reasons: it does not depend on which key the server
 // presents, and a callback writing into a shared list would be a data race
 // with concurrent handshakes.
-func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnostic, error) {
+func HostKeyVerifier(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	if opts.InsecureHostKey {

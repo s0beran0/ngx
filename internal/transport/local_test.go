@@ -66,7 +66,7 @@ func TestLocalOpenMissingFile(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
-	f, err := tr.Open(filepath.Join(t.TempDir(), "nao-existe.conf"))
+	f, err := tr.Open(filepath.Join(t.TempDir(), "does-not-exist.conf"))
 	require.Error(t, err)
 	assert.True(t, os.IsNotExist(err), "the error should be a missing-file one, got %v", err)
 	assert.Nil(t, f)
@@ -136,7 +136,7 @@ func TestLocalRunMissingBinary(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
-	argv := []string{filepath.Join(t.TempDir(), "binario-que-nao-existe"), "-t"}
+	argv := []string{filepath.Join(t.TempDir(), "binary-that-does-not-exist"), "-t"}
 	_, _, _, err := tr.Run(context.Background(), argv)
 	require.Error(t, err, "a missing binary is a transport error, not the command's verdict")
 }

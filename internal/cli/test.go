@@ -31,15 +31,15 @@ type TestData struct {
 // RenderHuman writes the line a human wants to read. The diagnostics were
 // already printed by the renderer before getting here.
 func (d TestData) RenderHuman(w io.Writer) error {
-	veredito := "rejected"
+	verdict := "rejected"
 	if d.OK {
-		veredito = "accepted"
+		verdict = "accepted"
 	}
 	if d.ConfigFile == "" {
-		_, err := fmt.Fprintf(w, "configuration %s\n", veredito)
+		_, err := fmt.Fprintf(w, "configuration %s\n", verdict)
 		return err
 	}
-	_, err := fmt.Fprintf(w, "configuration %s: %s\n", veredito, d.ConfigFile)
+	_, err := fmt.Fprintf(w, "configuration %s: %s\n", verdict, d.ConfigFile)
 	return err
 }
 
@@ -51,10 +51,10 @@ func newTestCmd(ctx *Context) *cobra.Command {
 		Short: "Run `nginx -t` and return structured diagnostics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			execCtx, cancelar := ctx.contextoDeExecucao(cmd.Context())
-			defer cancelar()
+			execCtx, cancel := ctx.executionContext(cmd.Context())
+			defer cancel()
 
-			res, err := ctx.NovoRuntime().TestConfig(execCtx)
+			res, err := ctx.NewRuntime().TestConfig(execCtx)
 			if err != nil {
 				// Here nginx never got to answer: missing binary, denied
 				// privilege, transport down. That is an infrastructure
@@ -62,7 +62,7 @@ func newTestCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			env := ctx.NovoEnvelope("test")
+			env := ctx.NewEnvelope("test")
 			env.Data = TestData{
 				OK:         res.OK,
 				ConfigFile: res.ConfigFile,
@@ -85,8 +85,8 @@ func newTestCmd(ctx *Context) *cobra.Command {
 			// All that is missing is exit 3, which is why the error goes
 			// wrapped — a second envelope on stdout would break whoever reads
 			// the output as a single JSON document.
-			return semRerrenderizar(output.InvalidConfig(
-				"`nginx -t` rejected the configuration on %s", ctx.transporte().Describe()))
+			return withoutRerender(output.InvalidConfig(
+				"`nginx -t` rejected the configuration on %s", ctx.activeTransport().Describe()))
 		},
 	}
 }

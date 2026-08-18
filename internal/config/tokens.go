@@ -225,10 +225,10 @@ func (t *tokenizer) readQuoted(quote byte, start, line, col int) error {
 			value = append(value, t.consumeIntoValue()...)
 		}
 	}
-	return &ErroDeAspa{Aspa: string(quote), Linha: line}
+	return &QuoteError{Quote: string(quote), Line: line}
 }
 
-// ErroDeAspa is the source ending inside an open quote. It is a type, and not
+// QuoteError is the source ending inside an open quote. It is a type, and not
 // an fmt.Errorf, because this is one of the enumerated divergences against
 // crossplane: their lexer closes the quote implicitly at end of file
 // (lex.go:325-327, "if token.Len() > 0 { emit(tokenStartLine, lexState ==
@@ -236,13 +236,13 @@ func (t *tokenizer) readQuoted(quote byte, start, line, col int) error {
 // guard), so that a dangling quote yields an "ok" config for them. nginx
 // refuses it; we refuse it too, and the fuzz has to recognize this refusal by
 // its class, not by a substring of the message.
-type ErroDeAspa struct {
-	Aspa  string
-	Linha int
+type QuoteError struct {
+	Quote string
+	Line  int
 }
 
-func (e *ErroDeAspa) Error() string {
-	return fmt.Sprintf("quote %q opened on line %d was never closed", e.Aspa, e.Linha)
+func (e *QuoteError) Error() string {
+	return fmt.Sprintf("quote %q opened on line %d was never closed", e.Quote, e.Line)
 }
 
 // readWord consumes an unquoted word: a directive name or an argument. It

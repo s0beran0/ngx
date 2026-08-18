@@ -57,13 +57,13 @@ output:
 `)
 	local := write(t, dir, "local.yaml", `
 nginx:
-  config: /tmp/teste/nginx.conf
+  config: /tmp/test/nginx.conf
 `)
 
 	s, err := settings.Load(global, local)
 
 	require.NoError(t, err)
-	require.Equal(t, "/tmp/teste/nginx.conf", s.Nginx.Config, "the local file wins")
+	require.Equal(t, "/tmp/test/nginx.conf", s.Nginx.Config, "the local file wins")
 	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary, "a key that was not overridden survives")
 	require.Equal(t, "json", s.Output.Format)
 }
@@ -95,7 +95,7 @@ mcp:
 
 func TestInvalidYAMLBecomesError(t *testing.T) {
 	dir := t.TempDir()
-	bad := write(t, dir, "bad.yaml", "nginx: [isto: nao: fecha")
+	bad := write(t, dir, "bad.yaml", "nginx: [this: does: not: close")
 
 	_, err := settings.Load(bad, filepath.Join(dir, "ausente.yaml"))
 

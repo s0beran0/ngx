@@ -24,7 +24,7 @@ func TestGuardTurnsPanicIntoTypedRefusal(t *testing.T) {
 
 	var problems ParseErrors
 	require.True(t, errors.As(err, &problems))
-	require.Equal(t, RefusalCrossplanePanic, problems[0].Classe)
+	require.Equal(t, RefusalCrossplanePanic, problems[0].Class)
 	require.Contains(t, problems[0].Message, "boom from the dependency")
 }
 

@@ -32,7 +32,7 @@ func apply(path string, newBinary []byte, perm os.FileMode) error {
 
 	if err := os.Rename(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
-		return wrapError(err, CodigoTrocaFalhou,
+		return wrapError(err, CodeSwapFailed,
 			"could not put the new binary at %s; the current ngx stays in place "+
 				"and keeps working", path)
 	}

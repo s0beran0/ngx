@@ -20,7 +20,7 @@ import (
 func parseSimple(t *testing.T) *config.Tree {
 	t.Helper()
 	tree, err := config.Parse(config.ParseOptions{
-		Path: filepath.Join("testdata", "simples.conf"),
+		Path: filepath.Join("testdata", "simple.conf"),
 	})
 	require.NoError(t, err)
 	return tree
@@ -31,7 +31,7 @@ func TestParseProducesOneFileWithSource(t *testing.T) {
 
 	require.Len(t, tree.Files, 1)
 	require.NotEmpty(t, tree.Files[0].Source, "the original source has to be kept around for the spans")
-	require.Contains(t, tree.Files[0].Path, "simples.conf")
+	require.Contains(t, tree.Files[0].Path, "simple.conf")
 }
 
 func TestParsePreservesComments(t *testing.T) {
@@ -92,11 +92,11 @@ func TestParseKeepsArgsAndFile(t *testing.T) {
 
 	require.NotNil(t, listen)
 	require.Equal(t, []string{"443", "ssl"}, listen.Args)
-	require.Contains(t, listen.File, "simples.conf")
+	require.Contains(t, listen.File, "simple.conf")
 }
 
 func TestParseMissingFileBecomesError(t *testing.T) {
-	_, err := config.Parse(config.ParseOptions{Path: "testdata/nao-existe.conf"})
+	_, err := config.Parse(config.ParseOptions{Path: "testdata/does-not-exist.conf"})
 
 	require.Error(t, err)
 }
@@ -123,7 +123,7 @@ func TestInMemoryTreeIsNotRedacted(t *testing.T) {
 // return a *Tree with Source but zero Nodes, and no error at all.
 func TestParseSyntaxErrorBecomesParseErrors(t *testing.T) {
 	_, err := config.Parse(config.ParseOptions{
-		Path: filepath.Join("testdata", "erro_sintaxe.conf"),
+		Path: filepath.Join("testdata", "syntax_error.conf"),
 	})
 
 	require.Error(t, err)
@@ -141,7 +141,7 @@ func TestParseSyntaxErrorBecomesParseErrors(t *testing.T) {
 // normal channel.
 func TestParseBrokenIncludeBecomesParseErrors(t *testing.T) {
 	_, err := config.Parse(config.ParseOptions{
-		Path: filepath.Join("testdata", "include_quebrado.conf"),
+		Path: filepath.Join("testdata", "include_broken.conf"),
 	})
 
 	require.Error(t, err)
@@ -177,10 +177,10 @@ func TestParseWithInMemoryFilesystem(t *testing.T) {
 	require.Len(t, tree.Files, 1)
 	require.Equal(t, memFS["mem/nginx.conf"], tree.Files[0].Source)
 
-	// simples.conf really does exist on disk, but is not in the in-memory
+	// simple.conf really does exist on disk, but is not in the in-memory
 	// FS: the injected Open has to be the only source, with no fallback.
 	_, err = config.Parse(config.ParseOptions{
-		Path: filepath.Join("testdata", "simples.conf"),
+		Path: filepath.Join("testdata", "simple.conf"),
 		Open: open,
 	})
 	require.Error(t, err)
@@ -319,7 +319,7 @@ func (l *slowReader) Close() error { return nil }
 // reverting leituraEspelhada to the round 1 version and running this very
 // test. This test only pins the regression when run with go test -race.
 func TestParseWithArglessIncludeHasNoDataRace(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("testdata", "include_sem_args.conf"))
+	data, err := os.ReadFile(filepath.Join("testdata", "include_no_args.conf"))
 	require.NoError(t, err)
 
 	open := func(path string) (io.ReadCloser, error) {
@@ -327,7 +327,7 @@ func TestParseWithArglessIncludeHasNoDataRace(t *testing.T) {
 	}
 
 	_, err = config.Parse(config.ParseOptions{
-		Path: "include_sem_args.conf",
+		Path: "include_no_args.conf",
 		Open: open,
 	})
 
@@ -398,8 +398,8 @@ func TestParseIOFailureDoesNotTruncateSourceSilently(t *testing.T) {
 // would succeed on a second one, to prove that readSource propagates the
 // recorded error instead of re-reading the file.
 func TestParseTransientIOFailureDoesNotBecomePartialTree(t *testing.T) {
-	completo := []byte("worker_processes auto;\nevents {\n    worker_connections 1024;\n}\n")
-	firstLine := completo[:len("worker_processes auto;\n")]
+	full := []byte("worker_processes auto;\nevents {\n    worker_connections 1024;\n}\n")
+	firstLine := full[:len("worker_processes auto;\n")]
 
 	var calls int
 	open := func(path string) (io.ReadCloser, error) {
@@ -410,7 +410,7 @@ func TestParseTransientIOFailureDoesNotBecomePartialTree(t *testing.T) {
 		}
 		// if readSource re-read the file, this second read would succeed
 		// completely -- and that is exactly what must not happen.
-		return io.NopCloser(bytes.NewReader(completo)), nil
+		return io.NopCloser(bytes.NewReader(full)), nil
 	}
 
 	tree, err := config.Parse(config.ParseOptions{
@@ -480,7 +480,7 @@ func TestParseIOFailureInIncludeDoesNotBlameIncludingFile(t *testing.T) {
 		"the diagnostic has to point at the file that could not be read, not at the one doing the include")
 	require.NotEqual(t, top, p.File,
 		"the file doing the include is intact: blaming it sends the consumer off debugging the wrong file")
-	require.Equal(t, config.RefusalReadFailure, p.Classe,
+	require.Equal(t, config.RefusalReadFailure, p.Class,
 		"an I/O failure has to carry a class of its own, not come out as a crossplane refusal")
 	require.NotContains(t, p.Message, raw,
 		"the message is ours: it does not forward the raw Go runtime string")
@@ -511,7 +511,7 @@ func TestParseIOFailureAtTopHasOwnClassAndMessage(t *testing.T) {
 	p := problems[0]
 
 	require.Equal(t, "remote/nginx.conf", p.File)
-	require.Equal(t, config.RefusalReadFailure, p.Classe)
+	require.Equal(t, config.RefusalReadFailure, p.Class)
 	require.NotContains(t, p.Message, raw,
 		"the message is ours: it does not forward the raw Go runtime string")
 }

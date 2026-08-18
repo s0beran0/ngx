@@ -11,7 +11,7 @@ import "os"
 // not serve, and the sequence is the one from DD5, implemented in
 // swapByRename: write .new, rename the current one to .old, put the new
 // one in place and leave the removal of the .old for the next run
-// (LimparResiduo).
+// (CleanLeftovers).
 //
 // Go's os.Rename uses MoveFileEx with MOVEFILE_REPLACE_EXISTING, which is
 // enough for both renames: there is no need to call the Windows API directly.

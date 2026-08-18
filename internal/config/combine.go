@@ -54,7 +54,7 @@ func Combine(t *Tree) (*Tree, error) {
 			Nodes:  nodes,
 		}},
 	}
-	AtribuirIDs(combined.Files[0].Nodes, "")
+	AssignIDs(combined.Files[0].Nodes, "")
 	combined.Hash = Hash(combined)
 	return combined, nil
 }

@@ -40,7 +40,7 @@ RELEASES_URL="https://github.com/${REPOSITORY}/releases"
 # While the placeholder is here, the script REFUSES to install: absence of
 # verification is a failure, never a "carried on anyway".
 MINISIGN_PUBLIC_KEY="RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW"
-KEY_PLACEHOLDER="PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2"
+KEY_PLACEHOLDER="PLACEHOLDER-MINISIGN-KEY-NOT-GENERATED-SEE-TASK-D2"
 
 # Configurable through the environment. No surprising default values.
 # The default uses "-" and not ":-": NGX_INSTALL_DIR set but empty almost

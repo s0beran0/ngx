@@ -57,9 +57,7 @@ A public key that `update` himself downloads doesn't protect against anything: w
 
 `ngx` compiles and runs on Windows, because nginx for Windows exists and is officially distributed. But nginx.org itself classifies that build as **beta**: it only uses `select()`/`poll()`, "high performance and scalability should not be expected", only one worker actually works, and there is no support for UDP or QUIC.
 
-*Practical consequence:* the nginx binary on Windows is not installed by the package manager — it is left in an unpacked directory, like `C:
-ginx-1.31.3
-ginx.exe`, and uses the execution directory as a prefix. So the automatic path detection that works on Linux does not apply, and the documentation needs to show how to point `ngx` to the right directory with `-c`.
+*Practical consequence:* the nginx binary on Windows is not installed by the package manager — it is left in an unpacked directory, like `C:\nginx-1.31.3\nginx.exe`, and uses the execution directory as a prefix. So the automatic path detection that works on Linux does not apply, and the documentation needs to show how to point `ngx` to the right directory with `-c`.
 
 *The README tells the user this.* Supporting the platform and being honest about its limitations are not contradictory things — omitting would lead someone to bet production on a build that the vendor itself does not recommend.
 
@@ -108,12 +106,12 @@ jobs:
       - name: vet
         run: go vet ./...
 
-      - name: testes com race detector
+      - name: tests with race detector
         run: go test ./... -race
 
-      # The binary is distributed statically: a dependency that requires code
-      # it would break the cross-compile, and the error would only appear in the release.
-      - name: build sem cgo
+      # The binary ships statically linked: a dependency that needed C code
+      # would break the cross-compile, and the error would only surface at release time.
+      - name: build without cgo
         env:
           CGO_ENABLED: 0
         run: go build ./...
@@ -149,7 +147,7 @@ Expected: the workflow appears and both jobs are recognized.
 
 ```bash
 git add .github/workflows/ci.yml
-git commit -m "ci: roda vet, testes com race e cross-compile"
+git commit -m "ci: run vet, race tests and cross-compile"
 ```
 
 ---
@@ -181,8 +179,8 @@ In `internal/output/envelope.go`, next to `Version`:
 
 ```go
 // PublicKey is the minisign public key used to verify releases.
-// Filled in at build via -ldflags; empty in local build, which makes the
-// update command refuses to update instead of accepting without verification.
+// Filled in at build time via -ldflags; empty in a local build, which makes the
+// update command refuse to update rather than accept an unverified binary.
 var PublicKey = ""
 ```
 
@@ -212,7 +210,7 @@ builds:
 
 archives:
   - formats: [tar.gz]
-    # Windows receives .zip: and what the platform opens without extra tool, and
+    # Windows gets .zip: it is what the platform opens without an extra tool, and
     # what install.ps1 expects.
     format_overrides:
       - goos: windows
@@ -226,8 +224,8 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-# Assinar apenas o checksums.txt e suficiente: ele cobre todos os artefatos
-# by hash, then a signature protects the entire set.
+# Signing only checksums.txt is enough: it covers every artifact
+# by hash, so one signature protects the whole set.
 signs:
   - id: minisign
     cmd: minisign
@@ -237,8 +235,8 @@ signs:
     stdin: "{{ .Env.MINISIGN_PASSWORD }}"
 
 release:
-  # Marks the release as pre-release when the tag has a pre-release suffix
-  # (-beta, -rc, -alpha). And what separates the beta channel from the stable channel.
+  # Marks the release as a pre-release when the tag carries a pre-release suffix
+  # (-beta, -rc, -alpha). That is what separates the beta channel from the stable one.
   prerelease: auto
 
 changelog:
@@ -279,12 +277,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: instala o minisign
+      - name: install minisign
         run: |
           sudo apt-get update
           sudo apt-get install -y minisign
 
-      - name: prepara a chave de assinatura
+      - name: prepare the signing key
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
         run: |
@@ -313,7 +311,7 @@ Expected: generates `dist/` with the four binaries and `checksums.txt`. Confirm 
 
 ```bash
 git add .goreleaser.yaml .github/workflows/release.yml internal/output/envelope.go ngx-minisign.pub
-git commit -m "release: goreleaser com canais por semver e assinatura minisign"
+git commit -m "release: goreleaser with semver channels and minisign signing"
 ```
 
 ---
@@ -339,12 +337,12 @@ Create `install.sh`. Requirements that the script must satisfy, and that the Ste
 
 ```sh
 if [ ! -w "$NGX_INSTALL_DIR" ]; then
-    echo "erro: sem permissao de escrita em $NGX_INSTALL_DIR" >&2
+    echo "error: no write permission on $NGX_INSTALL_DIR" >&2
     echo "" >&2
-    echo "rode a instalacao com privilegio:" >&2
+    echo "run the install with privilege:" >&2
     echo "  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh" >&2
     echo "" >&2
-    echo "ou instale num diretorio seu, sem privilegio:" >&2
+    echo "or install into a directory you own, without privilege:" >&2
     echo "  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | NGX_INSTALL_DIR=\$HOME/.local/bin sh" >&2
     exit 1
 fi
@@ -368,11 +366,11 @@ Create `install_test.sh`, which exercises the script without touching the system
 
 Create `install.ps1`, equivalent in PowerShell. Requirements:
 
-gx in` by default, respecting `$env:NGX_INSTALL_DIR`. - Accepts `$env:NGX_CHANNEL` and `$env:NGX_VERSION`, with the same meaning as the Unix version.This directory is writable without elevation, which is the right behavior for the platform — unlike Unix, on Windows there is no conventional `/usr/local/bin`.
+- Installs in `$env:LOCALAPPDATA\ngx\bin` by default, respecting `$env:NGX_INSTALL_DIR`. This directory is writable without elevation, which is the right behavior for the platform — unlike Unix, on Windows there is no conventional `/usr/local/bin`.
+- Accepts `$env:NGX_CHANNEL` and `$env:NGX_VERSION`, with the same meaning as the Unix version.
 - Detect architecture by `$env:PROCESSOR_ARCHITECTURE` (`AMD64` → `amd64`, `ARM64` → `arm64`).
-- **Adds the directory to the user's `PATH`** if it is not already there, via `[Environment]::SetEnvironmentVariable('Path', ..., 'User')`, and warns that it is necessary to open a new terminal for the change to take effect. - Download `.zip` — not `.tar.gz` — and `checksums.txt`, check SHA256 with `Get-FileHash -Algorithm SHA256`, and only then extract with `Expand-Archive`.
-Without this, the person installs and the command is not found.
-- Installs in `$env:LOCALAPPDATA
+- Download `.zip` — not `.tar.gz` — and `checksums.txt`, check SHA256 with `Get-FileHash -Algorithm SHA256`, and only then extract with `Expand-Archive`.
+- **Adds the directory to the user's `PATH`** if it is not already there, via `[Environment]::SetEnvironmentVariable('Path', ..., 'User')`, and warns that it is necessary to open a new terminal for the change to take effect. Without this, the person installs and the command is not found.
 - If the user points `NGX_INSTALL_DIR` to a path that requires elevation, such as `C:\Program Files`, it detects the lack of permission **before downloading** and instructs to run PowerShell as administrator — same rule as in Unix, without trying to elevate it alone.
 
 The one-liner documented in the README:
@@ -459,7 +457,7 @@ The behavior differs between Unix and Windows enough to justify two files with b
 
 If step 3 fails after step 2 succeeds, restore: rename `.old` back. Leaving the user without `ngx.exe` is the worst possible outcome of this function, worse than not updating.
 
-**Cleanup of `.old`.** Add a function `LimparResiduo(string path)` that removes a remaining `.old`, and call it **at `ngx`** initialization, silently — if it fails, it's not the user's problem. Without this, each update leaves an orphaned binary in the directory forever.
+**Cleanup of `.old`.** Add a function `CleanLeftovers(string path)` that removes a remaining `.old`, and call it **at `ngx`** initialization, silently — if it fails, it's not the user's problem. Without this, each update leaves an orphaned binary in the directory forever.
 
 In both cases, if the directory lacks write permission, a clear error saying which directory and which privilege is needed, without trying to escalate.
 
@@ -484,7 +482,7 @@ Expected: all green.
 
 ```bash
 git add internal/update/ internal/cli/update.go internal/cli/root.go
-git commit -m "feat(update): auto-atualizacao com verificacao de assinatura"
+git commit -m "feat(update): self-update with signature verification"
 ```
 
 ---
@@ -504,22 +502,20 @@ Add to `README.md` sections covering:
 **Installation on Linux and macOS** — the `curl` one-liner, showing **both** ways from the beginning, because most machines where `ngx` is useful require privilege to write to `/usr/local/bin`:
 
 ```sh
-# installation on the system (needs privilege)
+# system-wide install (needs privilege)
 curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh
 
-# installation of your user, without privileges
+# per-user install, no privileges needed
 curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | NGX_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
 Document `NGX_CHANNEL`, `NGX_VERSION` and `NGX_INSTALL_DIR`. Also show the manual download, for those who don't run scripts from the internet — and say that this is a legitimate preference, not paranoia.
 
-**Installation on Windows** — PowerShell one-liner, default directory (`%LOCALAPPDATA%
-gx in`), the warning about opening a new terminal for the `PATH` to be valid, and how to install it in a location that requires an administrator.
+**Installation on Windows** — PowerShell one-liner, default directory (`%LOCALAPPDATA%\ngx\bin`), the warning about opening a new terminal for the `PATH` to be valid, and how to install it in a location that requires an administrator.
 
 **Honest note about nginx on Windows** — `ngx` runs on Windows, but nginx there is officially **beta** according to nginx.org itself: it only uses `select()`/`poll()`, only one worker actually works, there is no support for UDP or QUIC, and it lacks the XSLT, image filter, GeoIP and built-in Perl modules. Say it bluntly and point to `https://nginx.org/en/docs/windows.html`.
 
-Also explain that, on Windows, nginx is not normally installed via a package manager: it is located in an unpacked directory, like `C:
-ginx-1.31.3\`, and uses the run directory as a prefix. So the auto-detection that works on Linux does not apply, and you need to point the path explicitly:
+Also explain that, on Windows, nginx is not normally installed via a package manager: it is located in an unpacked directory, like `C:\nginx-1.31.3\`, and uses the run directory as a prefix. So the auto-detection that works on Linux does not apply, and you need to point the path explicitly:
 
 ```powershell
 ngx inspect -c C:\nginx-1.31.3\conf\nginx.conf
@@ -541,7 +537,7 @@ Be explicit about the warranty difference: the installation script checks **chec
 
 ```bash
 git add README.md
-git commit -m "docs: instalacao, atualizacao e verificacao de releases"
+git commit -m "docs: installing, updating and verifying releases"
 ```
 
 ---

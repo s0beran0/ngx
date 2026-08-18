@@ -9,7 +9,7 @@ import (
 
 // oldSuffix is the name the binary in use receives on Windows while the
 // new one takes its place (DD5). It lives here, and not in the file with the
-// build tag, because LimparResiduo runs on every system.
+// build tag, because CleanLeftovers runs on every system.
 const oldSuffix = ".old"
 
 // defaultPerm is the permission applied when the current binary does not exist
@@ -26,7 +26,7 @@ const defaultPerm os.FileMode = 0o755
 // failure midway leaves a working ngx at path.
 func Apply(path string, newBinary []byte) error {
 	if len(newBinary) == 0 {
-		return newError(CodigoArtefatoInvalido,
+		return newError(CodeInvalidArtifact,
 			"the new binary came out empty; the replacement was aborted and the "+
 				"current ngx stays in place")
 	}
@@ -37,13 +37,13 @@ func Apply(path string, newBinary []byte) error {
 	return apply(path, newBinary, perm)
 }
 
-// LimparResiduo removes the .old binary left behind by a previous update on
+// CleanLeftovers removes the .old binary left behind by a previous update on
 // Windows, where the executable in use cannot be deleted (DD5). It should be
 // called at ngx startup and fails silently on purpose: an orphan file is not
 // the user's problem, and an error here has nothing to do with the command
 // they asked for. Without this cleanup, every update leaves an orphan binary
 // in the directory forever.
-func LimparResiduo(path string) {
+func CleanLeftovers(path string) {
 	if path == "" {
 		return
 	}
@@ -76,7 +76,7 @@ func realOps() fileOps {
 //  3. renames <path>.new to <path>;
 //  4. tries to remove the .old and IGNORES the failure -- the file is still
 //     in use by the running process, and its removal is left for the next
-//     run, via LimparResiduo.
+//     run, via CleanLeftovers.
 //
 // If step 3 fails after step 2 succeeded, the .old goes back into place.
 // Leaving the user without a binary is the worst possible outcome of this
@@ -95,7 +95,7 @@ func swapByRename(ops fileOps, path string, newBinary []byte, perm os.FileMode) 
 
 	if err := ops.rename(path, old); err != nil {
 		_ = ops.remove(tmpNew)
-		return wrapError(err, CodigoTrocaFalhou,
+		return wrapError(err, CodeSwapFailed,
 			"could not move the current binary %s to %s; nothing was swapped and "+
 				"the current ngx keeps working", path, old)
 	}
@@ -106,19 +106,19 @@ func swapByRename(ops fileOps, path string, newBinary []byte, perm os.FileMode) 
 		// without ngx.
 		if errRestore := ops.rename(old, path); errRestore != nil {
 			_ = ops.remove(tmpNew)
-			return wrapError(err, CodigoTrocaFalhou,
+			return wrapError(err, CodeSwapFailed,
 				"the binary swap failed midway and the restore failed too: the previous "+
 					"binary is at %s and needs to be renamed back to %s by hand",
 				old, path)
 		}
 		_ = ops.remove(tmpNew)
-		return wrapError(err, CodigoTrocaFalhou,
+		return wrapError(err, CodeSwapFailed,
 			"could not put the new binary at %s; the previous one was restored "+
 				"and keeps working", path)
 	}
 
 	// An expected failure while the current process keeps running from the
-	// renamed file. LimparResiduo takes care of it on the next run.
+	// renamed file. CleanLeftovers takes care of it on the next run.
 	_ = ops.remove(old)
 	return nil
 }
@@ -155,13 +155,13 @@ func writeFile(path string, data []byte, perm os.FileMode) error {
 func writeError(cause error, path string) error {
 	dir := filepath.Dir(path)
 	if errors.Is(cause, fs.ErrPermission) {
-		return wrapError(cause, CodigoPermissao,
+		return wrapError(cause, CodePermission,
 			"no permission to write to %s, which is where the ngx binary lives. "+
 				"The update needs write privilege on that directory: "+
 				"retry the command with privilege or install ngx into a directory "+
 				"of your own user. Nothing was swapped", dir)
 	}
-	return wrapError(cause, CodigoTrocaFalhou,
+	return wrapError(cause, CodeSwapFailed,
 		"could not write the new binary to %s; nothing was swapped and the current "+
 			"ngx keeps working", dir)
 }

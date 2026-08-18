@@ -117,7 +117,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		if err := align(file); err != nil {
 			return nil, err
 		}
-		AtribuirIDs(file.Nodes, "")
+		AssignIDs(file.Nodes, "")
 		tree.Files = append(tree.Files, file)
 	}
 	tree.Hash = Hash(tree)
@@ -144,7 +144,7 @@ func parseGuarded(path string, opts *crossplane.ParseOptions) (payload *crosspla
 		err = ParseErrors{{
 			File:    path,
 			Message: fmt.Sprintf("the dependency parser panicked on this configuration: %v", r),
-			Classe:  RefusalCrossplanePanic,
+			Class:   RefusalCrossplanePanic,
 		}}
 	}()
 	return crossplane.Parse(path, opts)
@@ -316,7 +316,7 @@ func rejectNonRegularTarget(path string, rc io.ReadCloser) ParseErrors {
 	return ParseErrors{{
 		File:    path,
 		Message: fmt.Sprintf("%s: a configuration has to be a regular file", kind),
-		Classe:  RefusalTargetNotRegular,
+		Class:   RefusalTargetNotRegular,
 	}}
 }
 
@@ -359,7 +359,7 @@ func (c *sourceCache) readErrors() ParseErrors {
 		problems = append(problems, ParseError{
 			File:    path,
 			Message: readFailureMessage(c.errs[path]),
-			Classe:  readFailureClass(c.errs[path]),
+			Class:   readFailureClass(c.errs[path]),
 		})
 	}
 	return problems

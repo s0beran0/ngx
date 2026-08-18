@@ -27,13 +27,13 @@ var rootBlocks = map[string]bool{
 	"mail":   true,
 }
 
-// AtribuirIDs fills in the ID field of every node, recursively.
+// AssignIDs fills in the ID field of every node, recursively.
 //
 // The index counts among siblings of the same directive, not by absolute
 // position: inserting a location does not renumber the servers next to it.
 // Comments get no ID and take no part in the count -- otherwise adding a
 // comment would shift the IDs of the directives around it.
-func AtribuirIDs(nodes []*Node, prefix string) {
+func AssignIDs(nodes []*Node, prefix string) {
 	counters := map[string]int{}
 	atRoot := prefix == ""
 
@@ -50,7 +50,7 @@ func AtribuirIDs(nodes []*Node, prefix string) {
 		}
 
 		if len(n.Block) > 0 {
-			AtribuirIDs(n.Block, n.ID)
+			AssignIDs(n.Block, n.ID)
 		}
 	}
 }

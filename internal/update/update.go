@@ -25,21 +25,21 @@ import (
 // Update diagnostic codes. Each failure mode has its own: a generic "it
 // failed" sends the reader looking in the wrong place.
 const (
-	CodigoSemChavePublica    = "NGX-0301"
-	CodigoChavePlaceholder   = "NGX-0302"
-	CodigoChaveInvalida      = "NGX-0303"
-	CodigoAssinaturaInvalida = "NGX-0304"
-	CodigoChecksumAusente    = "NGX-0305"
-	CodigoChecksumDivergente = "NGX-0306"
-	CodigoRateLimit          = "NGX-0307"
-	CodigoReleaseAusente     = "NGX-0308"
-	CodigoAssetAusente       = "NGX-0309"
-	CodigoPermissao          = "NGX-0310"
-	CodigoTrocaFalhou        = "NGX-0311"
-	CodigoCanalInvalido      = "NGX-0312"
-	CodigoDowngrade          = "NGX-0313"
-	CodigoRede               = "NGX-0314"
-	CodigoArtefatoInvalido   = "NGX-0315"
+	CodeNoPublicKey      = "NGX-0301"
+	CodePlaceholderKey   = "NGX-0302"
+	CodeInvalidKey       = "NGX-0303"
+	CodeInvalidSignature = "NGX-0304"
+	CodeChecksumMissing  = "NGX-0305"
+	CodeChecksumMismatch = "NGX-0306"
+	CodeRateLimit        = "NGX-0307"
+	CodeReleaseMissing   = "NGX-0308"
+	CodeAssetMissing     = "NGX-0309"
+	CodePermission       = "NGX-0310"
+	CodeSwapFailed       = "NGX-0311"
+	CodeInvalidChannel   = "NGX-0312"
+	CodeDowngrade        = "NGX-0313"
+	CodeNetwork          = "NGX-0314"
+	CodeInvalidArtifact  = "NGX-0315"
 )
 
 // PublicKey is the minisign public key embedded in the binary (DD2/DD3).
@@ -63,7 +63,7 @@ var PublicKey = ""
 // PublicKeyPlaceholder is the text that signals "key not generated yet".
 // It exists so that a placeholder forgotten somewhere in the build chain
 // fails with a message of its own instead of becoming an obscure parse error.
-const PublicKeyPlaceholder = "CHAVE-MINISIGN-PENDENTE-NAO-GERADA"
+const PublicKeyPlaceholder = "MINISIGN-KEY-PENDING-NOT-GENERATED"
 
 // Channel is the update channel. The channels are derived from the semver of
 // the tag (DD1), not from branches: "v0.2.0" is stable, "v0.2.0-rc.1" is a
@@ -108,12 +108,12 @@ func ChannelFromEnv(getenv func(string) string) (Channel, error) {
 
 // Options describes one update run.
 type Options struct {
-	// Channel is the channel consulted when Versao is empty.
+	// Channel is the channel consulted when Version is empty.
 	Channel Channel
-	// Versao, when filled in, installs exactly that version -- including one
+	// Version, when filled in, installs exactly that version -- including one
 	// older than the current one. It is the only path to a downgrade:
 	// without it, an older release is never applied.
-	Versao string
+	Version string
 	// CurrentVersion is the version of this binary (output.Version).
 	CurrentVersion string
 	// BinaryPath is the executable to be replaced. Empty uses
@@ -122,8 +122,8 @@ type Options struct {
 	// PublicKey overrides the embedded key. It exists for testing; in
 	// production it stays empty and the package uses PublicKey.
 	PublicKeyOverride string
-	// Cliente is the GitHub API client. Empty uses the default one.
-	Cliente *Cliente
+	// Client is the GitHub API client. Empty uses the default one.
+	Client *Client
 	// CheckOnly downloads and swaps nothing: it only reports whether
 	// there is a new version.
 	CheckOnly bool
@@ -157,9 +157,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 			"unknown channel %q: the valid channels are \"stable\" and \"beta\"", channel)
 	}
 
-	cli := opts.Cliente
+	cli := opts.Client
 	if cli == nil {
-		cli = NovoCliente(0)
+		cli = NewClient(0)
 	}
 
 	key := opts.PublicKeyOverride
@@ -175,7 +175,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 
-	rel, err := resolveRelease(ctx, cli, channel, opts.Versao)
+	rel, err := resolveRelease(ctx, cli, channel, opts.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		Channel:        channel,
 	}
 
-	explicit := opts.Versao != ""
+	explicit := opts.Version != ""
 	res.Available = newerThan(rel.Version, opts.CurrentVersion)
 
 	if opts.CheckOnly {
@@ -226,7 +226,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		goarch = runtime.GOARCH
 	}
 
-	artifact, err := rel.AssetDaPlataforma(goos, goarch)
+	artifact, err := rel.AssetForPlatform(goos, goarch)
 	if err != nil {
 		return nil, err
 	}
@@ -239,15 +239,15 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	artifactData, err := cli.Baixar(ctx, artifact.URL)
+	artifactData, err := cli.Download(ctx, artifact.URL)
 	if err != nil {
 		return nil, err
 	}
-	checksumsData, err := cli.Baixar(ctx, checksums.URL)
+	checksumsData, err := cli.Download(ctx, checksums.URL)
 	if err != nil {
 		return nil, err
 	}
-	signatureData, err := cli.Baixar(ctx, signature.URL)
+	signatureData, err := cli.Download(ctx, signature.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	newBinary, err := ExtrairBinario(artifact.Name, artifactData, goos)
+	newBinary, err := ExtractBinary(artifact.Name, artifactData, goos)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 func validateKey(key string) error {
 	c := strings.TrimSpace(key)
 	if c == "" {
-		return newError(CodigoSemChavePublica,
+		return newError(CodeNoPublicKey,
 			"this binary was built without an embedded public verification key and "+
 				"therefore cannot update itself: there is no way to prove the downloaded "+
 				"release came from the project. Download the new version manually from "+
@@ -282,7 +282,7 @@ func validateKey(key string) error {
 				"official binary, which already ships with the key embedded")
 	}
 	if c == PublicKeyPlaceholder {
-		return newError(CodigoChavePlaceholder,
+		return newError(CodePlaceholderKey,
 			"the embedded public key is still the placeholder %q: no minisign key pair "+
 				"has been generated for the project. Updating without real verification "+
 				"is not an option", PublicKeyPlaceholder)
@@ -290,7 +290,7 @@ func validateKey(key string) error {
 	return nil
 }
 
-func resolveRelease(ctx context.Context, cli *Cliente, channel Channel, version string) (*Release, error) {
+func resolveRelease(ctx context.Context, cli *Client, channel Channel, version string) (*Release, error) {
 	if version != "" {
 		return cli.ByVersion(ctx, version)
 	}
@@ -313,12 +313,12 @@ func normalizeVersion(v string) string {
 	return v
 }
 
-// newerThan reports whether remota is newer than current. An unreadable current
+// newerThan reports whether remote is newer than current. An unreadable current
 // version (a local build without -ldflags, for example) counts as "any
 // release is newer": the opposite would lock the update away from whoever
 // needs it most.
-func newerThan(remota, current string) bool {
-	r := normalizeVersion(remota)
+func newerThan(remote, current string) bool {
+	r := normalizeVersion(remote)
 	if r == "" {
 		return false
 	}

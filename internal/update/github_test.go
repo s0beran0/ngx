@@ -67,8 +67,8 @@ func (s *fakeServer) visited() []string {
 	return append([]string(nil), s.paths...)
 }
 
-func (s *fakeServer) client() *Cliente {
-	return &Cliente{
+func (s *fakeServer) client() *Client {
+	return &Client{
 		HTTP:    &http.Client{Timeout: 5 * time.Second},
 		BaseURL: s.URL,
 		Repo:    "s0beran0/ngx",
@@ -124,7 +124,7 @@ func TestLatestBetaWithNoReleaseAtAll(t *testing.T) {
 
 	_, err := s.client().Latest(context.Background(), ChannelBeta)
 
-	assert.Equal(t, CodigoReleaseAusente, codeOf(t, err))
+	assert.Equal(t, CodeReleaseMissing, codeOf(t, err))
 }
 
 func TestLatestHandlesRateLimitWithItsOwnError(t *testing.T) {
@@ -141,7 +141,7 @@ func TestLatestHandlesRateLimitWithItsOwnError(t *testing.T) {
 
 	_, err := s.client().Latest(context.Background(), ChannelStable)
 
-	assert.Equal(t, CodigoRateLimit, codeOf(t, err))
+	assert.Equal(t, CodeRateLimit, codeOf(t, err))
 	assert.Contains(t, err.Error(), "rate limit")
 	assert.Contains(t, err.Error(), "the window reopens at")
 }
@@ -155,10 +155,10 @@ func TestLatest403WithoutRateLimitIsNotALimitError(t *testing.T) {
 
 	_, err := s.client().Latest(context.Background(), ChannelStable)
 
-	assert.Equal(t, CodigoRede, codeOf(t, err))
+	assert.Equal(t, CodeNetwork, codeOf(t, err))
 }
 
-func TestPorVersaoAcceptsWithOrWithoutV(t *testing.T) {
+func TestByVersionAcceptsWithOrWithoutV(t *testing.T) {
 	s := newServer(t)
 	s.respondJSON("/repos/s0beran0/ngx/releases/tags/v0.1.0", Release{Version: "v0.1.0"})
 
@@ -171,12 +171,12 @@ func TestPorVersaoAcceptsWithOrWithoutV(t *testing.T) {
 	assert.Equal(t, "v0.1.0", rel.Version)
 }
 
-func TestPorVersaoNonexistent(t *testing.T) {
+func TestByVersionNonexistent(t *testing.T) {
 	s := newServer(t)
 
 	_, err := s.client().ByVersion(context.Background(), "v9.9.9")
 
-	assert.Equal(t, CodigoReleaseAusente, codeOf(t, err))
+	assert.Equal(t, CodeReleaseMissing, codeOf(t, err))
 }
 
 func TestReleaseSerializesAssetsAsEmptyList(t *testing.T) {
@@ -203,10 +203,10 @@ func TestRespectsCanceledContext(t *testing.T) {
 
 	_, err := s.client().Latest(ctx, ChannelStable)
 
-	assert.Equal(t, CodigoRede, codeOf(t, err))
+	assert.Equal(t, CodeNetwork, codeOf(t, err))
 }
 
-func TestAssetDaPlataformaChoosesBySuffix(t *testing.T) {
+func TestAssetForPlatformChoosesBySuffix(t *testing.T) {
 	rel := &Release{Version: "v1.0.0", Assets: []Asset{
 		{Name: "ngx_1.0.0_linux_amd64.tar.gz"},
 		{Name: "ngx_1.0.0_linux_arm64.tar.gz"},
@@ -214,51 +214,51 @@ func TestAssetDaPlataformaChoosesBySuffix(t *testing.T) {
 		{Name: ChecksumsName},
 	}}
 
-	a, err := rel.AssetDaPlataforma("linux", "arm64")
+	a, err := rel.AssetForPlatform("linux", "arm64")
 	require.NoError(t, err)
 	assert.Equal(t, "ngx_1.0.0_linux_arm64.tar.gz", a.Name)
 
-	a, err = rel.AssetDaPlataforma("windows", "amd64")
+	a, err = rel.AssetForPlatform("windows", "amd64")
 	require.NoError(t, err)
 	assert.Equal(t, "ngx_1.0.0_windows_amd64.zip", a.Name)
 }
 
-func TestAssetDaPlataformaMissingListsWhatExists(t *testing.T) {
+func TestAssetForPlatformMissingListsWhatExists(t *testing.T) {
 	rel := &Release{Version: "v1.0.0", Assets: []Asset{{Name: "ngx_1.0.0_linux_amd64.tar.gz"}}}
 
-	_, err := rel.AssetDaPlataforma("darwin", "arm64")
+	_, err := rel.AssetForPlatform("darwin", "arm64")
 
-	assert.Equal(t, CodigoAssetAusente, codeOf(t, err))
+	assert.Equal(t, CodeAssetMissing, codeOf(t, err))
 	assert.Contains(t, err.Error(), "ngx_1.0.0_linux_amd64.tar.gz")
 	assert.Contains(t, err.Error(), "darwin/arm64")
 }
 
-func TestAssetPorNomeMissing(t *testing.T) {
+func TestAssetByNameMissing(t *testing.T) {
 	rel := &Release{Version: "v1.0.0", Assets: []Asset{}}
 
 	_, err := rel.AssetByName(SignatureName)
 
-	assert.Equal(t, CodigoAssetAusente, codeOf(t, err))
+	assert.Equal(t, CodeAssetMissing, codeOf(t, err))
 	assert.Contains(t, err.Error(), SignatureName)
 }
 
-func TestBaixarRefusesErrorStatus(t *testing.T) {
+func TestDownloadRefusesErrorStatus(t *testing.T) {
 	s := newServer(t)
 	s.respond("/artifact", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 
-	_, err := s.client().Baixar(context.Background(), s.URL+"/artifact")
+	_, err := s.client().Download(context.Background(), s.URL+"/artifact")
 
-	assert.Equal(t, CodigoRede, codeOf(t, err))
+	assert.Equal(t, CodeNetwork, codeOf(t, err))
 	assert.Contains(t, err.Error(), "500")
 }
 
-func TestBaixarReturnsTheBytes(t *testing.T) {
+func TestDownloadReturnsTheBytes(t *testing.T) {
 	s := newServer(t)
 	s.respondBytes("/artifact", []byte("binary content"))
 
-	data, err := s.client().Baixar(context.Background(), s.URL+"/artifact")
+	data, err := s.client().Download(context.Background(), s.URL+"/artifact")
 
 	require.NoError(t, err)
 	assert.Equal(t, "binary content", string(data))
@@ -278,7 +278,7 @@ func TestParseChannel(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown channel")
 }
 
-func TestCanalDoAmbiente(t *testing.T) {
+func TestChannelFromTheEnvironment(t *testing.T) {
 	// NGX_CHANNEL=beta is the only way into the prerelease channel without
 	// passing the flag: changing channel is possible, never accidental.
 	c, err := ChannelFromEnv(func(string) string { return "beta" })

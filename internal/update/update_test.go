@@ -82,13 +82,13 @@ func (c *scenario) options(path, currentVersion string) Options {
 		CurrentVersion:    currentVersion,
 		BinaryPath:        path,
 		PublicKeyOverride: c.key,
-		Cliente:           c.srv.client(),
+		Client:            c.srv.client(),
 		SO:                "linux",
 		Arch:              "amd64",
 	}
 }
 
-func TestExecutarUpdatesOnTheHappyPath(t *testing.T) {
+func TestExecuteUpdatesOnTheHappyPath(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
@@ -102,7 +102,7 @@ func TestExecutarUpdatesOnTheHappyPath(t *testing.T) {
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
-func TestExecutarWithFailingVerificationPreservesTheCurrentBinary(t *testing.T) {
+func TestExecuteWithFailingVerificationPreservesTheCurrentBinary(t *testing.T) {
 	// The test that matters most in this package: an artifact that does not
 	// match the signed checksums.txt must not come near the binary in use.
 	// After the failure, the current ngx has to be intact byte for byte, with
@@ -115,7 +115,7 @@ func TestExecutarWithFailingVerificationPreservesTheCurrentBinary(t *testing.T) 
 	res, err := Run(context.Background(), c.options(path, "v0.2.0"))
 
 	require.Nil(t, res)
-	assert.Equal(t, CodigoChecksumDivergente, codeOf(t, err))
+	assert.Equal(t, CodeChecksumMismatch, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0 IN USE", contentOf(t, path))
 
 	after, err := os.Stat(path)
@@ -128,7 +128,7 @@ func TestExecutarWithFailingVerificationPreservesTheCurrentBinary(t *testing.T) 
 	assert.Len(t, entries, 1, "the verification failure left junk in the directory")
 }
 
-func TestExecutarWithSignatureFromAnotherKeyPreservesTheCurrentBinary(t *testing.T) {
+func TestExecuteWithSignatureFromAnotherKeyPreservesTheCurrentBinary(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	otherPub, _ := keyPair(t)
 	path := testBinary(t, "ngx v0.2.0", 0o755)
@@ -138,11 +138,11 @@ func TestExecutarWithSignatureFromAnotherKeyPreservesTheCurrentBinary(t *testing
 
 	_, err := Run(context.Background(), opts)
 
-	assert.Equal(t, CodigoAssinaturaInvalida, codeOf(t, err))
+	assert.Equal(t, CodeInvalidSignature, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExecutarWithoutPublicKeyRefusesBeforeDownloadingAnything(t *testing.T) {
+func TestExecuteWithoutPublicKeyRefusesBeforeDownloadingAnything(t *testing.T) {
 	// A binary built without -ldflags cannot update itself, and the refusal
 	// comes before any request: there is no reason to download what cannot be
 	// verified.
@@ -156,12 +156,12 @@ func TestExecutarWithoutPublicKeyRefusesBeforeDownloadingAnything(t *testing.T) 
 
 	_, err := Run(context.Background(), opts)
 
-	assert.Equal(t, CodigoSemChavePublica, codeOf(t, err))
+	assert.Equal(t, CodeNoPublicKey, codeOf(t, err))
 	assert.Empty(t, c.srv.visited(), "it should not have touched the network")
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExecutarCheckOnlyNeedsNoKeyAndSwapsNothing(t *testing.T) {
+func TestExecuteCheckOnlyNeedsNoKeyAndSwapsNothing(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
@@ -177,7 +177,7 @@ func TestExecutarCheckOnlyNeedsNoKeyAndSwapsNothing(t *testing.T) {
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExecutarCheckOnlyWhenAlreadyUpToDate(t *testing.T) {
+func TestExecuteCheckOnlyWhenAlreadyUpToDate(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
@@ -191,7 +191,7 @@ func TestExecutarCheckOnlyWhenAlreadyUpToDate(t *testing.T) {
 	assert.False(t, res.Updated)
 }
 
-func TestExecutarDoesNotDowngradeUnasked(t *testing.T) {
+func TestExecuteDoesNotDowngradeUnasked(t *testing.T) {
 	// A downgrade is possible, never accidental: if the channel's release is
 	// older than the installed one, the update is a no-op.
 	c := newScenario(t, "0.2.0", "ngx v0.2.0")
@@ -205,12 +205,12 @@ func TestExecutarDoesNotDowngradeUnasked(t *testing.T) {
 	assert.Equal(t, "ngx v0.9.0", contentOf(t, path))
 }
 
-func TestExecutarDowngradesWhenTheVersionIsRequestedExplicitly(t *testing.T) {
+func TestExecuteDowngradesWhenTheVersionIsRequestedExplicitly(t *testing.T) {
 	c := newScenario(t, "0.2.0", "ngx v0.2.0")
 	path := testBinary(t, "ngx v0.9.0", 0o755)
 
 	opts := c.options(path, "v0.9.0")
-	opts.Versao = "v0.2.0"
+	opts.Version = "v0.2.0"
 
 	res, err := Run(context.Background(), opts)
 
@@ -220,12 +220,12 @@ func TestExecutarDowngradesWhenTheVersionIsRequestedExplicitly(t *testing.T) {
 	assert.Contains(t, c.srv.visited(), "/repos/s0beran0/ngx/releases/tags/v0.2.0")
 }
 
-func TestExecutarWithVersionEqualToInstalledSwapsNothing(t *testing.T) {
+func TestExecuteWithVersionEqualToInstalledSwapsNothing(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0 rebuilt")
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
 	opts := c.options(path, "v0.3.0")
-	opts.Versao = "v0.3.0"
+	opts.Version = "v0.3.0"
 
 	res, err := Run(context.Background(), opts)
 
@@ -234,7 +234,7 @@ func TestExecutarWithVersionEqualToInstalledSwapsNothing(t *testing.T) {
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
-func TestExecutarDoesNotUpdateWhenAlreadyOnTheChannelVersion(t *testing.T) {
+func TestExecuteDoesNotUpdateWhenAlreadyOnTheChannelVersion(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0 another build")
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
@@ -245,7 +245,7 @@ func TestExecutarDoesNotUpdateWhenAlreadyOnTheChannelVersion(t *testing.T) {
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
-func TestExecutarWithUnreadableCurrentVersionStillUpdates(t *testing.T) {
+func TestExecuteWithUnreadableCurrentVersionStillUpdates(t *testing.T) {
 	// A local build without -ldflags has a version that is not semver.
 	// Blocking the update in exactly that case would block whoever needs it
 	// most.
@@ -258,7 +258,7 @@ func TestExecutarWithUnreadableCurrentVersionStillUpdates(t *testing.T) {
 	assert.True(t, res.Updated)
 }
 
-func TestExecutarOnBetaChannelQueriesTheReleaseList(t *testing.T) {
+func TestExecuteOnBetaChannelQueriesTheReleaseList(t *testing.T) {
 	c := newScenario(t, "0.4.0-rc.1", "ngx v0.4.0-rc.1")
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
@@ -275,7 +275,7 @@ func TestExecutarOnBetaChannelQueriesTheReleaseList(t *testing.T) {
 	assert.NotContains(t, c.srv.visited(), "/repos/s0beran0/ngx/releases/latest")
 }
 
-func TestExecutarRefusesUnknownChannel(t *testing.T) {
+func TestExecuteRefusesUnknownChannel(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
@@ -289,7 +289,7 @@ func TestExecutarRefusesUnknownChannel(t *testing.T) {
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExecutarWithoutArtifactForThePlatformPreservesTheBinary(t *testing.T) {
+func TestExecuteWithoutArtifactForThePlatformPreservesTheBinary(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
@@ -298,11 +298,11 @@ func TestExecutarWithoutArtifactForThePlatformPreservesTheBinary(t *testing.T) {
 
 	_, err := Run(context.Background(), opts)
 
-	assert.Equal(t, CodigoAssetAusente, codeOf(t, err))
+	assert.Equal(t, CodeAssetMissing, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExecutarWithInterruptedDownloadPreservesTheBinary(t *testing.T) {
+func TestExecuteWithInterruptedDownloadPreservesTheBinary(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 	// The artifact stops being served midway.
@@ -312,40 +312,40 @@ func TestExecutarWithInterruptedDownloadPreservesTheBinary(t *testing.T) {
 
 	_, err := Run(context.Background(), c.options(path, "v0.2.0"))
 
-	assert.Equal(t, CodigoRede, codeOf(t, err))
+	assert.Equal(t, CodeNetwork, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
-func TestExtrairBinarioFromTarGz(t *testing.T) {
+func TestExtractBinaryFromTarGz(t *testing.T) {
 	archive := tarGzWith(t, map[string][]byte{"ngx": []byte("executable"), "LICENSE": []byte("MIT")})
 
-	bin, err := ExtrairBinario("ngx_1_linux_amd64.tar.gz", archive, "linux")
+	bin, err := ExtractBinary("ngx_1_linux_amd64.tar.gz", archive, "linux")
 
 	require.NoError(t, err)
 	assert.Equal(t, "executable", string(bin))
 }
 
-func TestExtrairBinarioFromWindowsZip(t *testing.T) {
+func TestExtractBinaryFromWindowsZip(t *testing.T) {
 	archive := zipWith(t, map[string][]byte{"ngx.exe": []byte("executable"), "LICENSE": []byte("MIT")})
 
-	bin, err := ExtrairBinario("ngx_1_windows_amd64.zip", archive, "windows")
+	bin, err := ExtractBinary("ngx_1_windows_amd64.zip", archive, "windows")
 
 	require.NoError(t, err)
 	assert.Equal(t, "executable", string(bin))
 }
 
-func TestExtrairBinarioWithoutTheExecutableInside(t *testing.T) {
+func TestExtractBinaryWithoutTheExecutableInside(t *testing.T) {
 	archive := tarGzWith(t, map[string][]byte{"LICENSE": []byte("MIT")})
 
-	_, err := ExtrairBinario("ngx_1_linux_amd64.tar.gz", archive, "linux")
+	_, err := ExtractBinary("ngx_1_linux_amd64.tar.gz", archive, "linux")
 
-	assert.Equal(t, CodigoArtefatoInvalido, codeOf(t, err))
+	assert.Equal(t, CodeInvalidArtifact, codeOf(t, err))
 }
 
-func TestExtrairBinarioWithUnknownFormat(t *testing.T) {
-	_, err := ExtrairBinario("ngx_1_linux_amd64.rar", []byte("x"), "linux")
+func TestExtractBinaryWithUnknownFormat(t *testing.T) {
+	_, err := ExtractBinary("ngx_1_linux_amd64.rar", []byte("x"), "linux")
 
-	assert.Equal(t, CodigoArtefatoInvalido, codeOf(t, err))
+	assert.Equal(t, CodeInvalidArtifact, codeOf(t, err))
 }
 
 func TestNewerThanFollowsSemver(t *testing.T) {

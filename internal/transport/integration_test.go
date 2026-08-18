@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration tests of the remote path against the test bench (test/bancada):
+// Integration tests of the remote path against the test bench (test/bench):
 // a throwaway container with sshd and nginx that reproduces the shape measured
 // on a production nginx — three wildcard patterns, 130 files in the effective
 // configuration, /etc/nginx readable by root only and a secret inside the
@@ -11,7 +11,7 @@
 // bench running, the tests SKIP with the instructions to bring it up — whoever
 // cloned the project and has no Docker must not see a false failure.
 //
-// Run: make bancada-up && go test -tags integration ./... -race
+// Run: make bench-up && go test -tags integration ./... -race
 //
 // The package is transport_test, and not transport, because the explicit
 // privilege test (DR5) uses internal/runtime, which imports
@@ -41,10 +41,10 @@ const (
 	benchHost = "127.0.0.1"
 	benchUser = "ngxtest"
 	// The port is fixed in the Makefile so the test knows where to connect;
-	// whoever brought the bench up with another BANCADA_PORTA says so
+	// whoever brought the bench up with another BENCH_PORT says so
 	// through the variable.
 	defaultBenchPort = 2222
-	envBenchPort     = "NGX_BANCADA_PORTA"
+	envBenchPort     = "NGX_BENCH_PORT"
 
 	// The effective configuration of the container has 130 files, checked
 	// during the image build itself. The tolerance matches the one in
@@ -54,27 +54,27 @@ const (
 	benchFileCount = 130
 	fileTolerance  = 5
 
-	// marcadorArmadilha exists only in the same-named file on the LOCAL
-	// disk (test/bancada/armadilha-local). Seeing it means the file from
+	// trapMarker exists only in the same-named file on the LOCAL
+	// disk (test/bench/local-trap). Seeing it means the file from
 	// the local disk was read instead of the one in the container.
-	marcadorArmadilha = "ARMADILHA-LOCAL-NAO-DEVE-APARECER"
-	arquivoArmadilha  = "zz-armadilha-local.conf"
+	trapMarker = "LOCAL-TRAP-MUST-NOT-APPEAR"
+	trapFile   = "zz-local-trap.conf"
 
 	// The three secrets of the bench, in the three shapes it reproduces.
-	benchToken    = "Bearer ngx-bancada-token-4f3c9a1b2e"
+	benchToken    = "Bearer ngx-bench-token-4f3c9a1b2e"
 	benchHtpasswd = "/etc/nginx/secrets/htpasswd"
 	benchTLSKey   = "/etc/nginx/secrets/tls.key"
 
 	// The remote fixture, written into the HOME of the bench user.
-	remoteTopFile  = "ngx-remoto.conf"
+	remoteTopFile  = "ngx-remote.conf"
 	remoteConfDDir = "etc/nginx/conf.d"
-	containerFile  = "10-do-container.conf"
+	containerFile  = "10-container.conf"
 	confDPattern   = remoteConfDDir + "/*.conf"
 	modulesPattern = "/usr/share/nginx/modules/*.conf"
 )
 
 // ---------------------------------------------------------------------------
-// Bancada
+// Bench
 // ---------------------------------------------------------------------------
 
 func repoRoot(t *testing.T) string {
@@ -101,19 +101,19 @@ func benchPort(t *testing.T) int {
 func requireBench(t *testing.T) (key string, port int) {
 	t.Helper()
 
-	key = filepath.Join(repoRoot(t), "test", "bancada", ".chave", "id_ed25519")
+	key = filepath.Join(repoRoot(t), "test", "bench", ".key", "id_ed25519")
 	port = benchPort(t)
 
 	if _, err := os.Stat(key); err != nil {
 		t.Skipf("bench not running: the test key %s does not exist. "+
-			"Run `make bancada-up` (needs Docker).", key)
+			"Run `make bench-up` (needs Docker).", key)
 	}
 
 	address := net.JoinHostPort(benchHost, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
 		t.Skipf("bench not running: nothing listens on %s (%v). "+
-			"Run `make bancada-up` (needs Docker).", address, err)
+			"Run `make bench-up` (needs Docker).", address, err)
 	}
 	_ = conn.Close()
 
@@ -192,7 +192,7 @@ func connectToBench(t *testing.T) transport.Transport {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture remota
+// Fixture remote
 // ---------------------------------------------------------------------------
 
 // The fixture lives in the HOME of the bench user because /etc/nginx is
@@ -222,13 +222,13 @@ http {
 const containerConf = `# MARCADOR-DO-CONTAINER
 #
 # The three secret shapes are the same as in the real bench configuration
-# (test/bancada/gerar-config.sh).
+# (test/bench/generate-config.sh).
 server {
     listen 8080;
-    server_name do-container.bancada.local;
+    server_name container.bench.local;
 
     location / {
-        auth_basic "area restrita da bancada";
+        auth_basic "area restrita da bench";
         auth_basic_user_file ` + benchHtpasswd + `;
 
         proxy_set_header Authorization "` + benchToken + `";
@@ -238,13 +238,13 @@ server {
 
 server {
     listen 8443 ssl;
-    server_name tls.bancada.local;
+    server_name tls.bench.local;
 
     ssl_certificate     /etc/nginx/secrets/tls.crt;
     ssl_certificate_key ` + benchTLSKey + `;
 
     location / {
-        return 200 "tls da bancada\n";
+        return 200 "tls da bench\n";
     }
 }
 `
@@ -307,18 +307,18 @@ func treePaths(t *config.Tree) []string {
 // vacuously), and that the tree read from the bench has the container file and
 // no trace of the trap.
 func TestGlobResolvesContainerFilesNotLocalDiskFiles(t *testing.T) {
-	armadilha := filepath.Join(repoRoot(t), "test", "bancada", "armadilha-local")
+	trap := filepath.Join(repoRoot(t), "test", "bench", "local-trap")
 
 	tr := connectToBench(t)
 	setupRemoteFixture(t, tr)
 
-	t.Chdir(armadilha)
+	t.Chdir(trap)
 
 	localMatches, err := transport.Local().Glob(confDPattern)
 	require.NoError(t, err)
-	require.Containsf(t, localMatches, filepath.Join(remoteConfDDir, arquivoArmadilha),
+	require.Containsf(t, localMatches, filepath.Join(remoteConfDDir, trapFile),
 		"the local trap is not in place: %s should match %s from %s",
-		confDPattern, arquivoArmadilha, armadilha)
+		confDPattern, trapFile, trap)
 
 	tree, err := config.Parse(config.ParseOptions{
 		Path: remoteTopFile,
@@ -333,9 +333,9 @@ func TestGlobResolvesContainerFilesNotLocalDiskFiles(t *testing.T) {
 
 	modules := 0
 	for _, f := range tree.Files {
-		require.NotContainsf(t, f.Path, "armadilha",
+		require.NotContainsf(t, f.Path, "trap",
 			"a file from the local disk got into the tree read from the bench: %s", f.Path)
-		require.NotContainsf(t, string(f.Source), marcadorArmadilha,
+		require.NotContainsf(t, string(f.Source), trapMarker,
 			"the local trap marker leaked into the tree, coming from %s", f.Path)
 		if strings.HasPrefix(f.Path, "/usr/share/nginx/modules/") {
 			modules++
@@ -379,7 +379,7 @@ func TestRemoteDumpWithSudoReturnsContainerEffectiveConfig(t *testing.T) {
 				byPrefix[prefix]++
 			}
 		}
-		require.NotContainsf(t, f.Content, marcadorArmadilha,
+		require.NotContainsf(t, f.Content, trapMarker,
 			"the local trap marker showed up in the container dump, in %s", f.Path)
 	}
 	for prefix, n := range byPrefix {

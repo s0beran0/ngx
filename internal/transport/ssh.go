@@ -24,15 +24,15 @@ import (
 )
 
 const (
-	// CodigoConexaoSSH marks the failure to establish the SSH session: DNS,
+	// CodeSSHConnection marks the failure to establish the SSH session: DNS,
 	// network, timeout, or the server refusing every authentication method.
-	CodigoConexaoSSH = "NGX-0206"
+	CodeSSHConnection = "NGX-0206"
 
-	// CodigoSessaoSFTP marks the case where the SSH connection comes up but
+	// CodeSFTPSession marks the case where the SSH connection comes up but
 	// the SFTP subsystem does not. They are different problems with
 	// different solutions: the first is network or credentials, the second
 	// is sshd configuration.
-	CodigoSessaoSFTP = "NGX-0207"
+	CodeSFTPSession = "NGX-0207"
 )
 
 // DefaultSSHTimeout caps the handshake when SSHOptions.Timeout says nothing.
@@ -107,7 +107,7 @@ func SSHWithDiagnostics(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		user = currentUser()
 	}
 
-	verifyHostKey, hostKeyDiags, err := VerificadorHostKey(opts)
+	verifyHostKey, hostKeyDiags, err := HostKeyVerifier(opts)
 	if len(hostKeyDiags) > 0 {
 		diags = append(diags, hostKeyDiags...)
 	}
@@ -131,7 +131,7 @@ func SSHWithDiagnostics(opts SSHOptions) (Transport, []output.Diagnostic, error)
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	conf := &ssh.ClientConfig{
 		User:            user,
-		Auth:            auth.Metodos,
+		Auth:            auth.Methods,
 		HostKeyCallback: verifyHostKey,
 		Timeout:         timeout,
 	}
@@ -163,7 +163,7 @@ func SSHWithDiagnostics(opts SSHOptions) (Transport, []output.Diagnostic, error)
 
 	if err != nil {
 		// The host key error already comes typed from the callback (DR1).
-		// Rewrapping it in CodigoConexaoSSH would erase the distinction
+		// Rewrapping it in CodeSSHConnection would erase the distinction
 		// between first access and changed key — which is exactly what
 		// whoever consumes the output has to separate without interpreting
 		// text —, and would turn a verification refusal into a generic
@@ -172,7 +172,7 @@ func SSHWithDiagnostics(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		if errors.As(err, &typed) {
 			return nil, diags, typed
 		}
-		return nil, diags, sshConnectionError(user, address, auth.Nomes, err)
+		return nil, diags, sshConnectionError(user, address, auth.Names, err)
 	}
 
 	sftpClient, err := sftp.NewClient(client)
@@ -460,7 +460,7 @@ func sshConnectionError(user, address string, methods []string, cause error) err
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoConexaoSSH,
+			Code:     CodeSSHConnection,
 			Message: fmt.Sprintf(
 				"could not connect to %s@%s: %v. Authentication methods "+
 					"offered: %s",
@@ -478,7 +478,7 @@ func sftpSessionError(user, address string, cause error) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoSessaoSFTP,
+			Code:     CodeSFTPSession,
 			Message: fmt.Sprintf(
 				"the connection to %s@%s was established, but the SFTP subsystem did "+
 					"not answer: %v. ngx reads the configuration over SFTP; check whether "+

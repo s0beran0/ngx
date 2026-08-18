@@ -147,7 +147,7 @@ func TestDetectUnrecognizedOutput(t *testing.T) {
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoSaidaNaoReconhecida, e.Diag.Code)
+	assert.Equal(t, CodeUnrecognizedOutput, e.Diag.Code)
 }
 
 func TestDetectUsesGivenBinary(t *testing.T) {

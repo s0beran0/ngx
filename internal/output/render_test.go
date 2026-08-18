@@ -11,12 +11,12 @@ import (
 )
 
 type redactableData struct {
-	Valor string `json:"valor"`
+	Value string `json:"value"`
 }
 
 func (d redactableData) Redacted(rs output.RedactSet) any {
-	if rs.Matches("ssl_certificate_key", []string{d.Valor}) {
-		return redactableData{Valor: output.RedactedValue}
+	if rs.Matches("ssl_certificate_key", []string{d.Value}) {
+		return redactableData{Value: output.RedactedValue}
 	}
 	return d
 }
@@ -24,7 +24,7 @@ func (d redactableData) Redacted(rs output.RedactSet) any {
 // nonRedactableData deliberately does not implement Redactable: it exists to
 // pin the fail-open behavior when Data does not know how to redact itself.
 type nonRedactableData struct {
-	Valor string `json:"valor"`
+	Value string `json:"value"`
 }
 
 type humanData struct{}
@@ -38,18 +38,18 @@ func (humanData) RenderHuman(w io.Writer) error {
 // HumanRenderable. It exists to prove that redaction also reaches the
 // FormatHuman path, not only JSON.
 type redactableHumanData struct {
-	Valor string `json:"valor"`
+	Value string `json:"value"`
 }
 
 func (d redactableHumanData) Redacted(rs output.RedactSet) any {
-	if rs.Matches("ssl_certificate_key", []string{d.Valor}) {
-		return redactableHumanData{Valor: output.RedactedValue}
+	if rs.Matches("ssl_certificate_key", []string{d.Value}) {
+		return redactableHumanData{Value: output.RedactedValue}
 	}
 	return d
 }
 
 func (d redactableHumanData) RenderHuman(w io.Writer) error {
-	_, err := io.WriteString(w, d.Valor+"\n")
+	_, err := io.WriteString(w, d.Value+"\n")
 	return err
 }
 
@@ -86,10 +86,10 @@ func TestFormatHumanWithoutHumanRenderableFallsBackToIndentedJSON(t *testing.T) 
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true}
 
 	env := output.New("status")
-	env.Data = nonRedactableData{Valor: "abc"}
+	env.Data = nonRedactableData{Value: "abc"}
 	require.NoError(t, r.Render(env))
 
-	require.Contains(t, buf.String(), "\"valor\": \"abc\"")
+	require.Contains(t, buf.String(), "\"value\": \"abc\"")
 }
 
 // Without Data, the human format writes nothing beyond the diagnostics (the
@@ -165,7 +165,7 @@ func TestNoRedactIsAcceptedWithTTY(t *testing.T) {
 	}
 
 	env := output.New("get")
-	env.Data = redactableData{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableData{Value: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "/etc/ssl/priv.key")
@@ -181,7 +181,7 @@ func TestRenderAppliesRedactionToData(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	env.Data = redactableData{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableData{Value: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.NotContains(t, buf.String(), "/etc/ssl/priv.key")
@@ -201,7 +201,7 @@ func TestRenderHumanAppliesRedactionToData(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true, Redact: set}
 
 	env := output.New("get")
-	env.Data = redactableHumanData{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableHumanData{Value: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.NotContains(t, buf.String(), "/etc/ssl/priv.key")
@@ -221,7 +221,7 @@ func TestRenderDoesNotRedactDataThatDoesNotImplementRedactable(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	env.Data = nonRedactableData{Valor: "/etc/ssl/priv.key"}
+	env.Data = nonRedactableData{Value: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "/etc/ssl/priv.key")
@@ -237,7 +237,7 @@ func TestRenderDoesNotMutateCallerData(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	original := redactableData{Valor: "/etc/ssl/priv.key"}
+	original := redactableData{Value: "/etc/ssl/priv.key"}
 	env.Data = original
 	require.NoError(t, r.Render(env))
 

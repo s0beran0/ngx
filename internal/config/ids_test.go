@@ -61,7 +61,7 @@ func TestPlainDirectivesUsePrefixD(t *testing.T) {
 	tree := parseText(t, `http {
   server {
     listen 443 ssl;
-    server_name api.exemplo.com;
+    server_name api.example.com;
     location / { proxy_pass http://a; }
   }
 }`)
@@ -80,7 +80,7 @@ func TestCommentsGetNoIDAndDoNotShiftIndices(t *testing.T) {
     # explica o listen
     listen 443 ssl;
     # explica o name
-    server_name api.exemplo.com;
+    server_name api.example.com;
   }
 }`)
 

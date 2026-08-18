@@ -265,7 +265,7 @@ func TestParameterExpansionEndsOnWhitespace(t *testing.T) {
 
 // Coverage: every byte that is not whitespace belongs to some token.
 func TestTokensCoverEverySignificantByte(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))
+	src, err := os.ReadFile(filepath.Join("testdata", "simple.conf"))
 	require.NoError(t, err)
 
 	toks, err := config.Tokenize(src)

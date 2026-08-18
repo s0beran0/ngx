@@ -25,7 +25,7 @@ nginx: configuration file /etc/nginx/nginx.conf test is successful
 nginx: configuration file /etc/nginx/nginx.conf test failed
 `
 
-	outputTestWithWarning = `nginx: [warn] conflicting server name "exemplo.com" on 0.0.0.0:80, ignored
+	outputTestWithWarning = `nginx: [warn] conflicting server name "example.com" on 0.0.0.0:80, ignored
 nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 `
@@ -47,7 +47,7 @@ http {
 # configuration file /etc/nginx/conf.d/site.conf:
 server {
     listen 80;
-    server_name exemplo.com;
+    server_name example.com;
 }
 `
 )

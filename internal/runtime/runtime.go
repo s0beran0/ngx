@@ -55,15 +55,15 @@ const (
 	// runs with no shell and no TTY, there is nowhere to send the password.
 	CodeSudoUnavailable = "NGX-0222"
 
-	// CodigoSaidaNaoReconhecida: the command ran, but the output does not
+	// CodeUnrecognizedOutput: the command ran, but the output does not
 	// have the expected format. Inventing fields out of output that was not
 	// understood is worse than admitting it was not understood.
-	CodigoSaidaNaoReconhecida = "NGX-0223"
+	CodeUnrecognizedOutput = "NGX-0223"
 
-	// CodigoTesteConfig: a diagnostic translated from a line of `nginx -t`
+	// CodeConfigTest: a diagnostic translated from a line of `nginx -t`
 	// or `nginx -T`. A single code for every level: the level becomes
 	// severity, it does not become a code.
-	CodigoTesteConfig = "NGX-0224"
+	CodeConfigTest = "NGX-0224"
 
 	// CodeProcessState: something about the state of the process -- the
 	// evidence that it is not running, or the reason why it could not be
@@ -328,7 +328,7 @@ func unrecognizedOutputError(r *Runtime, e *execution, what string) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoSaidaNaoReconhecida,
+			Code:     CodeUnrecognizedOutput,
 			Message: fmt.Sprintf(
 				"the output of `%s` on %s does not have the expected format (%s): %s",
 				strings.Join(e.argv, " "), r.tr.Describe(), what, summarize(e.combinedOutput())),

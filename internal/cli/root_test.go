@@ -11,14 +11,14 @@ import (
 )
 
 // An invalid global flag is a raw cobra error, not an *output.Error: it is
-// exactly the conversion branch in executar that has to turn this into an
+// exactly the conversion branch in execute that has to turn this into an
 // envelope on stdout with NGX-0002, and not just return an exit code with no
-// sign at all of what went wrong. comandoDe falls back to "ngx" here because
+// sign at all of what went wrong. commandOf falls back to "ngx" here because
 // cobra never gets to resolve which command was being run.
-func TestFlagInvalidaProduzExitDeUso(t *testing.T) {
+func TestInvalidFlagProducesUsageExit(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
-	code := cli.Execute([]string{"--flag-que-nao-existe"}, &out, &errBuf, false)
+	code := cli.Execute([]string{"--flag-that-does-not-exist"}, &out, &errBuf, false)
 
 	require.Equal(t, output.ExitUsage, code)
 
@@ -32,10 +32,10 @@ func TestFlagInvalidaProduzExitDeUso(t *testing.T) {
 
 // The same conversion branch for a raw cobra error, now via an unknown
 // command instead of an invalid flag.
-func TestComandoDesconhecidoProduzExitDeUso(t *testing.T) {
+func TestUnknownCommandProducesUsageExit(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
-	code := cli.Execute([]string{"comando-inexistente"}, &out, &errBuf, false)
+	code := cli.Execute([]string{"command-inexistente"}, &out, &errBuf, false)
 
 	require.Equal(t, output.ExitUsage, code)
 
@@ -49,7 +49,7 @@ func TestComandoDesconhecidoProduzExitDeUso(t *testing.T) {
 
 // --json and --human are mutually exclusive; asking for both is a usage
 // error, not a silent precedence.
-func TestJSONEHumanJuntosSaoErroDeUso(t *testing.T) {
+func TestJSONAndHumanTogetherAreUsageError(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
 	code := cli.Execute([]string{"--json", "--human", "version"}, &out, &errBuf, false)
@@ -57,7 +57,7 @@ func TestJSONEHumanJuntosSaoErroDeUso(t *testing.T) {
 	require.Equal(t, output.ExitUsage, code)
 }
 
-func TestVersionSaiNoEnvelopeJSONSemTTY(t *testing.T) {
+func TestVersionComesOutInTheJSONEnvelopeWithoutTTY(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
 	code := cli.Execute([]string{"version"}, &out, &errBuf, false)
@@ -72,7 +72,7 @@ func TestVersionSaiNoEnvelopeJSONSemTTY(t *testing.T) {
 
 // The error has to go out in the envelope, on stdout, so the agent can read
 // it. Writing only to stderr would force the agent to capture two streams.
-func TestErroDeExecucaoSaiNoEnvelope(t *testing.T) {
+func TestExecutionErrorComesOutInTheEnvelope(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
 	code := cli.Execute([]string{"--json", "--human", "version"}, &out, &errBuf, false)

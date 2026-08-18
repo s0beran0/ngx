@@ -75,7 +75,7 @@ The order of resolution is: explicit flags win; whatever is missing comes from `
 
 ### DR7 — unreadable `~/.ssh/config` degrades with warning, never aborts
 
-The parse library honors `Host` (with wildcard and negation), `Include`, `Match all` and `Match Host`. Any other criteria — `user`, `final`, `canonical`, `exec` — makes the parse of the **whole file** fail, not just that entry. Details and sources in `docs/superpowers/specs/2026-08-17-ngx-remoto-dependencias.md`.
+The parse library honors `Host` (with wildcard and negation), `Include`, `Match all` and `Match Host`. Any other criteria — `user`, `final`, `canonical`, `exec` — makes the parse of the **whole file** fail, not just that entry. Details and sources in `docs/superpowers/specs/2026-08-17-ngx-remote-dependencies.md`.
 
 A `~/.ssh/config` with `Match user deploy` is perfectly valid for `ssh` and not at all rare. If `ngx` aborted, it would break for anyone who has a legitimate file, due to our limitation.
 
@@ -158,7 +158,7 @@ Run: `go test ./internal/transport/ -race`
 
 ```bash
 git add internal/transport/
-git commit -m "feat(transport): interface de transporte e implementacao local"
+git commit -m "feat(transport): transport interface and local implementation"
 ```
 
 ---
@@ -203,7 +203,7 @@ Run: `go test ./internal/transport/ -race`, and `CGO_ENABLED=0 go build` for all
 
 ```bash
 git add internal/transport/
-git commit -m "feat(transport): cliente ssh com known_hosts estrito e ssh-agent portavel"
+git commit -m "feat(transport): ssh client with strict known_hosts and portable ssh-agent"
 ```
 
 ---
@@ -267,7 +267,7 @@ Run: `go test ./... -race`
 
 ```bash
 git add internal/runtime/
-git commit -m "refactor(runtime): executa via transporte, local ou remoto"
+git commit -m "refactor(runtime): execute through the transport, local or remote"
 ```
 
 ---
@@ -300,7 +300,7 @@ Run: `go test ./... -race`
 
 ```bash
 git add internal/cli/
-git commit -m "feat(cli): flags de conexao remota e transporte no contexto"
+git commit -m "feat(cli): remote connection flags and transport in the context"
 ```
 
 ---
@@ -308,7 +308,7 @@ git commit -m "feat(cli): flags de conexao remota e transporte no contexto"
 ### Task R6: Actual integration and documentation
 
 - Modify: `README.md`**Files:**
-- Create: `internal/transport/integration_test.go` (`//go:build integration`), `docs/remoto.md`
+- Create: `internal/transport/integration_test.go` (`//go:build integration`), `docs/remote.md`
 
 - Produces: integration suite against real SSH, and documentation**Interfaces:**
 - Consumption: all above
@@ -330,9 +330,9 @@ The bench is an artifact of the repository, versioned, targeting the `Makefile`.
 
 - [ ] **Step 2: Document**
 
-In `docs/remoto.md` and in a section of `README.md`:
+In `docs/remote.md` and in a section of `README.md`:
 
-- The minimum use, `ngx --host web1.exemplo.com inspect`, explaining that it works without flags for those who already have `ssh web1.exemplo.com` working.
+- The minimum use, `ngx --host web1.example.com inspect`, explaining that it works without flags for those who already have `ssh web1.example.com` working.
 - That **nothing is installed on the server** — `ngx` reads via SFTP and runs nginx that is already there.
 - The authentication order, and which password comes from `NGX_SSH_PASSWORD` or from the prompt, never from the flag, explaining why: flag leaks in `ps`, in the history and in the CI log.
 - What unknown host is refused, how to add it to `known_hosts`, and what `--insecure-host-key` means — including that it should not become a habit.
@@ -342,8 +342,8 @@ In `docs/remoto.md` and in a section of `README.md`:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add internal/transport/integration_test.go docs/remoto.md README.md
-git commit -m "test(transport): integracao ssh real; docs de operacao remota"
+git add internal/transport/integration_test.go docs/remote.md README.md
+git commit -m "test(transport): real ssh integration; remote operation docs"
 ```
 
 ---

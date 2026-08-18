@@ -1,8 +1,8 @@
 name: release
 
-# O canal sai do semver da tag, nao de branch (DD1): "v0.2.0" publica stable,
-# "v0.2.0-rc.1" publica pre-release. Quem decide e o goreleaser, com
-# prerelease: auto.
+# The channel comes out of the tag's semver, not the branch (DD1): "v0.2.0"
+# publishes stable, "v0.2.0-rc.1" publishes a pre-release. What decides is
+# goreleaser, with prerelease: auto.
 on:
   push:
     tags: ["v*"]
@@ -10,10 +10,10 @@ on:
 permissions:
   contents: write
 
-# Duas tags empurradas juntas nao podem correr em paralelo: as duas rodariam
-# "release --clean" no mesmo repositorio remoto. Aqui nao se cancela a
-# execucao anterior — cancelar um release no meio deixa a release do GitHub
-# pela metade.
+# Two tags pushed together must not run in parallel: both would run
+# "release --clean" against the same remote repository. The previous run is
+# NOT cancelled here -- cancelling a release midway leaves the GitHub release
+# half-published.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -25,103 +25,103 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # O goreleaser precisa do historico inteiro e das tags para montar o
-          # changelog e descobrir a versao.
+          # goreleaser needs the whole history and the tags to build the
+          # changelog and work out the version.
           fetch-depth: 0
 
-      # A versao vem do .tool-versions, mesmo arquivo que o CI e o asdf usam.
+      # The version comes from .tool-versions, the same file CI and asdf use.
       - uses: actions/setup-go@v6
         with:
           go-version-file: .tool-versions
           cache: true
 
-      # Tudo que pode faltar e checado ANTES de compilar ou publicar qualquer
-      # coisa. Um release que sobe pela metade e depois falha na assinatura
-      # exige apagar a release a mao.
-      - name: confere os segredos e a chave publica
+      # Everything that might be missing is checked BEFORE compiling or
+      # publishing anything. A release that goes up half-way and then fails to
+      # be signed forces deleting the release by hand.
+      - name: check the secrets and the public key
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
         run: |
-          faltando=""
-          [ -n "$MINISIGN_KEY" ] || faltando="$faltando secrets.MINISIGN_KEY"
-          [ -n "$MINISIGN_PASSWORD" ] || faltando="$faltando secrets.MINISIGN_PASSWORD"
-          [ -n "$NGX_PUBLIC_KEY" ] || faltando="$faltando vars.NGX_PUBLIC_KEY"
-          if [ -n "$faltando" ]; then
-            echo "erro: faltam no repositorio:$faltando" >&2
+          missing=""
+          [ -n "$MINISIGN_KEY" ] || missing="$missing secrets.MINISIGN_KEY"
+          [ -n "$MINISIGN_PASSWORD" ] || missing="$missing secrets.MINISIGN_PASSWORD"
+          [ -n "$NGX_PUBLIC_KEY" ] || missing="$missing vars.NGX_PUBLIC_KEY"
+          if [ -n "$missing" ]; then
+            echo "error: missing from the repository:$missing" >&2
             echo "" >&2
-            echo "sem a chave publica o binario sai sem material de" >&2
-            echo "verificacao e o 'ngx update' recusaria toda atualizacao;" >&2
-            echo "sem a chave privada o checksums.txt sai sem assinatura." >&2
-            echo "veja docs/superpowers/plans/2026-08-17-ngx-distribuicao.md" >&2
+            echo "without the public key the binary ships with no verification" >&2
+            echo "material and 'ngx update' would refuse every update;" >&2
+            echo "without the private key checksums.txt ships unsigned." >&2
+            echo "see docs/superpowers/plans/2026-08-17-ngx-distribution.md" >&2
             exit 1
           fi
 
-      - name: instala o minisign
+      - name: install minisign
         run: |
           sudo apt-get update
           sudo apt-get install -y minisign
 
-      - name: prepara a chave de assinatura
+      - name: prepare the signing key
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
         run: |
           umask 077
           printf '%s\n' "$MINISIGN_KEY" > "$RUNNER_TEMP/minisign.key"
 
-      # Ensaio da assinatura antes de publicar. Confere de uma vez tres coisas
-      # que so apareceriam no fim de um release de verdade: a senha esta certa,
-      # a sintaxe dos argumentos do minisign esta certa, e — o que mais importa
-      # — a chave privada do secret e o par da chave publica que vai embutida
-      # no binario. Um par trocado produziria uma release que todo "ngx update"
-      # recusa.
+      # Rehearse the signature before publishing. It catches at once three
+      # things that would otherwise only show up at the end of a real release:
+      # the password is right, the syntax of the minisign arguments is right,
+      # and -- what matters most -- the private key from the secret and the
+      # public key embedded in the binary are a pair. A swapped pair would
+      # produce a release that every "ngx update" refuses.
       #
-      # A senha vai pelo stdin sem quebra de linha, exatamente como o
-      # goreleaser a entrega em signs.stdin; testar de outro jeito nao testaria
-      # o caminho real.
-      - name: ensaia a assinatura com a chave publica publicada
+      # The password goes to stdin with no trailing newline, exactly as
+      # goreleaser delivers it in signs.stdin; testing it any other way would
+      # not test the real path.
+      - name: rehearse the signature against the published public key
         env:
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
         run: |
-          ensaio="$RUNNER_TEMP/ensaio.txt"
-          printf 'ngx release %s\n' "$GITHUB_REF_NAME" > "$ensaio"
+          rehearsal="$RUNNER_TEMP/rehearsal.txt"
+          printf 'ngx release %s\n' "$GITHUB_REF_NAME" > "$rehearsal"
           printf '%s' "$MINISIGN_PASSWORD" | minisign \
             -S -s "$RUNNER_TEMP/minisign.key" \
-            -m "$ensaio" -x "$ensaio.minisig"
-          minisign -V -m "$ensaio" -x "$ensaio.minisig" -P "$NGX_PUBLIC_KEY"
+            -m "$rehearsal" -x "$rehearsal.minisig"
+          minisign -V -m "$rehearsal" -x "$rehearsal.minisig" -P "$NGX_PUBLIC_KEY"
 
-      # DD6: prova que a chave publica REALMENTE chega ao binario, antes de
-      # publicar qualquer coisa.
+      # DD6: proves the public key REALLY reaches the binary, before publishing
+      # anything.
       #
-      # `-ldflags -X` contra simbolo inexistente nao da erro: o linker ignora,
-      # o build passa, e sai um binario com a chave vazia -- uma release
-      # "assinada" cujo `ngx update` nao verifica assinatura nenhuma, sem
-      # nenhum sinal. Ja aconteceu neste repo: o alvo apontava para
-      # internal/output.PublicKey, que nunca existiu.
+      # `-ldflags -X` against a non-existent symbol raises no error: the linker
+      # ignores it, the build passes, and out comes a binary with an empty key
+      # -- a "signed" release whose `ngx update` verifies no signature at all,
+      # with no signal whatsoever. It already happened in this repository: the
+      # target pointed at internal/output.PublicKey, which never existed.
       #
-      # Procurar a chave com `strings` NAO funciona, e essa foi a primeira
-      # tentativa: o Go grava os proprios ldflags na secao de build info, entao
-      # o valor aparece no binario mesmo quando o -X foi ignorado. A unica
-      # forma de distinguir e perguntar ao binario EM EXECUCAO, que so mostra
-      # `update_public_key` quando a variavel foi de fato preenchida.
-      - name: prova que a chave publica foi embutida
+      # Looking for the key with `strings` DOES NOT work, and that was the
+      # first attempt: Go writes its own ldflags into the build info section,
+      # so the value shows up in the binary even when -X was ignored. The only
+      # way to tell them apart is to ask the RUNNING binary, which only reports
+      # `update_public_key` when the variable was actually filled in.
+      - name: prove the public key was embedded
         env:
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
         run: |
           go build -ldflags \
-            "-X github.com/s0beran0/ngx/internal/update.ChavePublica=$NGX_PUBLIC_KEY" \
-            -o /tmp/ngx-prova ./cmd/ngx
-          embutida=$(/tmp/ngx-prova version --json | jq -r '.data.update_public_key // ""')
-          if [ "$embutida" != "$NGX_PUBLIC_KEY" ]; then
-            echo "ABORTADO: a chave publica nao chegou ao binario." >&2
-            echo "O -X foi ignorado em silencio -- confira se o simbolo" >&2
-            echo "internal/update.ChavePublica ainda existe com esse nome." >&2
-            echo "Publicar assim entregaria uma release que nao verifica nada." >&2
+            "-X github.com/s0beran0/ngx/internal/update.PublicKey=$NGX_PUBLIC_KEY" \
+            -o /tmp/ngx-proof ./cmd/ngx
+          embedded=$(/tmp/ngx-proof version --json | jq -r '.data.update_public_key // ""')
+          if [ "$embedded" != "$NGX_PUBLIC_KEY" ]; then
+            echo "ABORTED: the public key did not reach the binary." >&2
+            echo "The -X was silently ignored -- check whether the symbol" >&2
+            echo "internal/update.PublicKey still exists under that name." >&2
+            echo "Publishing like this would ship a release that verifies nothing." >&2
             exit 1
           fi
-          echo "chave publica embutida e conferida no artefato"
+          echo "public key embedded and checked in the artifact"
 
       - uses: goreleaser/goreleaser-action@v6
         with:
@@ -131,22 +131,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           MINISIGN_KEY_FILE: ${{ runner.temp }}/minisign.key
-          # Variable, nao secret: a chave publica e publica por definicao. O
-          # build embute este valor no binario (DD3).
+          # A variable, not a secret: the public key is public by definition.
+          # The build embeds this value in the binary (DD3).
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
 
-      # A release ja esta publicada quando este passo roda; ele nao previne o
-      # erro, so garante que ele nao passe despercebido. O ensaio acima e quem
-      # previne.
-      - name: confere a assinatura publicada
+      # The release is already published when this step runs; it does not
+      # prevent the error, only makes sure it does not go unnoticed. The
+      # rehearsal above is what prevents it.
+      - name: check the published signature
         env:
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
         run: |
           minisign -V -m dist/checksums.txt \
             -x dist/checksums.txt.minisig -P "$NGX_PUBLIC_KEY"
 
-      # Sem isso a chave privada continuaria no disco do runner ate a maquina
-      # ser reciclada.
-      - name: apaga a chave do runner
+      # Without this, the private key would stay on the runner's disk until the
+      # machine is recycled.
+      - name: wipe the key from the runner
         if: always()
         run: rm -f "$RUNNER_TEMP/minisign.key"

@@ -92,7 +92,7 @@ func ParseDiagnostics(text string) []output.Diagnostic {
 
 		d := output.Diagnostic{
 			Severity: severityFromLevel(m[1]),
-			Code:     CodigoTesteConfig,
+			Code:     CodeConfigTest,
 			Message:  m[2],
 		}
 		if loc := reLocation.FindStringSubmatch(d.Message); loc != nil {

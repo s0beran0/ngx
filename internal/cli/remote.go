@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// ConectarSSH opens a remote transport and returns, along with it, what
+// SSHConnector opens a remote transport and returns, along with it, what
 // building it observed on the way — a host key accepted without verification,
 // an unavailable ssh-agent, an unreadable key.
 //
@@ -20,18 +20,18 @@ import (
 // reason GlobalSettingsPath is a field: a CLI test needs to exercise the flag
 // wiring without opening a socket. In production the value is always
 // transport.SSHWithDiagnostics.
-type ConectarSSH func(transport.SSHOptions) (transport.Transport, []output.Diagnostic, error)
+type SSHConnector func(transport.SSHOptions) (transport.Transport, []output.Diagnostic, error)
 
-// flagsDeConexao are the flags that only make sense with --host. Passing any
+// connectionFlags are the flags that only make sense with --host. Passing any
 // of them without a destination is a usage error, not a value silently
 // ignored: whoever typed --user deploy without --host believes the connection
 // is going to use that user.
 //
 // --sudo is left out on purpose: explicit privilege (DR5) applies to the local
 // target too.
-var flagsDeConexao = []string{"host", "user", "port", "key", "known-hosts", "insecure-host-key"}
+var connectionFlags = []string{"host", "user", "port", "key", "known-hosts", "insecure-host-key"}
 
-// registrarFlagsDeConexao adds the global remote access flags.
+// registerConnectionFlags adds the global remote access flags.
 //
 // There is no password flag, and that is a security decision, not an
 // oversight: a flag's value shows up in `ps`, in the shell history and in the
@@ -41,7 +41,7 @@ var flagsDeConexao = []string{"host", "user", "port", "key", "known-hosts", "ins
 // --port starts at 0, and not at 22, because zero is what distinguishes "not
 // given" from "given as 22". DR2's precedence depends on that distinction: an
 // explicit flag beats ~/.ssh/config, which beats the default.
-func registrarFlagsDeConexao(p *pflag.FlagSet, f *GlobalFlags) {
+func registerConnectionFlags(p *pflag.FlagSet, f *GlobalFlags) {
 	p.StringVar(&f.Host, "host", "", "operate on a remote host over SSH (~/.ssh/config alias or address)")
 	p.StringVar(&f.User, "user", "", "SSH user")
 	p.IntVar(&f.Port, "port", 0, "SSH port")
@@ -52,7 +52,7 @@ func registrarFlagsDeConexao(p *pflag.FlagSet, f *GlobalFlags) {
 	p.BoolVar(&f.Sudo, "sudo", false, "escalate privilege on the commands that require it")
 }
 
-// abrirTransporte decides the target of the execution and stores it in the
+// openTransport decides the target of the execution and stores it in the
 // Context.
 //
 // Without --host the path is the usual one: local transport, no ~/.ssh/config
@@ -64,11 +64,11 @@ func registrarFlagsDeConexao(p *pflag.FlagSet, f *GlobalFlags) {
 // on the error one. An --insecure-host-key warning that vanishes from the
 // output makes DR1's escape hatch silent, which is exactly what the decision
 // exists to prevent.
-func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
+func openTransport(ctx *Context, cmd *cobra.Command) error {
 	f := ctx.Flags
 
 	if f.Host == "" {
-		if err := recusarFlagsDeConexaoSemHost(cmd); err != nil {
+		if err := refuseConnectionFlagsWithoutHost(cmd); err != nil {
 			return err
 		}
 		ctx.Transport = transport.Local()
@@ -88,22 +88,22 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 		// the command line.
 	}
 
-	caminhoConfig, diagCaminho := caminhoSSHConfig(ctx)
-	if diagCaminho != nil {
-		ctx.TransportDiags = append(ctx.TransportDiags, *diagCaminho)
+	configPath, pathDiag := sshConfigPath(ctx)
+	if pathDiag != nil {
+		ctx.TransportDiags = append(ctx.TransportDiags, *pathDiag)
 	}
 
 	// DR2's precedence belongs entirely to transport: an explicit flag beats
 	// ~/.ssh/config, which beats the default. Reimplementing it here would
 	// create a second source of truth that can disagree with the first.
-	resolvido, diags, err := transport.ResolveSSHConfig(opts, caminhoConfig)
+	resolved, diags, err := transport.ResolveSSHConfig(opts, configPath)
 	ctx.TransportDiags = append(ctx.TransportDiags, diags...)
 	if err != nil {
 		return err
 	}
 
-	tr, diagsConexao, err := ctx.conectar()(resolvido)
-	ctx.TransportDiags = append(ctx.TransportDiags, diagsConexao...)
+	tr, connDiags, err := ctx.connector()(resolved)
+	ctx.TransportDiags = append(ctx.TransportDiags, connDiags...)
 	if err != nil {
 		return err
 	}
@@ -112,25 +112,25 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 	return nil
 }
 
-// recusarFlagsDeConexaoSemHost turns what would be a silent surprise into a
+// refuseConnectionFlagsWithoutHost turns what would be a silent surprise into a
 // usage error. It uses Changed, and not the value, so as to also catch
 // --user "" and --port 0 typed explicitly.
-func recusarFlagsDeConexaoSemHost(cmd *cobra.Command) error {
+func refuseConnectionFlagsWithoutHost(cmd *cobra.Command) error {
 	if cmd == nil {
 		return nil
 	}
-	for _, nome := range flagsDeConexao {
-		if nome == "host" {
+	for _, name := range connectionFlags {
+		if name == "host" {
 			continue
 		}
-		if flag := cmd.Flags().Lookup(nome); flag != nil && flag.Changed {
-			return output.Usage("--%s only makes sense together with --host", nome)
+		if flag := cmd.Flags().Lookup(name); flag != nil && flag.Changed {
+			return output.Usage("--%s only makes sense together with --host", name)
 		}
 	}
 	return nil
 }
 
-// caminhoSSHConfig returns the file to consult. A Context with the field
+// sshConfigPath returns the file to consult. A Context with the field
 // filled in wins — that is what allows testing the resolution without
 // depending on the HOME of whoever runs the tests.
 //
@@ -138,12 +138,12 @@ func recusarFlagsDeConexaoSemHost(cmd *cobra.Command) error {
 // resolution goes on with flags and defaults, and the warning (DR7) says why
 // ~/.ssh/config was not consulted. Aborting would break whoever passed --host,
 // --user and --port explicitly and does not need the file at all.
-func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
+func sshConfigPath(ctx *Context) (string, *output.Diagnostic) {
 	if ctx.SSHConfigPath != "" {
 		return ctx.SSHConfigPath, nil
 	}
 
-	caminho, err := transport.DefaultSSHConfigPath()
+	path, err := transport.DefaultSSHConfigPath()
 	if err != nil {
 		return "", &output.Diagnostic{
 			Severity: output.SeverityWarning,
@@ -154,40 +154,40 @@ func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 			),
 		}
 	}
-	return caminho, nil
+	return path, nil
 }
 
-// conectar returns the connector to use. The production default lives here,
+// connector returns the connector to use. The production default lives here,
 // and not in Execute, so that a Context assembled by hand by a test about
 // another subject keeps working.
 //
 // It is SSHWithDiagnostics, never SSH: the latter discards the host key and
 // ssh-agent diagnostics, and a lost warning is a warning that does not exist.
-func (c *Context) conectar() ConectarSSH {
-	if c.ConectarSSH != nil {
-		return c.ConectarSSH
+func (c *Context) connector() SSHConnector {
+	if c.SSHConnector != nil {
+		return c.SSHConnector
 	}
 	return transport.SSHWithDiagnostics
 }
 
-// transporte returns the target of the operations, falling back to the local
-// one when the Context was assembled without going through preparar (tests
+// activeTransport returns the target of the operations, falling back to the local
+// one when the Context was assembled without going through prepare (tests
 // about other subjects).
-func (c *Context) transporte() transport.Transport {
+func (c *Context) activeTransport() transport.Transport {
 	if c.Transport == nil {
 		return transport.Local()
 	}
 	return c.Transport
 }
 
-// NovoEnvelope creates the command's envelope already with the target in meta
+// NewEnvelope creates the command's envelope already with the target in meta
 // and with the connection diagnostics inside.
 //
 // Every command builds its output through here instead of calling output.New
 // directly: target and connection warnings apply to any command, and what
 // every command has to remember to do, some command forgets.
-func (c *Context) NovoEnvelope(comando string) *output.Envelope {
-	env := output.New(comando)
+func (c *Context) NewEnvelope(command string) *output.Envelope {
+	env := output.New(command)
 	if c.Transport != nil {
 		env.Meta.Target = c.Transport.Describe()
 	}
@@ -197,11 +197,11 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 	return env
 }
 
-// NovoRuntime builds the runtime on top of the context's transport.
+// NewRuntime builds the runtime on top of the context's transport.
 //
 // WithSudo carries the --sudo flag directly: without it, a command that needs
 // privilege is reported, never retried with sudo (DR5).
-// TransporteDeLeitura returns the transport the commands use to READ
+// ReadTransport returns the transport the commands use to READ
 // configuration, already with privileged reading when --sudo was asked for.
 //
 // The escalation is minimal: each file is tried first as the connection user,
@@ -211,25 +211,25 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 //
 // Without --sudo it returns the raw transport: DR5 requires privilege to be
 // asked for, never inferred.
-func (c *Context) TransporteDeLeitura(ctx context.Context) transport.Transport {
+func (c *Context) ReadTransport(ctx context.Context) transport.Transport {
 	sudo := c.Flags != nil && c.Flags.Sudo
-	return transport.WithPrivilegedReadAndDump(ctx, c.transporte(), sudo, c.dumpDeFallback)
+	return transport.WithPrivilegedReadAndDump(ctx, c.activeTransport(), sudo, c.fallbackDump)
 }
 
-// dumpDeFallback delivers the effective configuration via `nginx -T`, the last
+// fallbackDump delivers the effective configuration via `nginx -T`, the last
 // resort for reading. On a hardened server the sudoers file allows specific
 // commands -- typically nginx -- and refuses a generic `cat`; there this is
 // the only path that works.
-func (c *Context) dumpDeFallback(ctx context.Context) (map[string][]byte, error) {
-	d, err := c.NovoRuntime().DumpConfig(ctx)
+func (c *Context) fallbackDump(ctx context.Context) (map[string][]byte, error) {
+	d, err := c.NewRuntime().DumpConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	arquivos := make(map[string][]byte, len(d.Files))
+	files := make(map[string][]byte, len(d.Files))
 	for _, f := range d.Files {
-		arquivos[f.Path] = []byte(f.Content)
+		files[f.Path] = []byte(f.Content)
 	}
-	return arquivos, nil
+	return files, nil
 }
 
 // ReadDiagnostics collects what the reading transport observed -- which
@@ -239,20 +239,20 @@ func ReadDiagnostics(tr transport.Transport) []output.Diagnostic {
 	return transport.Diagnostics(tr)
 }
 
-func (c *Context) NovoRuntime() *runtime.Runtime {
+func (c *Context) NewRuntime() *runtime.Runtime {
 	if c.Flags == nil {
-		return runtime.New(c.transporte())
+		return runtime.New(c.activeTransport())
 	}
-	return runtime.New(c.transporte(),
+	return runtime.New(c.activeTransport(),
 		runtime.WithBinary(c.Flags.NginxBin),
 		runtime.WithSudo(c.Flags.Sudo),
 	)
 }
 
-// fecharTransporte releases the connection. Calling it twice is safe by the
+// closeTransport releases the connection. Calling it twice is safe by the
 // Transport contract, and the field is zeroed so that a reused Context does
 // not point at a dead transport.
-func (c *Context) fecharTransporte() error {
+func (c *Context) closeTransport() error {
 	if c.Transport == nil {
 		return nil
 	}
@@ -261,11 +261,11 @@ func (c *Context) fecharTransporte() error {
 	return tr.Close()
 }
 
-// avisarFalhaAoFechar is the last resort for a Close that failed after the
+// warnCloseFailure is the last resort for a Close that failed after the
 // envelope had already been written. The envelope is immutable by then, and a
 // connection that did not close cleanly does not change the command's result —
 // but it also cannot disappear.
-func avisarFalhaAoFechar(stderr io.Writer, err error) {
+func warnCloseFailure(stderr io.Writer, err error) {
 	if err == nil {
 		return
 	}

@@ -1,7 +1,7 @@
 # SSH remote access dependencies
 
 This document records the investigation required by Step 1 of Task R2 of the plan
-`docs/superpowers/plans/2026-08-17-ngx-remoto-ssh.md`. It exists because three
+`docs/superpowers/plans/2026-08-17-ngx-remote-ssh.md`. It exists because three
 defects in this base were born from integration code written from memory: here
 every statement has a source, and the source is the library code or the code of the
 OpenSSH, not the memory of who wrote it.
@@ -177,7 +177,7 @@ Therefore:
 | --- | --- | --- |
 | Unknown host | `errors.As(err, &ke)` e `len(ke.Want) == 0` | normal friction: say the host and line to add |
 | **Key changed** | `errors.As(err, &ke)` e `len(ke.Want) > 0` | **possible attack**: say this in all letters, and show `ke.Want[i]` |
-| Key revoked | `errors.As(err, &re)` com `*knownhosts.RevokedError` (`knownhosts.go:333-339`) | refuses, informing the file and line |
+| Key revoked | `errors.As(err, &re)` with `*knownhosts.RevokedError` (`knownhosts.go:333-339`) | refuses, informing the file and line |
 
 `**KeyError` — that is, a `var ke *knownhosts.KeyError` variable.The error is always returned by pointer (`&KeyError{}` in `knownhosts.go:375` and
 `&RevokedError{...}` in `knownhosts.go:345`), then `errors.As` needs
@@ -233,12 +233,12 @@ The project's README states that "the `Match` directive is currently unsupported
 
 | Feature | Situation | Source |
 | --- | --- | --- |
-| `Host` com wildcard (`web*`, `?`) | Yes | `config.go:491` (`NewPattern`), `config.go:550` (`Matches`) |
-| `Host` com negação (`!web9`) | yes — matching a negated pattern discards the entire block | `config.go:550-568` |
-| `Include`, inclusive com wildcard no caminho | yes, up to 5 levels of recursion (`ErrDepthExceeded`) | `config.go:705-795` |
+| `Host` with wildcard (`web*`, `?`) | Yes | `config.go:491` (`NewPattern`), `config.go:550` (`Matches`) |
+| `Host` with negation (`!web9`) | yes — matching a negated pattern discards the entire block | `config.go:550-568` |
+| `Include`, including wildcards in the path | yes, up to 5 levels of recursion (`ErrDepthExceeded`) | `config.go:705-795` |
 | `Match all` | yes, treated as `Host*` | `parser.go:184-195` |
-| `Match Host <padrões>` | Yes | `parser.go:196-222` |
-| `IdentityFile` múltiplo | yes, via `GetAll` | `config.go:406` |
+| `Match Host <patterns>` | Yes | `parser.go:196-222` |
+| Multiple `IdentityFile` | yes, via `GetAll` | `config.go:406` |
 | Case-insensitive keys | Yes | `config.go:376` |
 
 ### What Isn't Honorable — and How It Fails

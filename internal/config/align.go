@@ -25,14 +25,14 @@ import (
 func align(f *File) error {
 	toks, err := Tokenize(f.Source)
 	if err != nil {
-		var quote *ErroDeAspa
+		var quote *QuoteError
 		if errors.As(err, &quote) {
 			return ParseErrors{{
 				File:    f.Path,
-				Line:    quote.Linha,
+				Line:    quote.Line,
 				Message: quote.Error(),
-				Classe:  RefusalUnclosedQuote,
-				Token:   quote.Aspa,
+				Class:   RefusalUnclosedQuote,
+				Token:   quote.Quote,
 			}}
 		}
 		return fmt.Errorf("while tokenizing %s: %w", f.Path, err)
@@ -48,7 +48,7 @@ func align(f *File) error {
 			File:    f.Path,
 			Line:    leftover.Line,
 			Message: fmt.Sprintf("%d tokens left over after aligning the tree", len(a.toks)-a.pos),
-			Classe:  RefusalLeftoverTokens,
+			Class:   RefusalLeftoverTokens,
 			Token:   leftover.Raw,
 		}}
 	}
@@ -211,7 +211,7 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 			File:    a.file,
 			Line:    next.Line,
 			Message: fmt.Sprintf("expected ';' or '{' after %q, found %q", n.Directive, next.Raw),
-			Classe:  RefusalMissingTerminator,
+			Class:   RefusalMissingTerminator,
 			Token:   next.Raw,
 		}}
 	}
@@ -259,7 +259,7 @@ func (a *aligner) peek() (Token, error) {
 		return Token{}, ParseErrors{{
 			File:    a.file,
 			Message: "unexpected end of configuration",
-			Classe:  RefusalUnexpectedEnd,
+			Class:   RefusalUnexpectedEnd,
 		}}
 	}
 	return a.toks[a.pos], nil
@@ -302,7 +302,7 @@ func (a *aligner) unexpectedToken(tok Token, class RefusalClass) error {
 		File:    a.file,
 		Line:    tok.Line,
 		Message: fmt.Sprintf("column %d: unexpected token %q", tok.Column, tok.Raw),
-		Classe:  class,
+		Class:   class,
 		Token:   tok.Raw,
 	}}
 }

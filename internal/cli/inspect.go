@@ -40,30 +40,30 @@ func (d InspectData) Redacted(rs output.RedactSet) any {
 		return d
 	}
 
-	arquivos := make([]*config.File, 0, len(d.Config))
+	files := make([]*config.File, 0, len(d.Config))
 	for _, f := range d.Config {
-		arquivos = append(arquivos, &config.File{
+		files = append(files, &config.File{
 			Path:   f.Path,
 			Source: f.Source,
-			Nodes:  redigirNodes(f.Nodes, rs),
+			Nodes:  redactNodes(f.Nodes, rs),
 		})
 	}
-	return InspectData{Config: arquivos, Summary: d.Summary}
+	return InspectData{Config: files, Summary: d.Summary}
 }
 
-func redigirNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
-	saida := make([]*config.Node, 0, len(nodes))
+func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
+	out := make([]*config.Node, 0, len(nodes))
 	for _, n := range nodes {
-		copia := *n
+		clone := *n
 		if rs.Matches(n.Directive, n.Args) {
-			copia.Args = []string{output.RedactedValue}
+			clone.Args = []string{output.RedactedValue}
 		}
 		if len(n.Block) > 0 {
-			copia.Block = redigirNodes(n.Block, rs)
+			clone.Block = redactNodes(n.Block, rs)
 		}
-		saida = append(saida, &copia)
+		out = append(out, &clone)
 	}
-	return saida
+	return out
 }
 
 func newInspectCmd(ctx *Context) *cobra.Command {
@@ -74,8 +74,8 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 		Short: "Complete dump: configuration tree and summary",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			caminho := caminhoDaConfig(ctx)
-			if caminho == "" {
+			path := configPathOf(ctx)
+			if path == "" {
 				return output.Usage("provide the configuration with -c or in nginx.config")
 			}
 
@@ -90,18 +90,18 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 			// case of a production nginx: most files are readable by
 			// everyone, and a handful hold credentials and stay restricted
 			// to root.
-			ctxExec, cancelar := ctx.contextoDeExecucao(cmd.Context())
-			defer cancelar()
+			ctxExec, cancel := ctx.executionContext(cmd.Context())
+			defer cancel()
 
-			tr := ctx.TransporteDeLeitura(ctxExec)
+			tr := ctx.ReadTransport(ctxExec)
 			tree, err := config.Parse(config.ParseOptions{
-				Path: caminho,
+				Path: path,
 				Open: tr.Open,
 				Glob: tr.Glob,
 			})
-			diagsLeitura := ReadDiagnostics(tr)
+			readDiags := ReadDiagnostics(tr)
 			if err != nil {
-				return erroDeParse(comDicaDeSudo(err, ctx), diagsLeitura...)
+				return parseFailure(withSudoHint(err, ctx), readDiags...)
 			}
 
 			if combine {
@@ -111,9 +111,9 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 				}
 			}
 
-			env := ctx.NovoEnvelope("inspect")
-			env.Diagnostics = append(env.Diagnostics, diagsLeitura...)
-			env.Data = InspectData{Config: tree.Files, Summary: resumir(tree)}
+			env := ctx.NewEnvelope("inspect")
+			env.Diagnostics = append(env.Diagnostics, readDiags...)
+			env.Data = InspectData{Config: tree.Files, Summary: summarize(tree)}
 			env.Meta.ConfigHash = tree.Hash
 			return ctx.Renderer.Render(env)
 		},
@@ -123,7 +123,7 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 	return cmd
 }
 
-// erroDeParse translates the config.Parse failure into the correct exit code.
+// parseFailure translates the config.Parse failure into the correct exit code.
 //
 // config.ParseErrors represents invalid user configuration -- a syntax error,
 // an include pointing at a nonexistent file -- and is exit 3
@@ -136,61 +136,61 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 // in the Diagnostic (instead of becoming just text inside Message) so that the
 // output points at the exact place of the problem; when there is more than one
 // item, each appears located in the message, instead of a single generic line.
-// comDicaDeSudo adds, when the refusal was for permission and --sudo was not
+// withSudoHint adds, when the refusal was for permission and --sudo was not
 // asked for, the sentence that turns a dead end into a next step.
 //
 // Without it the operator gets "no permission" and is left not knowing that
 // the tool solves that -- and the wrong way out, loosening permissions on the
 // server, is the most obvious one for whoever is in a hurry. DR5 prevents
 // escalating on its own; nothing prevents saying how.
-func comDicaDeSudo(err error, ctx *Context) error {
+func withSudoHint(err error, ctx *Context) error {
 	if ctx.Flags != nil && ctx.Flags.Sudo {
 		return err
 	}
-	var problemas config.ParseErrors
-	if !errors.As(err, &problemas) {
+	var problems config.ParseErrors
+	if !errors.As(err, &problems) {
 		return err
 	}
-	for i := range problemas {
+	for i := range problems {
 		// Branch on the CLASS, never on the message text. This used to match
-		// the word "permissao" in the message, and translating the project to
+		// the word "permission" in the message, and translating the project to
 		// English removed the hint silently -- no test noticed, because no
 		// test covered the branch. Class survives rewording and translation.
-		if problemas[i].Classe != config.RefusalPermissionDenied {
+		if problems[i].Class != config.RefusalPermissionDenied {
 			continue
 		}
-		problemas[i].Message += ". Run with --sudo so that ngx reads with privilege " +
+		problems[i].Message += ". Run with --sudo so that ngx reads with privilege " +
 			"only the refused files; there is no need to change permissions on the target"
 	}
-	return problemas
+	return problems
 }
 
-func erroDeParse(err error, extras ...output.Diagnostic) error {
-	var problemas config.ParseErrors
-	if !errors.As(err, &problemas) || len(problemas) == 0 {
+func parseFailure(err error, extras ...output.Diagnostic) error {
+	var problems config.ParseErrors
+	if !errors.As(err, &problems) || len(problems) == 0 {
 		return output.Internal(err, "%s", err.Error())
 	}
 
-	itens := make([]string, len(problemas))
-	for i, p := range problemas {
+	items := make([]string, len(problems))
+	for i, p := range problems {
 		// With no known line (a file that did not even open), the `:0` would
 		// be an invented reference. An unavailable field is omitted.
 		if p.Line > 0 {
-			itens[i] = fmt.Sprintf("%s:%d: %s", p.File, p.Line, p.Message)
+			items[i] = fmt.Sprintf("%s:%d: %s", p.File, p.Line, p.Message)
 		} else {
-			itens[i] = fmt.Sprintf("%s: %s", p.File, p.Message)
+			items[i] = fmt.Sprintf("%s: %s", p.File, p.Message)
 		}
 	}
 
-	e := output.InvalidConfig("%s", strings.Join(itens, "; "))
-	e.Diag.File = problemas[0].File
-	e.Diag.Line = problemas[0].Line
+	e := output.InvalidConfig("%s", strings.Join(items, "; "))
+	e.Diag.File = problems[0].File
+	e.Diag.Line = problems[0].Line
 	e.Extras = append(e.Extras, extras...)
 	e.Err = err
 	return e
 }
 
-func caminhoDaConfig(ctx *Context) string {
+func configPathOf(ctx *Context) string {
 	if ctx.Flags.ConfigPath != "" {
 		return ctx.Flags.ConfigPath
 	}
@@ -200,11 +200,11 @@ func caminhoDaConfig(ctx *Context) string {
 	return ""
 }
 
-// resumir counts the blocks of the tree. Only directives that open a block
+// summarize counts the blocks of the tree. Only directives that open a block
 // (via HasBlock) enter the count: the fixture has "server 10.0.0.1:8080;"
 // inside an upstream, which is also called "server" but is a simple directive,
 // not a block -- counting by name alone would inflate Servers.
-func resumir(t *config.Tree) Summary {
+func summarize(t *config.Tree) Summary {
 	s := Summary{Files: len(t.Files)}
 	t.Walk(func(n *config.Node) bool {
 		if !n.HasBlock() {

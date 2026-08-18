@@ -51,7 +51,7 @@ $ReleasesUrl = "https://github.com/$Repository/releases"
 # While the placeholder is here, the script REFUSES to install: absence of
 # verification is a failure, never a "carried on anyway".
 $MinisignPublicKey = 'RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW'
-$KeyPlaceholder    = 'PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2'
+$KeyPlaceholder    = 'PLACEHOLDER-MINISIGN-KEY-NOT-GENERATED-SEE-TASK-D2'
 
 function Show-Help {
     @'

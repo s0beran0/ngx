@@ -57,17 +57,17 @@ type Context struct {
 	Renderer *output.Renderer
 	Command  string
 
-	// GlobalSettingsPath and LocalSettingsPath are the paths preparar passes
+	// GlobalSettingsPath and LocalSettingsPath are the paths prepare passes
 	// to settings.Load. Execute fills them with the package's
 	// GlobalSettingsPath/LocalSettingsPath constants; keeping them in the
-	// Context instead of hardcoded in preparar's body is what lets a test
+	// Context instead of hardcoded in prepare's body is what lets a test
 	// isolate the loading of the settings from the real filesystem without
 	// changing the cwd of the whole process.
 	GlobalSettingsPath string
 	LocalSettingsPath  string
 
 	// Transport is the target of the operations: the local machine or a
-	// remote host. preparar fills it; executar closes it, including on the
+	// remote host. prepare fills it; execute closes it, including on the
 	// error path.
 	Transport transport.Transport
 
@@ -82,9 +82,9 @@ type Context struct {
 	// the HOME of whoever runs the suite.
 	SSHConfigPath string
 
-	// ConectarSSH opens the remote connection. Empty means
+	// SSHConnector opens the remote connection. Empty means
 	// transport.SSHWithDiagnostics.
-	ConectarSSH ConectarSSH
+	SSHConnector SSHConnector
 
 	// Getenv reads an environment variable. Injectable so that a test does
 	// not depend on the environment of whoever runs the suite -- nor
@@ -104,15 +104,15 @@ func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCod
 	}
 
 	root := NewRoot(ctx)
-	return executar(root, ctx, args, stderr)
+	return execute(root, ctx, args, stderr)
 }
 
-// executar dispatches the already-built command and translates the error into
+// execute dispatches the already-built command and translates the error into
 // an exit code. It is separate from Execute so that a white-box test can
 // inject a root with an extra command (for example, one that returns a typed
 // error wrapped with %w) without duplicating the error normalization and
 // envelope rendering logic.
-func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer) output.ExitCode {
+func execute(root *cobra.Command, ctx *Context, args []string, stderr io.Writer) output.ExitCode {
 	root.SetArgs(args)
 	root.SetOut(stderr)
 	root.SetErr(stderr)
@@ -121,7 +121,7 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 	// connection left open survives the process only for as long as the
 	// server's timeout, and in a test it becomes a leaking goroutine.
 	defer func() {
-		avisarFalhaAoFechar(stderr, ctx.fecharTransporte())
+		warnCloseFailure(stderr, ctx.closeTransport())
 	}()
 
 	err := root.Execute()
@@ -133,14 +133,14 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 	// That is the case of `test` with a rejected configuration: the result
 	// went out whole, and rendering an error envelope on top would put two
 	// JSON documents on stdout.
-	var jaRenderizado *erroJaRenderizado
-	if errors.As(err, &jaRenderizado) {
+	var alreadyRendered *alreadyRenderedError
+	if errors.As(err, &alreadyRendered) {
 		return output.CodeOf(err)
 	}
 
 	// errors.As, not a direct type assertion: a command may return an
 	// *output.Error wrapped with %w to attach context (the idiomatic pattern,
-	// e.g. fmt.Errorf("while reading %s: %w", caminho,
+	// e.g. fmt.Errorf("while reading %s: %w", path,
 	// output.InvalidConfig(...))). A direct assertion does not traverse the
 	// wrapping — it would treat that error as raw and replace it with a
 	// generic Usage, losing the original exit code and diagnostic. Cobra also
@@ -152,15 +152,15 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 		err = output.Usage("%s", err.Error())
 	}
 
-	renderErro(ctx, stderr, err)
+	renderError(ctx, stderr, err)
 	return output.CodeOf(err)
 }
 
-// renderErro draws the error envelope. ctx.Renderer is always built by Execute
+// renderError draws the error envelope. ctx.Renderer is always built by Execute
 // (or by the white-box test that assembles the Context), so it is never nil
 // here.
-func renderErro(ctx *Context, stderr io.Writer, err error) {
-	env := ctx.NovoEnvelope(comandoDe(ctx))
+func renderError(ctx *Context, stderr io.Writer, err error) {
+	env := ctx.NewEnvelope(commandOf(ctx))
 	var e *output.Error
 	if errors.As(err, &e) {
 		env.AddDiagnostic(e.Diag)
@@ -201,7 +201,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			return preparar(ctx, cmd)
+			return prepare(ctx, cmd)
 		},
 	}
 
@@ -217,7 +217,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout for the operations")
 	p.StringVar(&f.Profile, "profile", "", "profile from ngx's configuration file")
 	p.BoolVar(&f.NoRedact, "no-redact", false, "show sensitive values (terminal only)")
-	registrarFlagsDeConexao(p, f)
+	registerConnectionFlags(p, f)
 
 	root.AddCommand(newVersionCmd(ctx))
 	root.AddCommand(newInspectCmd(ctx))
@@ -227,12 +227,12 @@ func NewRoot(ctx *Context) *cobra.Command {
 	return root
 }
 
-// contextoDeExecucao applies the global --timeout to an operation that runs
+// executionContext applies the global --timeout to an operation that runs
 // something on the target. The cancel function is always returned and the
 // caller always defers it: a timeout of zero (or negative, typed by mistake)
 // cannot become an operation with no limit at all hanging on an SSH
 // connection, so in that case the flag default applies.
-func (c *Context) contextoDeExecucao(pai context.Context) (context.Context, context.CancelFunc) {
+func (c *Context) executionContext(pai context.Context) (context.Context, context.CancelFunc) {
 	if pai == nil {
 		pai = context.Background()
 	}
@@ -242,7 +242,7 @@ func (c *Context) contextoDeExecucao(pai context.Context) (context.Context, cont
 	return context.WithTimeout(pai, c.Flags.Timeout)
 }
 
-func preparar(ctx *Context, cmd *cobra.Command) error {
+func prepare(ctx *Context, cmd *cobra.Command) error {
 	f := ctx.Flags
 	ctx.Command = cmd.Name()
 
@@ -265,8 +265,8 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	// invalid value were caught only there, "ngx --quiet" with a bad format
 	// would suppress the usage error itself and the user would have no sign of
 	// the problem.
-	formato := resolverFormato(f, s)
-	if err := validarFormato(formato); err != nil {
+	format := resolveFormat(f, s)
+	if err := validateFormat(format); err != nil {
 		return err
 	}
 
@@ -291,17 +291,17 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 		})
 	}
 
-	ctx.Renderer.Format = formato
+	ctx.Renderer.Format = format
 	ctx.Renderer.Redact = set
 	ctx.Renderer.NoRedact = f.NoRedact
 	ctx.Renderer.Quiet = f.Quiet
 
-	// The transport is the last step of preparar: connecting before validating
+	// The transport is the last step of prepare: connecting before validating
 	// the flags would charge an SSH handshake to whoever typed --json --human.
-	return abrirTransporte(ctx, cmd)
+	return openTransport(ctx, cmd)
 }
 
-func resolverFormato(f *GlobalFlags, s *settings.Settings) output.Format {
+func resolveFormat(f *GlobalFlags, s *settings.Settings) output.Format {
 	switch {
 	case f.JSON:
 		return output.FormatJSON
@@ -312,18 +312,18 @@ func resolverFormato(f *GlobalFlags, s *settings.Settings) output.Format {
 	}
 }
 
-// validarFormato rejects any format outside auto/json/human. The
+// validateFormat rejects any format outside auto/json/human. The
 // --json/--human flags only produce one of those values by construction; the
-// only possible source of an invalid format in preparar is output.format from
+// only possible source of an invalid format in prepare is output.format from
 // the configuration file.
-func validarFormato(formato output.Format) error {
-	switch formato {
+func validateFormat(format output.Format) error {
+	switch format {
 	case output.FormatAuto, output.FormatJSON, output.FormatHuman, "":
 		return nil
 	default:
 		return output.Usage(
 			"invalid output.format in the configuration: %q (expected auto, json or human)",
-			string(formato),
+			string(format),
 		)
 	}
 }
@@ -334,8 +334,8 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 		Short: "Show the ngx version",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			env := ctx.NovoEnvelope("version")
-			dados := map[string]string{"version": output.Version}
+			env := ctx.NewEnvelope("version")
+			data := map[string]string{"version": output.Version}
 
 			// The embedded public key goes out here for two reasons. Users
 			// can check it against the project's published key before
@@ -349,10 +349,10 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 			// An unavailable field is omitted: a binary with no key does not
 			// show the field, instead of showing it empty.
 			if update.PublicKey != "" && update.PublicKey != update.PublicKeyPlaceholder {
-				dados["update_public_key"] = update.PublicKey
+				data["update_public_key"] = update.PublicKey
 			}
 
-			env.Data = dados
+			env.Data = data
 			return ctx.Renderer.Render(env)
 		},
 	}

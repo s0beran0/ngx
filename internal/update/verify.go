@@ -29,13 +29,13 @@ func Verify(data, checksums, signature []byte, publicKey, fileName string) error
 
 	var key minisign.PublicKey
 	if err := key.UnmarshalText([]byte(strings.TrimSpace(publicKey))); err != nil {
-		return wrapError(err, CodigoChaveInvalida,
+		return wrapError(err, CodeInvalidKey,
 			"the public key embedded in this binary is not a valid minisign key, "+
 				"so there is no way to verify the downloaded release")
 	}
 
 	if !minisign.Verify(key, checksums, signature) {
-		return newError(CodigoAssinaturaInvalida,
+		return newError(CodeInvalidSignature,
 			"the signature of %s does not match the embedded public key: the "+
 				"files were downloaded from a source that is not the project, were "+
 				"tampered with along the way, or the release was signed with another key. "+
@@ -44,7 +44,7 @@ func Verify(data, checksums, signature []byte, publicKey, fileName string) error
 
 	expected, ok := checksumFor(checksums, fileName)
 	if !ok {
-		return newError(CodigoChecksumAusente,
+		return newError(CodeChecksumMissing,
 			"the file %s does not appear in %s, so the download cannot be verified",
 			fileName, ChecksumsName)
 	}
@@ -52,7 +52,7 @@ func Verify(data, checksums, signature []byte, publicKey, fileName string) error
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])
 	if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
-		return newError(CodigoChecksumDivergente,
+		return newError(CodeChecksumMismatch,
 			"the SHA256 of %s does not match the published one: expected %s, got %s. The "+
 				"download came corrupted or tampered with; nothing was installed and the "+
 				"current ngx stays in place", fileName, expected, got)

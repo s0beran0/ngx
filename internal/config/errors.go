@@ -3,7 +3,7 @@ package config
 import "fmt"
 
 // RefusalClass names the reason why ngx refused a configuration. It exists
-// for one thing only: the FuzzAlinhamento oracle compares ngx against
+// for one thing only: the FuzzAlignment oracle compares ngx against
 // crossplane and needs to tell "deliberate refusal, with a known token shape"
 // apart from "over-rejection, which is a bug". Each class below is one
 // enumerated, narrow divergence with a unit test of its own -- see
@@ -17,40 +17,40 @@ const (
 	RefusalCrossplane RefusalClass = ""
 
 	// RefusalUnclosedQuote: the source ends inside an open quote.
-	RefusalUnclosedQuote RefusalClass = "aspa_nao_fechada"
+	RefusalUnclosedQuote RefusalClass = "unclosed_quote"
 
 	// RefusalTokenInsteadOfDirective: some other token showed up where a
 	// directive name was expected.
-	RefusalTokenInsteadOfDirective RefusalClass = "token_no_lugar_de_diretiva"
+	RefusalTokenInsteadOfDirective RefusalClass = "token_instead_of_directive"
 
 	// RefusalUnexpectedToken: a token out of place at any other position of
 	// the matching (argument, block close, comment). It is no known
 	// divergence at all: if it shows up in the fuzz, it is an aligner bug.
-	RefusalUnexpectedToken RefusalClass = "token_inesperado"
+	RefusalUnexpectedToken RefusalClass = "unexpected_token"
 
 	// RefusalMissingTerminator: the directive neither ends in ';' nor opens '{'.
-	RefusalMissingTerminator RefusalClass = "terminador_ausente"
+	RefusalMissingTerminator RefusalClass = "missing_terminator"
 
 	// RefusalLeftoverTokens: the tree ran out before the tokens did.
-	RefusalLeftoverTokens RefusalClass = "tokens_sobrando"
+	RefusalLeftoverTokens RefusalClass = "leftover_tokens"
 
 	// RefusalUnexpectedEnd: the tokens ran out before the tree did.
-	RefusalUnexpectedEnd RefusalClass = "fim_inesperado"
+	RefusalUnexpectedEnd RefusalClass = "unexpected_end"
 
 	// RefusalInvalidIfExpression: "if" with no parenthesized expression.
-	RefusalInvalidIfExpression RefusalClass = "expressao_if_invalida"
+	RefusalInvalidIfExpression RefusalClass = "invalid_if_expression"
 
 	// RefusalTargetNotRegular: the path exists and opened, but is not a
 	// regular file -- directory, socket, fifo, device.
-	RefusalTargetNotRegular RefusalClass = "alvo_nao_e_arquivo_regular"
+	RefusalTargetNotRegular RefusalClass = "target_not_regular_file"
 
 	// RefusalCrossplanePanic: crossplane panicked while parsing.
-	RefusalCrossplanePanic RefusalClass = "panico_do_crossplane"
+	RefusalCrossplanePanic RefusalClass = "crossplane_panic"
 
 	// RefusalReadFailure: reading one of the configuration files failed
 	// midway -- the .conf may well be intact, what failed was the I/O. Not a
 	// fuzz divergence: the fuzz reads from memory and never produces it.
-	RefusalReadFailure RefusalClass = "falha_de_leitura"
+	RefusalReadFailure RefusalClass = "read_failure"
 
 	// RefusalPermissionDenied is a read failure whose cause is specifically a
 	// permission denial. It exists as a class of its own because callers act
@@ -59,16 +59,16 @@ const (
 	//
 	// It exists as a CLASS, and not as a substring of the message, because
 	// branching on human-readable text breaks the moment the text changes.
-	// That is not hypothetical here: the CLI used to match "permissao" in the
+	// That is not hypothetical here: the CLI used to match "permission" in the
 	// message, and translating the project to English silently removed the
 	// --sudo hint, with no test noticing.
-	RefusalPermissionDenied RefusalClass = "permissao_negada"
+	RefusalPermissionDenied RefusalClass = "permission_denied"
 )
 
 // ParseError is a problem found while reading the configuration, with the
 // location preserved so that the diagnostic can point at the exact spot.
 //
-// Classe and Token are there for the comparison against crossplane in the
+// Class and Token are there for the comparison against crossplane in the
 // fuzz: Token keeps the raw text of the lexeme that motivated the refusal, so
 // that the enumerated divergence matches the exact shape of the token ("{",
 // "}") instead of matching the message by substring.
@@ -76,7 +76,7 @@ type ParseError struct {
 	File    string
 	Line    int
 	Message string
-	Classe  RefusalClass
+	Class   RefusalClass
 	Token   string
 }
 

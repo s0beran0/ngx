@@ -37,15 +37,15 @@ type ProcessData struct {
 // absent sentence, it does not become a zero.
 func (d StatusData) RenderHuman(w io.Writer) error {
 	if d.Nginx != nil {
-		produto := "nginx"
+		product := "nginx"
 		if d.Nginx.Flavor != "" {
-			produto = d.Nginx.Flavor
+			product = d.Nginx.Flavor
 		}
-		versao := d.Nginx.Version
-		if versao == "" {
-			versao = "(version not reported)"
+		version := d.Nginx.Version
+		if version == "" {
+			version = "(version not reported)"
 		}
-		if _, err := fmt.Fprintf(w, "%s %s em %s\n", produto, versao, d.Nginx.Binary); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s at %s\n", product, version, d.Nginx.Binary); err != nil {
 			return err
 		}
 	}
@@ -75,10 +75,10 @@ func newStatusCmd(ctx *Context) *cobra.Command {
 		Short: "Show the target's nginx and the state of the process",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			execCtx, cancelar := ctx.contextoDeExecucao(cmd.Context())
-			defer cancelar()
+			execCtx, cancel := ctx.executionContext(cmd.Context())
+			defer cancel()
 
-			rt := ctx.NovoRuntime()
+			rt := ctx.NewRuntime()
 
 			info, err := rt.Detect(execCtx)
 			if err != nil {
@@ -94,7 +94,7 @@ func newStatusCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			env := ctx.NovoEnvelope("status")
+			env := ctx.NewEnvelope("status")
 			env.Meta.NginxVersion = info.Version
 			env.Data = StatusData{
 				Nginx: info,

@@ -22,7 +22,7 @@ type UpdateData = update.Result
 // because DR3 says nothing is installed there.
 func newUpdateCmd(ctx *Context) *cobra.Command {
 	var (
-		canal    string
+		channel  string
 		versao   string
 		conferir bool
 	)
@@ -35,31 +35,31 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 			"leaves the current ngx intact.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			execCtx, cancelar := ctx.contextoDeExecucao(cmd.Context())
-			defer cancelar()
+			execCtx, cancel := ctx.executionContext(cmd.Context())
+			defer cancel()
 
-			c, err := update.ParseChannel(canalEscolhido(ctx, canal))
+			c, err := update.ParseChannel(chosenChannel(ctx, channel))
 			if err != nil {
 				return output.Usage("%s", err.Error())
 			}
 
 			res, err := update.Run(execCtx, update.Options{
 				Channel:        c,
-				Versao:         versao,
+				Version:        versao,
 				CurrentVersion: output.Version,
 				CheckOnly:      conferir,
 			})
 			if err != nil {
-				return erroDeUpdate(err)
+				return updateFailure(err)
 			}
 
-			env := ctx.NovoEnvelope("update")
+			env := ctx.NewEnvelope("update")
 			env.Data = res
 			return ctx.Renderer.Render(env)
 		},
 	}
 
-	cmd.Flags().StringVar(&canal, "channel", "",
+	cmd.Flags().StringVar(&channel, "channel", "",
 		"release channel: stable (default) or beta, which includes pre-releases")
 	cmd.Flags().StringVar(&versao, "version", "",
 		"install exactly this version, even one older than the current")
@@ -68,11 +68,11 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 	return cmd
 }
 
-// canalEscolhido resolves the channel precedence: the flag beats the
+// chosenChannel resolves the channel precedence: the flag beats the
 // environment variable, which beats the default. NGX_CHANNEL exists because
 // install.sh already uses it, and whoever installed from the beta channel
 // expects to stay on it without repeating the flag on every update.
-func canalEscolhido(ctx *Context, flag string) string {
+func chosenChannel(ctx *Context, flag string) string {
 	if flag != "" {
 		return flag
 	}
@@ -82,15 +82,15 @@ func canalEscolhido(ctx *Context, flag string) string {
 	return ""
 }
 
-// erroDeUpdate preserves the typed error from the update package. It already
+// updateFailure preserves the typed error from the update package. It already
 // carries its own code and message -- rewrapping would erase the distinction
 // between "there is no new version", "the signature does not check out" and
 // "there was no permission to write", which are three outcomes whoever
 // consumes the output needs to tell apart.
-func erroDeUpdate(err error) error {
-	var tipado *output.Error
-	if errors.As(err, &tipado) {
-		return tipado
+func updateFailure(err error) error {
+	var typed *output.Error
+	if errors.As(err, &typed) {
+		return typed
 	}
 	return output.Internal(err, "%s", err.Error())
 }

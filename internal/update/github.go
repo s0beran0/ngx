@@ -55,16 +55,16 @@ func (r *Release) AssetByName(name string) (Asset, error) {
 			return a, nil
 		}
 	}
-	return Asset{}, newError(CodigoAssetAusente,
+	return Asset{}, newError(CodeAssetMissing,
 		"release %s does not carry the file %q, so there is no way to verify the download; "+
 			"published artifacts: %s", r.Version, name, assetNames(r.Assets))
 }
 
-// AssetDaPlataforma picks the artifact for the given system and
+// AssetForPlatform picks the artifact for the given system and
 // architecture. The choice is made by suffix (_<so>_<arch>.<ext>) instead of
 // by a name assembled from the version: the goreleaser name template can
 // change without the update having to be rewritten.
-func (r *Release) AssetDaPlataforma(goos, goarch string) (Asset, error) {
+func (r *Release) AssetForPlatform(goos, goarch string) (Asset, error) {
 	suffixes := []string{
 		fmt.Sprintf("_%s_%s.tar.gz", goos, goarch),
 		fmt.Sprintf("_%s_%s.zip", goos, goarch),
@@ -76,7 +76,7 @@ func (r *Release) AssetDaPlataforma(goos, goarch string) (Asset, error) {
 			}
 		}
 	}
-	return Asset{}, newError(CodigoAssetAusente,
+	return Asset{}, newError(CodeAssetMissing,
 		"release %s does not carry an artifact for %s/%s; published artifacts: %s",
 		r.Version, goos, goarch, assetNames(r.Assets))
 }
@@ -92,39 +92,39 @@ func assetNames(assets []Asset) string {
 	return strings.Join(names, ", ")
 }
 
-// Cliente talks to the GitHub API.
-type Cliente struct {
+// Client talks to the GitHub API.
+type Client struct {
 	HTTP    *http.Client
 	BaseURL string
 	Repo    string
 }
 
-// NovoCliente returns a client with the given timeout. A zero timeout means
+// NewClient returns a client with the given timeout. A zero timeout means
 // "no timeout of its own": the caller controls it through the context, which
 // is how the CLI's global --timeout reaches here.
-func NovoCliente(timeout time.Duration) *Cliente {
-	return &Cliente{
+func NewClient(timeout time.Duration) *Client {
+	return &Client{
 		HTTP:    &http.Client{Timeout: timeout},
 		BaseURL: DefaultBaseURL,
 		Repo:    DefaultRepo,
 	}
 }
 
-func (c *Cliente) http() *http.Client {
+func (c *Client) http() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
 	return http.DefaultClient
 }
 
-func (c *Cliente) base() string {
+func (c *Client) base() string {
 	if c.BaseURL != "" {
 		return strings.TrimSuffix(c.BaseURL, "/")
 	}
 	return DefaultBaseURL
 }
 
-func (c *Cliente) repo() string {
+func (c *Client) repo() string {
 	if c.Repo != "" {
 		return c.Repo
 	}
@@ -138,7 +138,7 @@ func (c *Cliente) repo() string {
 // non-draft entry, because the API returns them ordered by creation
 // descending -- and the beta channel accepts both a prerelease and a stable,
 // whichever comes first (DD1).
-func (c *Cliente) Latest(ctx context.Context, channel Channel) (*Release, error) {
+func (c *Client) Latest(ctx context.Context, channel Channel) (*Release, error) {
 	if channel == ChannelBeta {
 		var releases []Release
 		url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", c.base(), c.repo())
@@ -151,7 +151,7 @@ func (c *Cliente) Latest(ctx context.Context, channel Channel) (*Release, error)
 			}
 			return normalize(&releases[i]), nil
 		}
-		return nil, newError(CodigoReleaseAusente,
+		return nil, newError(CodeReleaseMissing,
 			"the beta channel has no published release in %s", c.repo())
 	}
 
@@ -166,7 +166,7 @@ func (c *Cliente) Latest(ctx context.Context, channel Channel) (*Release, error)
 // ByVersion resolves a specific version by tag. It is the downgrade path and
 // the deliberate version-change path: it never happens without someone asking
 // for it.
-func (c *Cliente) ByVersion(ctx context.Context, version string) (*Release, error) {
+func (c *Client) ByVersion(ctx context.Context, version string) (*Release, error) {
 	tag := strings.TrimSpace(version)
 	if tag == "" {
 		return nil, output.Usage("give the version in the vX.Y.Z format")
@@ -182,51 +182,51 @@ func (c *Cliente) ByVersion(ctx context.Context, version string) (*Release, erro
 	return normalize(&rel), nil
 }
 
-// Baixar reads a whole artifact into memory, respecting the ceiling.
-func (c *Cliente) Baixar(ctx context.Context, url string) ([]byte, error) {
+// Download reads a whole artifact into memory, respecting the ceiling.
+func (c *Client) Download(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, wrapError(err, CodigoRede, "invalid download url: %s", url)
+		return nil, wrapError(err, CodeNetwork, "invalid download url: %s", url)
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "ngx-update")
 
 	resp, err := c.http().Do(req)
 	if err != nil {
-		return nil, wrapError(err, CodigoRede,
+		return nil, wrapError(err, CodeNetwork,
 			"could not download %s: the network failed or the time limit ran out", url)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, newError(CodigoRede,
+		return nil, newError(CodeNetwork,
 			"the download of %s returned HTTP %d", url, resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, downloadLimit+1))
 	if err != nil {
-		return nil, wrapError(err, CodigoRede,
+		return nil, wrapError(err, CodeNetwork,
 			"the download of %s was interrupted before the end", url)
 	}
 	if int64(len(data)) > downloadLimit {
-		return nil, newError(CodigoRede,
+		return nil, newError(CodeNetwork,
 			"the download of %s went past the limit of %d bytes and was aborted",
 			url, int64(downloadLimit))
 	}
 	return data, nil
 }
 
-func (c *Cliente) getJSON(ctx context.Context, url string, dest any) error {
+func (c *Client) getJSON(ctx context.Context, url string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return wrapError(err, CodigoRede, "invalid url: %s", url)
+		return wrapError(err, CodeNetwork, "invalid url: %s", url)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "ngx-update")
 
 	resp, err := c.http().Do(req)
 	if err != nil {
-		return wrapError(err, CodigoRede,
+		return wrapError(err, CodeNetwork,
 			"could not query the GitHub API at %s: the network failed or the "+
 				"time limit ran out", url)
 	}
@@ -238,10 +238,10 @@ func (c *Cliente) getJSON(ctx context.Context, url string, dest any) error {
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, downloadLimit+1))
 	if err != nil {
-		return wrapError(err, CodigoRede, "the response from %s was interrupted", url)
+		return wrapError(err, CodeNetwork, "the response from %s was interrupted", url)
 	}
 	if err := json.Unmarshal(body, dest); err != nil {
-		return wrapError(err, CodigoRede,
+		return wrapError(err, CodeNetwork,
 			"the response from %s is not the JSON expected from the GitHub API", url)
 	}
 	return nil
@@ -258,14 +258,14 @@ func apiStatus(resp *http.Response, url string) error {
 		return nil
 	case http.StatusForbidden, http.StatusTooManyRequests:
 		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
-			return newError(CodigoRateLimit,
+			return newError(CodeRateLimit,
 				"the GitHub API rate limit was reached%s. It is not a problem with "+
 					"ngx nor with your network: the API without authentication allows "+
 					"60 calls per hour per IP. Wait for the window to reopen or download "+
 					"the new version manually from the releases page",
 				rateLimitResetHint(resp))
 		}
-		return newError(CodigoRede, "the GitHub API refused the query to %s with HTTP %d",
+		return newError(CodeNetwork, "the GitHub API refused the query to %s with HTTP %d",
 			url, resp.StatusCode)
 	case http.StatusNotFound:
 		// The 404 on /releases/latest has a common and far from obvious
@@ -274,16 +274,16 @@ func apiStatus(resp *http.Response, url string) error {
 		// releases. Without saying so, the reader concludes the project
 		// publishes nothing.
 		if strings.HasSuffix(url, "/releases/latest") {
-			return newError(CodigoReleaseAusente,
+			return newError(CodeReleaseMissing,
 				"no stable release found at %s. This endpoint ignores prereleases: "+
 					"if the project has only published -rc or -beta versions, "+
 					"use --channel beta (or NGX_CHANNEL=beta) to reach them", url)
 		}
-		return newError(CodigoReleaseAusente,
+		return newError(CodeReleaseMissing,
 			"the GitHub API did not find %s: the requested version may not exist or "+
 				"may have no published release", url)
 	default:
-		return newError(CodigoRede, "the GitHub API returned HTTP %d for %s",
+		return newError(CodeNetwork, "the GitHub API returned HTTP %d for %s",
 			resp.StatusCode, url)
 	}
 }
@@ -311,7 +311,7 @@ func normalize(r *Release) *Release {
 
 // Latest queries the official repository with the default client. It is the
 // signature Task D4 specifies; whoever needs a timeout or another endpoint
-// uses Cliente directly.
+// uses Client directly.
 func Latest(ctx context.Context, channel Channel) (*Release, error) {
-	return NovoCliente(0).Latest(ctx, channel)
+	return NewClient(0).Latest(ctx, channel)
 }

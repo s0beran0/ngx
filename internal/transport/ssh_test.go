@@ -93,17 +93,17 @@ func nginxRemote() *fakeRemote {
 			// Shuffled on purpose: the server hands back whatever it
 			// likes and the glob has to return a sorted result.
 			"/etc/nginx":            {"conf.d", "sites", "nginx.conf", "mime.types"},
-			"/etc/nginx/conf.d":     {"zz-ultimo.conf", "gzip.conf", "aa-primeiro.conf", "leiame.txt"},
+			"/etc/nginx/conf.d":     {"zz-last.conf", "gzip.conf", "aa-first.conf", "readme.txt"},
 			"/etc/nginx/sites":      {"a", "b"},
 			"/etc/nginx/sites/a":    {"srv.conf"},
 			"/etc/nginx/sites/b":    {"srv.conf", "extra.conf"},
-			".":                     {"local.conf", "outro.txt"},
+			".":                     {"local.conf", "other.txt"},
 			"/etc/nginx/conf.d/sub": {},
 		},
 		files: map[string]bool{
-			"/etc/nginx/nginx.conf":            true,
-			"/etc/nginx/conf.d/gzip.conf":      true,
-			"/etc/nginx/conf.d/zz-ultimo.conf": true,
+			"/etc/nginx/nginx.conf":          true,
+			"/etc/nginx/conf.d/gzip.conf":    true,
+			"/etc/nginx/conf.d/zz-last.conf": true,
 		},
 		failures: map[string]error{},
 	}
@@ -116,9 +116,9 @@ func TestRemoteGlobExpandsAndSorts(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{
-		"/etc/nginx/conf.d/aa-primeiro.conf",
+		"/etc/nginx/conf.d/aa-first.conf",
 		"/etc/nginx/conf.d/gzip.conf",
-		"/etc/nginx/conf.d/zz-ultimo.conf",
+		"/etc/nginx/conf.d/zz-last.conf",
 	}, matches, "the order feeds the canonical hash: it has to be stable")
 }
 
@@ -152,7 +152,7 @@ func TestRemoteGlobPropagatesPermissionDenied(t *testing.T) {
 func TestRemoteGlobMissingDirIsNotAnError(t *testing.T) {
 	r := nginxRemote()
 
-	matches, err := remoteGlob(r, "/etc/nginx/nao-existe/*.conf")
+	matches, err := remoteGlob(r, "/etc/nginx/does-not-exist/*.conf")
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{}, matches)
@@ -303,7 +303,7 @@ func TestQuoteArgument(t *testing.T) {
 	}{
 		{"simple", "nginx", `'nginx'`},
 		{"empty", "", `''`},
-		{"space", "meu arquivo.conf", `'meu arquivo.conf'`},
+		{"space", "meu file.conf", `'meu file.conf'`},
 		{"dollar", "$HOME/x", `'$HOME/x'`},
 		{"backtick", "`id`", "'`id`'"},
 		{"semicolon", "a; rm -rf /", `'a; rm -rf /'`},
@@ -348,7 +348,7 @@ type testSSHServer struct {
 	respond   func(command string) execResponse
 }
 
-const testPassword = "senha-de-teste"
+const testPassword = "test-password"
 
 // startSSHServer brings up a real SSH server on 127.0.0.1:0, with an
 // ephemeral host key and password authentication. Without it there is no way
@@ -663,7 +663,7 @@ func TestSSHUnknownHostKeyIsRefused(t *testing.T) {
 
 	// The code has to reach the caller intact: it is by the code, and not
 	// by the text, that the consumer separates first access from a changed
-	// key (DR1). Wrapping this in CodigoConexaoSSH would make a
+	// key (DR1). Wrapping this in CodeSSHConnection would make a
 	// verification refusal look like a network or credential failure.
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
@@ -707,7 +707,7 @@ func TestSSHOpenAndGlobEndToEnd(t *testing.T) {
 		[]byte("include conf.d/*.conf;\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(confd, "gzip.conf"), []byte("gzip on;\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(confd, "ssl.conf"), []byte("ssl on;\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(confd, "leiame.txt"), []byte("nao\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(confd, "readme.txt"), []byte("no\n"), 0o644))
 
 	// A remote path is POSIX: filepath.ToSlash covers a Windows client.
 	rootPOSIX := filepath.ToSlash(root)
@@ -726,7 +726,7 @@ func TestSSHOpenAndGlobEndToEnd(t *testing.T) {
 		rootPOSIX + "/conf.d/ssl.conf",
 	}, matches)
 
-	empty, err := tr.Glob(rootPOSIX + "/nao-existe/*.conf")
+	empty, err := tr.Glob(rootPOSIX + "/does-not-exist/*.conf")
 	require.NoError(t, err)
 	assert.Equal(t, []string{}, empty)
 

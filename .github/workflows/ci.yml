@@ -8,14 +8,15 @@ on:
 permissions:
   contents: read
 
-# Um push novo na mesma ref cancela a execucao anterior: o resultado dela ja
-# nao interessa e o runner fica livre.
+# A new push on the same ref cancels the previous run: its result no longer
+# matters and the runner is freed.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # O binario e distribuido estatico. Fixar aqui evita que algum job esqueca.
+  # The binary is distributed statically. Pinning it here keeps any job from
+  # forgetting it.
   CGO_ENABLED: "0"
 
 jobs:
@@ -25,48 +26,49 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # A versao vem do .tool-versions, o mesmo arquivo que o asdf usa na
-      # maquina do desenvolvedor. Duplicar o numero aqui faria o CI e o
-      # ambiente local divergirem sem ninguem notar.
+      # The version comes from .tool-versions, the same file asdf uses on the
+      # developer's machine. Duplicating the number here would let CI and the
+      # local environment diverge without anyone noticing.
       - uses: actions/setup-go@v6
         with:
           go-version-file: .tool-versions
           cache: true
 
-      - name: formatacao
+      - name: formatting
         run: |
-          arquivos=$(gofmt -l .)
-          if [ -n "$arquivos" ]; then
-            echo "gofmt pendente nos arquivos:" >&2
-            echo "$arquivos" >&2
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then
+            echo "gofmt pending on the files:" >&2
+            echo "$files" >&2
             exit 1
           fi
 
       - name: vet
         run: go vet ./...
 
-      # Os testes de integracao ficam atras da build tag `integration` e nao
-      # rodam aqui, entao NADA os compila -- e codigo que nao compila nao
-      # acusa nada. Ja aconteceu: uma traducao mudou mensagens em hostkey.go e
-      # as assercoes de integracao continuaram comparando o texto antigo, sem
-      # que nenhum job ficasse vermelho. Elas so quebrariam na proxima vez que
-      # alguem subisse a bancada, longe da mudanca que as quebrou.
+      # The integration tests sit behind the `integration` build tag and do
+      # not run here, so NOTHING was compiling them -- and code that is never
+      # compiled accuses nothing. It already happened: a translation changed
+      # messages in hostkey.go and the integration assertions kept comparing
+      # the old text, with no job ever turning red. They broke the next time
+      # someone brought the bench up, far from the change that broke them.
       #
-      # `vet` com a tag compila e analisa esses arquivos sem precisar de
-      # Docker: custa segundos e fecha o buraco.
-      - name: vet dos testes de integracao
+      # `vet` with the tag compiles and analyses those files without needing
+      # Docker: it costs seconds and closes the hole.
+      - name: vet of the integration tests
         run: go vet -tags integration ./...
 
-      # O race detector exige cgo; e a unica excecao ao CGO_ENABLED=0, e vale
-      # so para rodar os testes, nunca para o binario distribuido.
-      - name: testes com race detector
+      # The race detector requires cgo; it is the only exception to
+      # CGO_ENABLED=0, and it holds only for running the tests, never for the
+      # distributed binary.
+      - name: tests with the race detector
         env:
           CGO_ENABLED: "1"
         run: go test ./... -race -count=1
 
-      # Uma dependencia que exija cgo quebraria o cross-compile, e o erro so
-      # apareceria no release.
-      - name: build sem cgo
+      # A dependency that required cgo would break the cross-compile, and the
+      # error would only show up at release time.
+      - name: build without cgo
         run: go build ./...
 
   fuzz:
@@ -75,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        alvo: [FuzzAlinhamento, FuzzTokenizeSpans]
+        target: [FuzzAlignment, FuzzTokenizeSpans]
     steps:
       - uses: actions/checkout@v6
 
@@ -84,23 +86,23 @@ jobs:
           go-version-file: .tool-versions
           cache: true
 
-      # Tempo fixo e curto, nunca ilimitado: fuzz sem teto ja queimou orcamento
-      # neste projeto. O objetivo aqui e pegar regressao obvia; campanha longa
-      # se roda a mao.
-      - name: fuzz ${{ matrix.alvo }} por 60s
+      # Fixed, short time, never unbounded: fuzz with no ceiling has already
+      # burned the budget in this project. The goal here is catching an obvious
+      # regression; a long campaign is run by hand.
+      - name: fuzz ${{ matrix.target }} for 60s
         run: >
           go test ./internal/config
           -run '^$'
-          -fuzz '^${{ matrix.alvo }}$'
+          -fuzz '^${{ matrix.target }}$'
           -fuzztime=60s
 
-      # O corpus que o fuzz gera ao achar uma falha nao aparece no log; sem
-      # isso, um achado do CI e irreproduzivel.
-      - name: guardar corpus de falha
+      # The corpus fuzz generates when it finds a failure does not show up in
+      # the log; without this, a finding by CI is irreproducible.
+      - name: keep the failure corpus
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: fuzz-corpus-${{ matrix.alvo }}
+          name: fuzz-corpus-${{ matrix.target }}
           path: internal/config/testdata/fuzz/
           if-no-files-found: ignore
 
@@ -120,29 +122,31 @@ jobs:
           go-version-file: .tool-versions
           cache: true
 
-      - name: compila para ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: compile for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -o /dev/null ./cmd/ngx
 
-  # DESLIGADO ATE ALGUEM LIGAR, mas ja PRONTO.
+  # OFF UNTIL SOMEONE TURNS IT ON, but READY.
   #
-  # Os testes atras da build tag `integration` exercitam o caminho remoto
-  # contra a bancada (`make bancada-up`: container docker com sshd e nginx).
-  # O codigo remoto esta completo e a suite passa nesta maquina; o que falta e
-  # so a decisao de gastar minutos de runner construindo a imagem a cada push.
+  # The tests behind the `integration` build tag exercise the remote path
+  # against the bench (`make bench-up`: a docker container with sshd and
+  # nginx). The remote code is complete and the suite passes on this machine;
+  # what is missing is only the decision to spend runner minutes building the
+  # image on every push.
   #
-  # Continua atras da variavel por honestidade: nunca rodou num runner do
-  # GitHub, e ligar de fora do repo nao quebra ninguem, enquanto ligar por
-  # commit estrearia o CI em vermelho sem que ninguem pudesse testar antes.
+  # It stays behind a variable out of honesty: it has never run on a GitHub
+  # runner, and turning it on from outside the repository breaks nobody, while
+  # turning it on in a commit would land CI in red with no one able to test it
+  # first.
   #
-  # A chave e a variavel de repositorio NGX_CI_INTEGRACAO: enquanto ela nao
-  # existir (ou nao valer "1"), o job e pulado. Para ligar, basta
-  # `gh variable set NGX_CI_INTEGRACAO --body 1` — sem commit. Ate la, roda-se
-  # a mao: `make bancada-up && go test ./... -tags integration`.
-  integracao:
-    if: vars.NGX_CI_INTEGRACAO == '1'
+  # The switch is the repository variable NGX_CI_INTEGRATION: while it does
+  # not exist (or is not "1"), the job is skipped. To turn it on, just run
+  # `gh variable set NGX_CI_INTEGRATION --body 1` -- no commit needed. Until
+  # then, run it by hand: `make bench-up && go test ./... -tags integration`.
+  integration:
+    if: vars.NGX_CI_INTEGRATION == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -153,19 +157,19 @@ jobs:
           go-version-file: .tool-versions
           cache: true
 
-      - name: sobe a bancada
-        run: make bancada-up
+      - name: bring the bench up
+        run: make bench-up
 
-      - name: smoke da bancada
-        run: make bancada-smoke
+      - name: bench smoke test
+        run: make bench-smoke
 
-      - name: testes de integracao
+      - name: integration tests
         env:
           CGO_ENABLED: "1"
         run: go test ./... -tags integration -race -count=1
 
-      # Derruba mesmo se os testes falharem: o job seguinte no mesmo runner
-      # nao pode herdar container nem chave de teste.
-      - name: derruba a bancada
+      # Tears it down even if the tests fail: the next job on the same runner
+      # must not inherit a container or a test key.
+      - name: tear the bench down
         if: always()
-        run: make bancada-down
+        run: make bench-down

@@ -243,7 +243,7 @@ func TestIfWithSpacedParenthesesAligns(t *testing.T) {
 
 func TestEmptyBlockIsRecognized(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "vazio.conf")
+	p := filepath.Join(dir, "empty.conf")
 	require.NoError(t, os.WriteFile(p, []byte("events {}\n"), 0o644))
 
 	tree, err := config.Parse(config.ParseOptions{Path: p})

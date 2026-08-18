@@ -60,7 +60,7 @@ func TestCombineFillsOriginWithTheRealFile(t *testing.T) {
 
 	var api *config.Node
 	combined.Walk(func(n *config.Node) bool {
-		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "api.exemplo.com" {
+		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "api.example.com" {
 			api = n
 			return false
 		}
@@ -79,7 +79,7 @@ func TestCombineKeepsOriginOfTopFile(t *testing.T) {
 
 	var legacy *config.Node
 	combined.Walk(func(n *config.Node) bool {
-		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legado.exemplo.com" {
+		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legacy.example.com" {
 			legacy = n
 			return false
 		}
@@ -158,7 +158,7 @@ func TestCombineLiteralIncludeWithNoMatchingFileFails(t *testing.T) {
 				Nodes: []*config.Node{
 					{
 						Directive: "include",
-						Args:      []string{"nao-existe.conf"},
+						Args:      []string{"does-not-exist.conf"},
 						File:      topPath,
 						Line:      3,
 					},
@@ -169,7 +169,7 @@ func TestCombineLiteralIncludeWithNoMatchingFileFails(t *testing.T) {
 
 	_, err := config.Combine(tree)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "nao-existe.conf")
+	require.Contains(t, err.Error(), "does-not-exist.conf")
 }
 
 // Args is cloned in the copy: mutating the combined tree must not change the
@@ -183,7 +183,7 @@ func TestCombineDoesNotShareArgsWithOriginalTree(t *testing.T) {
 	findLegacy := func(t *config.Tree) *config.Node {
 		var found *config.Node
 		t.Walk(func(n *config.Node) bool {
-			if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legado.exemplo.com" {
+			if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legacy.example.com" {
 				found = n
 				return false
 			}
@@ -198,7 +198,7 @@ func TestCombineDoesNotShareArgsWithOriginalTree(t *testing.T) {
 	legacyCombined := findLegacy(combined)
 	require.NotNil(t, legacyCombined)
 
-	legacyCombined.Args[0] = "mutado.invalido"
-	require.Equal(t, "legado.exemplo.com", legacyOriginal.Args[0],
+	legacyCombined.Args[0] = "mutated.invalid"
+	require.Equal(t, "legacy.example.com", legacyOriginal.Args[0],
 		"mutating Args of the combined tree must not affect the original tree")
 }

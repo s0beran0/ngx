@@ -88,7 +88,7 @@ Host web1
 }
 
 func TestResolverMissingFileUsesDefaultsWithoutWarning(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nao-existe", "config")
+	path := filepath.Join(t.TempDir(), "does-not-exist", "config")
 
 	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
@@ -122,7 +122,7 @@ Host web1
 	assert.Equal(t, 2222, opts.Port)
 
 	// The default covers the rest: a host the file does not mention.
-	opts, _, err = ResolveSSHConfig(SSHOptions{Host: "outro"}, path)
+	opts, _, err = ResolveSSHConfig(SSHOptions{Host: "other"}, path)
 	require.NoError(t, err)
 	assert.Equal(t, expectedUser(t), opts.User)
 	assert.Equal(t, DefaultSSHPort, opts.Port)
@@ -256,7 +256,7 @@ func TestResolverPreservesFieldsTheFileDoesNotAffect(t *testing.T) {
 		Host:            "web1",
 		KnownHostsPath:  "/custom/known_hosts",
 		InsecureHostKey: true,
-		Password:        "segredo",
+		Password:        "secret",
 	}
 
 	opts, _, err := ResolveSSHConfig(flags, path)
@@ -264,7 +264,7 @@ func TestResolverPreservesFieldsTheFileDoesNotAffect(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/known_hosts", opts.KnownHostsPath)
 	assert.True(t, opts.InsecureHostKey)
-	assert.Equal(t, "segredo", opts.Password)
+	assert.Equal(t, "secret", opts.Password)
 }
 
 func TestResolverWithoutHostIsUsageError(t *testing.T) {

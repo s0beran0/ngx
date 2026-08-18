@@ -27,7 +27,7 @@ func TestDumpSplitsFiles(t *testing.T) {
 	assert.NotContains(t, d.Files[0].Content, "# configuration file")
 
 	assert.Equal(t, "/etc/nginx/conf.d/site.conf", d.Files[1].Path)
-	assert.Contains(t, d.Files[1].Content, "server_name exemplo.com;")
+	assert.Contains(t, d.Files[1].Content, "server_name example.com;")
 	// The last file does not get one more blank line than the others.
 	assert.True(t, strings.HasSuffix(d.Files[1].Content, "}\n"))
 }
@@ -162,7 +162,7 @@ func TestTestConfigSyntaxErrorDoesNotBecomePrivilege(t *testing.T) {
 	assert.False(t, res.OK)
 }
 
-func TestDividirDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
+func TestSplitDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
 	files := SplitDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
 	require.Len(t, files, 1)
 	assert.Equal(t, "/a.conf", files[0].Path)
@@ -171,14 +171,14 @@ func TestDividirDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
 
 // A comment inside a configuration must not split the file in two: the marker
 // only counts at the start of the line and with the trailing colon.
-func TestDividirDumpDoesNotConfuseComment(t *testing.T) {
+func TestSplitDumpDoesNotConfuseComment(t *testing.T) {
 	text := "# configuration file /a.conf:\n    # configuration file /fake.conf:\nfoo;\n"
 	files := SplitDump(text)
 	require.Len(t, files, 1)
 	assert.Contains(t, files[0].Content, "/fake.conf")
 }
 
-func TestDividirDumpEmpty(t *testing.T) {
+func TestSplitDumpEmpty(t *testing.T) {
 	files := SplitDump("")
 	require.NotNil(t, files)
 	assert.Empty(t, files)

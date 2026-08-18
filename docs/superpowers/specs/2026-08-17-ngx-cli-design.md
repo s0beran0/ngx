@@ -118,14 +118,14 @@ release packaging assembled since v0.1.Author's personal repository, MIT license
 ## 3. Architecture
 
 ```
-cmd/ngx/main.go          wiring e tradução de erro → exit code
+cmd/ngx/main.go          wiring and error-to-exit-code translation
 internal/
-  cli/       cobra: root, flags globais, os 7 comandos
-  output/    envelope, renderers json|human, redação, exit codes
+  cli/       cobra: root, global flags, the 7 commands
+  output/    envelope, renderers json|human, redaction, exit codes
   config/    parse · spans · ids · combine · render · hash
   selector/  lexer · parser · eval
   runtime/   detect (-V) · test (-t) · dump (-T) · exec · process
-  drift/     comparação disco ↔ carregado
+  drift/     disk vs. loaded comparison
   settings/  ngx configuration file (koanf)
 ```
 
@@ -152,8 +152,8 @@ files and the exit code table from differing between commands.
 
 ```go
 type Span struct {
-    Start int // offset de byte, inclusivo
-    End   int // offset de byte, exclusivo
+    Start int // byte offset, inclusive
+    End   int // byte offset, exclusive
 }
 
 type Origin struct {
@@ -167,12 +167,12 @@ type Node struct {
     File      string
     Line      int
     Column    int
-    Span      Span    // da primeira letra da diretiva ao ';' ou '}' final
-    HeadSpan  Span    // apenas diretiva + args, sem o bloco
+    Span      Span    // from the directive's first letter to the closing ';' or '}'
+    HeadSpan  Span    // directive + args only, without the block
     ID        string
     Comment   *string
     Block     []*Node
-    Origin    *Origin // preenchido em modo --combine
+    Origin    *Origin // filled in when running with --combine
 }
 ```
 
@@ -230,8 +230,8 @@ lexer.
 
 ### R1 — The `.` is a separator only outside of square brackets
 
-with `'` or `"`, which resolves regex locations and values containing `,` or `]`:`http.server[server_name=api.exemplo.com]` — dots within the value do not
-separate segment. The lexer maintains depth of `[`. Values can be aspeated
+with `'` or `"`, which resolves regex locations and values containing `,` or `]`:`http.server[server_name=api.example.com]` — dots within the value do not
+separate segment. The lexer maintains depth of `[`. Values can be quoted
 
 ```
 location["~ \.php$"]
@@ -328,7 +328,7 @@ v0.1 only emits the codes that its commands can produce:
 | 2 | usage error (invalid flag, malformed selector) |
 | 3 | invalid configuration (`nginx -t` failed) |
 | 7 | drift detected |
-| 9 | `config_hash` divergente do ID apresentado |
+| 9 | `config_hash` diverges from the ID supplied |
 
 Codes 4, 5, 6 and 8 belong to commands that do not yet exist and are not
 documented as supported until they are issueable. Exit code
@@ -337,7 +337,7 @@ for a case that never occurs and fails to deal with what happens.
 
 single dot in `main.go` translates.Commands do not choose exit code. Each error is a type that carries its own, and a
 
-### 6.3 Writing
+### 6.3 Redaction
 
 Configured in `output.redact`. The three formats that the spec uses as an example are
 unified in a single matcher — directive name with argument prefix
@@ -345,9 +345,9 @@ optional:
 
 ```yaml
 redact:
-  - ssl_certificate_key                 # por nome de diretiva
-  - proxy_set_header Authorization      # nome + prefixo de argumentos
-  - "**.auth_basic_user_file"           # prefixo de contexto, aceito e redundante
+  - ssl_certificate_key                 # by directive name
+  - proxy_set_header Authorization      # name + argument prefix
+  - "**.auth_basic_user_file"           # context prefix, accepted and redundant
 ```
 
 The `**.` prefix is accepted for compatibility with the spec, but is redundant:
@@ -438,7 +438,7 @@ disk. When there is content comparison, it is between normalized trees.
 |---|---|---|
 | `status` | runtime state + drift | 0, or 7 if drift |
 | `inspect` | runtime + full tree + summary | 0, 3 |
-| `get <seletor>` | subset of the tree; mandatory selector | 0, 2 if malformed, 9 if hash divergent |
+| `get <selector>` | subset of the tree; mandatory selector | 0, 2 if malformed, 9 if hash divergent |
 | `tree` | summarized server/location/upstream hierarchy with IDs | 0 |
 | `fmt` | format; `--check` does not write, `--write` writes | 0, or 7 with `--check` if there is a difference |
 | `test` | structured wrapper of `nginx -t` | 0, 3 |
@@ -503,7 +503,7 @@ real binary, and not just against the fake.
   Zero CGO, static single binary.
 
 Distribution, release channels and self-update have their own plan in
-`docs/superpowers/plans/2026-08-17-ngx-distribuicao.md`, with three decisions that
+`docs/superpowers/plans/2026-08-17-ngx-distribution.md`, with three decisions that
 extend this section: semver-derived channels (clear tag is stable, suffix
 `-beta`/`-rc` is pre-release), release check by SHA256 checksum more
 minisign signature, and public key embedded in the binary at compile time.
@@ -516,7 +516,7 @@ his checksum together. The subscription maintains the guarantee even with the
 GitHub compromised.
 
 Remote access via SSH has its own plan in
-`docs/superpowers/plans/2026-08-17-ngx-remoto-ssh.md`, anticipating part of the
+`docs/superpowers/plans/2026-08-17-ngx-remote-ssh.md`, anticipating part of the
 "multi-host via SSH" which §16 puts in v1.0. It operates without installing anything on the
 server: reads the configuration via SFTP and runs the nginx that already exists there. Three
 decisions: strict host key checking with explicit escaping, authentication

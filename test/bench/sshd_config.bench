@@ -1,0 +1,31 @@
+# The bench's sshd. Disposable, local container, with no hardening -- but root
+# does not get in and passwords do not exist: what the bench exercises is the
+# path of an ordinary user authenticated by key, plus explicit escalation via
+# sudo.
+
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+
+PermitRootLogin no
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# Oracle Linux's sshd is compiled with PAM mandatory; turning it off here only
+# produces a warning and changes nothing, since passwords are disabled above.
+UsePAM yes
+
+X11Forwarding no
+AllowTcpForwarding no
+PrintMotd no
+LogLevel INFO
+
+# SFTP is how ngx reads the remote configuration; without it the bench is
+# useless.
+Subsystem sftp internal-sftp

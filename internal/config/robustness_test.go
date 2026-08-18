@@ -67,7 +67,7 @@ func TestIfWithEmptyExpressionIsTypedRefusalNotPanic(t *testing.T) {
 	} {
 		t.Run(src, func(t *testing.T) {
 			pe := refusal(t, src)
-			require.Equal(t, config.RefusalInvalidIfExpression, pe.Classe)
+			require.Equal(t, config.RefusalInvalidIfExpression, pe.Class)
 			require.NotZero(t, pe.Line)
 		})
 	}
@@ -113,9 +113,9 @@ func TestCommentInArgsOfMapLikeBody(t *testing.T) {
 		"map with two standalone comments":  "map $a $b {\n  default # x\n  0;\n  # r1\n  # r2\n}\n",
 		"map without standalone comment":    "map $a $b {\n  default # x\n  0;\n}\n",
 		"types":                             "types {\n  text/html # t\n  html;\n}\n",
-		"split_clients":                     "split_clients $a $b {\n  0.5% # c\n  x;\n  # depois\n}\n",
-		"geo inside http":                   "http {\n  geo $a {\n    default # c\n    0;\n    # depois\n  }\n}\n",
-		"normal block after a map-like":     "map $a $b {\n  default # x\n  0;\n}\nserver_name a # y\n  b;\n# depois\n",
+		"split_clients":                     "split_clients $a $b {\n  0.5% # c\n  x;\n  # after\n}\n",
+		"geo inside http":                   "http {\n  geo $a {\n    default # c\n    0;\n    # after\n  }\n}\n",
+		"normal block after a map-like":     "map $a $b {\n  default # x\n  0;\n}\nserver_name a # y\n  b;\n# after\n",
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -223,7 +223,7 @@ func TestDivergenceUnclosedQuote(t *testing.T) {
 			require.Error(t, err)
 			var problems config.ParseErrors
 			require.True(t, errors.As(err, &problems))
-			require.Equal(t, config.RefusalUnclosedQuote, problems[0].Classe)
+			require.Equal(t, config.RefusalUnclosedQuote, problems[0].Class)
 		})
 	}
 }
@@ -236,7 +236,7 @@ func TestDivergenceBraceAsDirectiveName(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, "{}\n")
-	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Classe)
+	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Class)
 	require.Equal(t, "{", pe.Token)
 }
 
@@ -249,7 +249,7 @@ func TestDivergenceSemicolonAsDirectiveName(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, ";0;\n")
-	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Classe)
+	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Class)
 	require.Equal(t, ";", pe.Token)
 }
 
@@ -262,7 +262,7 @@ func TestDivergenceDirectiveWithoutSemicolon(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, "server { listen 80 }\n")
-	require.Equal(t, config.RefusalMissingTerminator, pe.Classe)
+	require.Equal(t, config.RefusalMissingTerminator, pe.Class)
 	require.Equal(t, "}", pe.Token)
 }
 
@@ -286,7 +286,7 @@ func TestDivergenceIncludeOfDirectory(t *testing.T) {
 
 	var problems config.ParseErrors
 	require.True(t, errors.As(err, &problems), "the raw Go error must not leak: %v", err)
-	require.Equal(t, config.RefusalTargetNotRegular, problems[0].Classe)
+	require.Equal(t, config.RefusalTargetNotRegular, problems[0].Class)
 	require.Equal(t, filepath.Join(dir, "sub"), problems[0].File)
 	// The guard is about the raw Go error LEAKING, not about the words. In
 	// Portuguese the two were easy to tell apart; translated, our message
@@ -326,6 +326,6 @@ func TestDivergenceIfWithoutTerminatorBeforeClosingBlock(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, src)
-	require.Equal(t, config.RefusalMissingTerminator, pe.Classe)
+	require.Equal(t, config.RefusalMissingTerminator, pe.Class)
 	require.Equal(t, "}", pe.Token)
 }

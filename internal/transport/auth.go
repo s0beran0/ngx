@@ -21,21 +21,21 @@ import (
 // command only stops when the list ends up empty — then there is nothing left
 // to try against the server.
 const (
-	// CodigoSemMetodoAuth: no authentication method can be assembled.
-	CodigoSemMetodoAuth = "NGX-0205"
+	// CodeNoAuthMethod: no authentication method can be assembled.
+	CodeNoAuthMethod = "NGX-0205"
 
-	// CodigoAvisoSSHAgentAusente: there is no reachable ssh-agent. A normal
+	// CodeSSHAgentMissingWarning: there is no reachable ssh-agent. A normal
 	// situation, reported because it changes what will be tried.
-	CodigoAvisoSSHAgentAusente = "NGX-0212"
+	CodeSSHAgentMissingWarning = "NGX-0212"
 
-	// CodigoAvisoChaveIndisponivel: the key that was pointed at exists in
+	// CodeKeyUnavailableWarning: the key that was pointed at exists in
 	// the configuration but cannot be used — missing file, invalid format,
 	// or a passphrase there is no way to obtain.
-	CodigoAvisoChaveIndisponivel = "NGX-0213"
+	CodeKeyUnavailableWarning = "NGX-0213"
 )
 
 // Names of the authentication methods, in the order they are tried. They show
-// up in Authentication.Nomes so that whoever consumes the output knows what was
+// up in Authentication.Names so that whoever consumes the output knows what was
 // offered to the server without having to infer it from a failure.
 const (
 	MethodSSHAgent = "ssh-agent"
@@ -78,11 +78,11 @@ var errNoSSHAgent = errors.New("ssh-agent unavailable")
 // challenge and gets back the signature —, and less of our code touching key
 // material is less surface to get wrong.
 //
-// Metodos and Nomes are parallel: Nomes[i] describes Metodos[i]. Neither is
+// Methods and Names are parallel: Names[i] describes Methods[i]. Neither is
 // nil.
 type Authentication struct {
-	Metodos []ssh.AuthMethod
-	Nomes   []string
+	Methods []ssh.AuthMethod
+	Names   []string
 
 	closers []func() error
 }
@@ -134,7 +134,7 @@ func defaultAuthEnv() authEnv {
 // BuildAuthentication assembles the authentication methods for the given
 // options.
 //
-// It returns three things for the same reason VerificadorHostKey does: the
+// It returns three things for the same reason HostKeyVerifier does: the
 // list, the diagnostics of what was left out, and the error for when nothing
 // was left. A method that cannot be assembled does not bring the connection
 // down — it just does not enter the list, with a diagnostic saying why. No
@@ -146,7 +146,7 @@ func BuildAuthentication(opts SSHOptions) (*Authentication, []output.Diagnostic,
 }
 
 func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnostic, error) {
-	auth := &Authentication{Metodos: []ssh.AuthMethod{}, Nomes: []string{}}
+	auth := &Authentication{Methods: []ssh.AuthMethod{}, Names: []string{}}
 	diags := []output.Diagnostic{}
 
 	add := func(name string, method ssh.AuthMethod, diag *output.Diagnostic) {
@@ -154,8 +154,8 @@ func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnost
 			diags = append(diags, *diag)
 		}
 		if method != nil {
-			auth.Metodos = append(auth.Metodos, method)
-			auth.Nomes = append(auth.Nomes, name)
+			auth.Methods = append(auth.Methods, method)
+			auth.Names = append(auth.Names, name)
 		}
 	}
 
@@ -197,7 +197,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnost
 		}
 		if method != nil {
 			signerSources = append(signerSources, method)
-			auth.Nomes = append(auth.Nomes, MethodKey)
+			auth.Names = append(auth.Names, MethodKey)
 		}
 	}
 
@@ -210,7 +210,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnost
 		}
 		if source != nil {
 			signerSources = append(signerSources, source)
-			auth.Nomes = append(auth.Nomes, MethodSSHAgent)
+			auth.Names = append(auth.Names, MethodSSHAgent)
 		}
 	}
 
@@ -221,12 +221,12 @@ func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnost
 		}
 		if method != nil {
 			signerSources = append(signerSources, method)
-			auth.Nomes = append(auth.Nomes, MethodKey)
+			auth.Names = append(auth.Names, MethodKey)
 		}
 	}
 
 	if len(signerSources) > 0 {
-		auth.Metodos = append(auth.Metodos, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
+		auth.Methods = append(auth.Methods, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
 			all := []ssh.Signer{}
 			for _, source := range signerSources {
 				ss, err := source()
@@ -244,7 +244,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnost
 
 	add(MethodPassword, passwordMethod(opts, env), nil)
 
-	if len(auth.Metodos) == 0 {
+	if len(auth.Methods) == 0 {
 		_ = auth.Close()
 		return nil, diags, noAuthMethodError(opts)
 	}
@@ -401,7 +401,7 @@ func readSecretFromTerminal(prompt string) (string, error) {
 func warnNoSSHAgent(cause error) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityInfo,
-		Code:     CodigoAvisoSSHAgentAusente,
+		Code:     CodeSSHAgentMissingWarning,
 		Message: fmt.Sprintf(
 			"ssh-agent is not available (%v); ssh-agent authentication will not be tried. "+
 				"This is not an error: if you want to use it, start the ssh-agent and register "+
@@ -419,7 +419,7 @@ func warnNoSSHAgent(cause error) output.Diagnostic {
 func warnKeyUnavailable(path, reason string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
-		Code:     CodigoAvisoChaveIndisponivel,
+		Code:     CodeKeyUnavailableWarning,
 		Message: fmt.Sprintf(
 			"the key %s will not be used for authentication: %s", path, reason),
 		File: path,
@@ -439,7 +439,7 @@ func noAuthMethodError(opts SSHOptions) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoSemMetodoAuth,
+			Code:     CodeNoAuthMethod,
 			Message: fmt.Sprintf(
 				"no authentication method available for %s: the ssh-agent did not answer, "+
 					"no usable key was provided, and standard input is not a terminal, "+
