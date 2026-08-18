@@ -114,12 +114,16 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -o /dev/null ./cmd/ngx
 
-  # DESLIGADO DE PROPOSITO.
+  # DESLIGADO ATE ALGUEM LIGAR, mas ja PRONTO.
   #
   # Os testes atras da build tag `integration` exercitam o caminho remoto
   # contra a bancada (`make bancada-up`: container docker com sshd e nginx).
-  # Esse codigo ainda esta sendo escrito, entao o job so produziria vermelho
-  # sem informacao.
+  # O codigo remoto esta completo e a suite passa nesta maquina; o que falta e
+  # so a decisao de gastar minutos de runner construindo a imagem a cada push.
+  #
+  # Continua atras da variavel por honestidade: nunca rodou num runner do
+  # GitHub, e ligar de fora do repo nao quebra ninguem, enquanto ligar por
+  # commit estrearia o CI em vermelho sem que ninguem pudesse testar antes.
   #
   # A chave e a variavel de repositorio NGX_CI_INTEGRACAO: enquanto ela nao
   # existir (ou nao valer "1"), o job e pulado. Para ligar, basta
