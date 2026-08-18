@@ -469,7 +469,9 @@ func clonarArgs(args []string) []string {
 func mensagemDeFalhaDeLeitura(err error) string {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
-		return "o usuario da conexao nao tem permissao para ler este arquivo, " +
+		// "o ngx" e nao "o usuario da conexao": a mesma mensagem sai quando o
+		// binario roda na propria maquina, onde nao ha conexao nenhuma.
+		return "o ngx nao tem permissao para ler este arquivo, " +
 			"entao a configuracao nao pode ser apresentada por inteiro"
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return "a leitura deste arquivo foi interrompida antes do fim, " +

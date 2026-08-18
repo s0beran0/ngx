@@ -278,13 +278,76 @@ escolher_ferramenta_sha256() {
 #   - da para verificar          -> segue, e a assinatura sera conferida
 #   - nao da, sem autorizacao    -> aborta aqui, dizendo por que e como resolver
 #   - nao da, com autorizacao    -> segue com aviso em destaque
+# openssl_verifica_ed25519 diz se este openssl consegue fazer as duas contas
+# que a assinatura minisign exige. Nao basta existir openssl: o LibreSSL que a
+# Apple distribui, por exemplo, nao tem BLAKE2b. Testar a capacidade e mais
+# confiavel que ler numero de versao.
+openssl_verifica_ed25519() {
+    existe openssl || return 1
+    printf x | openssl dgst -blake2b512 >/dev/null 2>&1 || return 1
+    openssl list -public-key-algorithms 2>/dev/null | grep -qi ed25519 || return 1
+    return 0
+}
+
+# verificar_assinatura_com_openssl reimplementa a verificacao do minisign.
+#
+# Formato, para quem for mexer: a chave publica e base64 de 2 bytes de
+# algoritmo + 8 de key id + 32 da chave Ed25519; a assinatura, na segunda linha
+# do .minisig, e base64 de 2 + 8 + 64 bytes de assinatura. O algoritmo "ED"
+# significa pre-hasheado: assina-se o BLAKE2b-512 do arquivo, nao o arquivo.
+#
+# O prefixo DER embutido abaixo transforma os 32 bytes crus numa chave publica
+# que o openssl aceita. Ele e fixo para Ed25519.
+verificar_assinatura_com_openssl() {
+    caminho_assinatura="$1"
+    tmp_verif="$(mktemp -d)" || { erro "nao foi possivel criar diretorio temporario"; exit 1; }
+
+    printf %s "$CHAVE_PUBLICA_MINISIGN" | openssl base64 -d -A 2>/dev/null \
+        | tail -c 32 > "${tmp_verif}/pub.raw"
+    # 302a300506032b6570032100, em octal para nao depender de xxd.
+    printf '\060\052\060\005\006\003\053\145\160\003\041\000' > "${tmp_verif}/pub.der"
+    cat "${tmp_verif}/pub.raw" >> "${tmp_verif}/pub.der"
+
+    sed -n 2p "$caminho_assinatura" | openssl base64 -d -A 2>/dev/null \
+        | tail -c 64 > "${tmp_verif}/sig.bin"
+
+    openssl dgst -blake2b512 -binary "$CAMINHO_CHECKSUMS" > "${tmp_verif}/digest.bin" 2>/dev/null
+
+    if ! openssl pkeyutl -verify -pubin -inkey "${tmp_verif}/pub.der" -keyform DER \
+        -rawin -in "${tmp_verif}/digest.bin" -sigfile "${tmp_verif}/sig.bin" >/dev/null 2>&1; then
+        rm -rf "$tmp_verif"
+        erro "a assinatura de checksums.txt NAO confere (verificada com openssl)"
+        linha ""
+        linha "o arquivo baixado nao foi assinado pela chave do projeto. isso"
+        linha "nao e erro de rede: e um artefato que nao deveria existir."
+        linha ""
+        linha "nada foi instalado. nao contorne este erro."
+        exit 1
+    fi
+
+    rm -rf "$tmp_verif"
+    informa "assinatura conferida (via openssl; minisign nao esta instalado)."
+}
+
 avaliar_verificacao_de_assinatura() {
     motivo=""
 
     if [ "$CHAVE_PUBLICA_MINISIGN" = "$PLACEHOLDER_CHAVE" ]; then
         motivo="a chave publica minisign do projeto ainda nao foi gerada e este script carrega um placeholder"
-    elif ! existe minisign; then
-        motivo="o minisign nao esta instalado nesta maquina"
+    elif existe minisign; then
+        VERIFICADOR="minisign"
+    elif openssl_verifica_ed25519; then
+        # A maioria dos servidores nao tem minisign, e exigir que instalem um
+        # pacote so para instalar o ngx e atrito que empurra todo mundo para o
+        # NGX_ALLOW_UNVERIFIED -- ou seja, a exigencia de seguranca acabaria
+        # produzindo menos verificacao, nao mais.
+        #
+        # A assinatura minisign e Ed25519 sobre BLAKE2b-512 (modo pre-hasheado
+        # "ED"), e openssl 3 faz as duas coisas. Verificado numa Oracle Linux 9
+        # real, que nao tem minisign e tem openssl.
+        VERIFICADOR="openssl"
+    else
+        motivo="nem o minisign nem um openssl com Ed25519 e BLAKE2b estao disponiveis"
     fi
 
     if [ -z "$motivo" ]; then
@@ -324,10 +387,11 @@ avaliar_verificacao_de_assinatura() {
         linha "  lado. acompanhe ${URL_RELEASES} e use uma versao"
         linha "  deste script publicada depois da primeira release assinada."
     else
-        linha "  instale o minisign e rode de novo:"
-        linha "    Debian/Ubuntu: apt-get install -y minisign"
-        linha "    Alpine:        apk add minisign"
-        linha "    macOS:         brew install minisign"
+        linha "  instale o minisign OU um openssl 3 e rode de novo:"
+        linha "    Debian/Ubuntu:   apt-get install -y minisign"
+        linha "    Alpine:          apk add minisign"
+        linha "    RHEL/Oracle/Fed: dnf install -y openssl"
+        linha "    macOS:           brew install minisign"
     fi
     linha ""
     linha "se voce aceita o risco de forma consciente, e so nesse caso:"
@@ -522,6 +586,11 @@ verificar_assinatura() {
         linha ""
         linha "confira a release em ${URL_RELEASES}/tag/${VERSAO}"
         exit 1
+    fi
+
+    if [ "$VERIFICADOR" = "openssl" ]; then
+        verificar_assinatura_com_openssl "$caminho_assinatura"
+        return 0
     fi
 
     if ! minisign -V -m "$CAMINHO_CHECKSUMS" -x "$caminho_assinatura" \

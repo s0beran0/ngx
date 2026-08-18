@@ -157,7 +157,7 @@ func comDicaDeSudo(err error, ctx *Context) error {
 			continue
 		}
 		problemas[i].Message += ". Rode com --sudo para que o ngx leia com privilegio " +
-			"apenas os arquivos recusados; nao e preciso mudar permissao no servidor"
+			"apenas os arquivos recusados; nao e preciso alterar permissao no alvo"
 	}
 	return problemas
 }

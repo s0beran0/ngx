@@ -356,7 +356,7 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 			File:     caminho,
 			Message: fmt.Sprintf(
 				"nem com privilegio foi possivel ler este caminho (%s); confira se o "+
-					"sudo do alvo permite `cat` sem senha para o usuario da conexao", motivo),
+					"sudo do alvo permite `cat` sem senha para o usuario que roda o ngx", motivo),
 		})
 	}
 	return diags
