@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
@@ -656,6 +657,14 @@ func TestSSHHostKeyDesconhecidoRecusa(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, tr)
 	assert.Contains(t, err.Error(), "host desconhecido")
+
+	// O codigo tem de chegar intacto ate quem chamou: e pelo codigo, e nao
+	// pelo texto, que o consumidor separa primeiro acesso de chave alterada
+	// (DR1). Embrulhar isso em CodigoConexaoSSH faria a recusa de
+	// verificacao parecer falha de rede ou de credencial.
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, CodigoHostDesconhecido, e.Diag.Code)
 }
 
 func TestSSHConexaoRecusadaTemDiagnosticoAcionavel(t *testing.T) {

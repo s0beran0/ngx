@@ -137,6 +137,15 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 	_ = auth.Close()
 
 	if err != nil {
+		// O erro de host key ja vem tipado do callback (DR1). Reembrulha-lo
+		// em CodigoConexaoSSH apagaria a distincao entre primeiro acesso e
+		// chave alterada — que e exatamente o que quem consome a saida tem
+		// de separar sem interpretar texto —, e transformaria uma recusa de
+		// verificacao numa falha generica de rede ou credencial.
+		var tipado *output.Error
+		if errors.As(err, &tipado) {
+			return nil, diags, tipado
+		}
 		return nil, diags, erroConexaoSSH(usuario, endereco, auth.Nomes, err)
 	}
 
