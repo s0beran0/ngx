@@ -293,6 +293,7 @@ O `code` de um `Diagnostic` é **interface pública**: um agente consumindo a sa
 | `0001`–`0009` | genéricos, alinhados ao exit code de mesmo número |
 | `0100`–`0199` | configuração e parse |
 | `0200`–`0299` | transporte e SSH |
+| `0300`–`0399` | atualização e distribuição |
 
 **A severidade nunca entra no código.** O `Diagnostic` já tem o campo `severity`; repetir a informação como prefixo (`NGX-W001`, `NGX-E001`) cria duas fontes de verdade que podem discordar, e obriga quem consome a fazer *parse* de string para descobrir algo que já vem estruturado.
 
