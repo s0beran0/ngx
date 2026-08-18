@@ -76,7 +76,7 @@ func TestWithoutSudoNothingIsEscalated(t *testing.T) {
 	f := newFake()
 	f.denied["/etc/nginx/nginx.conf"] = true
 
-	tr := transport.ComLeituraPrivilegiada(context.Background(), f, false)
+	tr := transport.WithPrivilegedRead(context.Background(), f, false)
 	_, err := tr.Open("/etc/nginx/nginx.conf")
 
 	require.ErrorIs(t, err, fs.ErrPermission)
@@ -93,7 +93,7 @@ func TestWithSudoOnlyTheRefusedIsElevated(t *testing.T) {
 	f.denied["/etc/nginx/restrito.conf"] = true
 	f.outputs["sudo -n cat -- /etc/nginx/restrito.conf"] = "server { listen 80; }\n"
 
-	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+	tr := transport.WithPrivilegedRead(context.Background(), f, true)
 
 	rc, err := tr.Open("/etc/nginx/aberto.conf")
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestWithSudoOnlyTheRefusedIsElevated(t *testing.T) {
 		[]string{"sudo", "-n", "cat", "--", "/etc/nginx/restrito.conf"}, f.executed[0],
 		"explicit argv, no shell: a file name must not turn into an injection")
 
-	diags := transport.Diagnosticos(tr)
+	diags := transport.Diagnostics(tr)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityInfo, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "/etc/nginx/restrito.conf",
@@ -128,7 +128,7 @@ func TestWhenSudoDeniesCatTheDumpResolves(t *testing.T) {
 	dump := func(context.Context) (map[string][]byte, error) {
 		return map[string][]byte{"/etc/nginx/nginx.conf": []byte("worker_processes 4;\n")}, nil
 	}
-	tr := transport.ComLeituraPrivilegiadaEDump(context.Background(), f, true, dump)
+	tr := transport.WithPrivilegedReadAndDump(context.Background(), f, true, dump)
 
 	rc, err := tr.Open("/etc/nginx/nginx.conf")
 	require.NoError(t, err)
@@ -136,9 +136,9 @@ func TestWhenSudoDeniesCatTheDumpResolves(t *testing.T) {
 	_ = rc.Close()
 
 	assert.Equal(t, "worker_processes 4;\n", string(b))
-	diags := transport.Diagnosticos(tr)
+	diags := transport.Diagnostics(tr)
 	require.NotEmpty(t, diags)
-	assert.Equal(t, transport.CodigoLeituraPeloDump, diags[0].Code,
+	assert.Equal(t, transport.CodeReadViaDump, diags[0].Code,
 		"the origin of the content has to show: it came from nginx -T, not from the file")
 }
 
@@ -149,11 +149,11 @@ func TestWithNoPathRefusesInsteadOfPresentingPartial(t *testing.T) {
 	f.denied["/etc/nginx/nginx.conf"] = true
 	f.failures["sudo -n cat -- /etc/nginx/nginx.conf"] = true
 
-	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+	tr := transport.WithPrivilegedRead(context.Background(), f, true)
 	_, err := tr.Open("/etc/nginx/nginx.conf")
 
 	require.ErrorIs(t, err, fs.ErrPermission, "the cause is still permission")
-	diags := transport.Diagnosticos(tr)
+	diags := transport.Diagnostics(tr)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "sudo")
@@ -172,7 +172,7 @@ func TestPathStartingWithDashDoesNotBecomeFlag(t *testing.T) {
 	f.denied[suspicious] = true
 	f.outputs["sudo -n cat -- "+suspicious] = "worker_processes 1;\n"
 
-	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+	tr := transport.WithPrivilegedRead(context.Background(), f, true)
 	rc, err := tr.Open(suspicious)
 	require.NoError(t, err)
 	_ = rc.Close()
@@ -217,7 +217,7 @@ func TestElevationOutsideKnownTreeBecomesWarning(t *testing.T) {
 		f.denied["/etc/nginx/conf.d/restrito.conf"] = true
 		f.outputs["sudo -n cat -- /etc/nginx/conf.d/restrito.conf"] = "server {}\n"
 
-		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		tr := transport.WithPrivilegedRead(context.Background(), f, true)
 		rc, err := tr.Open("/etc/nginx/nginx.conf")
 		require.NoError(t, err)
 		_ = rc.Close()
@@ -225,10 +225,10 @@ func TestElevationOutsideKnownTreeBecomesWarning(t *testing.T) {
 		require.NoError(t, err)
 		_ = rc.Close()
 
-		diags := transport.Diagnosticos(tr)
+		diags := transport.Diagnostics(tr)
 		assert.Equal(t, output.SeverityInfo,
-			severityOf(diags, transport.CodigoLeituraPrivilegiada))
-		assert.Empty(t, severityOf(diags, transport.CodigoElevacaoForaDaArvore),
+			severityOf(diags, transport.CodePrivilegedRead))
+		assert.Empty(t, severityOf(diags, transport.CodeElevationOutsideTree),
 			"conf.d sits under /etc/nginx, which the configuration already reached")
 	})
 
@@ -238,7 +238,7 @@ func TestElevationOutsideKnownTreeBecomesWarning(t *testing.T) {
 		f.denied["/opt/segredos/x.conf"] = true
 		f.outputs["sudo -n cat -- /opt/segredos/x.conf"] = "server {}\n"
 
-		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		tr := transport.WithPrivilegedRead(context.Background(), f, true)
 		rc, err := tr.Open("/etc/nginx/nginx.conf")
 		require.NoError(t, err)
 		_ = rc.Close()
@@ -246,9 +246,9 @@ func TestElevationOutsideKnownTreeBecomesWarning(t *testing.T) {
 		require.NoError(t, err)
 		_ = rc.Close()
 
-		diags := transport.Diagnosticos(tr)
+		diags := transport.Diagnostics(tr)
 		assert.Equal(t, output.SeverityWarning,
-			severityOf(diags, transport.CodigoElevacaoForaDaArvore),
+			severityOf(diags, transport.CodeElevationOutsideTree),
 			"elevating in a new directory is the anomaly the warning exists to show")
 	})
 
@@ -257,13 +257,13 @@ func TestElevationOutsideKnownTreeBecomesWarning(t *testing.T) {
 		f.denied["/opt/nginx-custom/nginx.conf"] = true
 		f.outputs["sudo -n cat -- /opt/nginx-custom/nginx.conf"] = "events {}\n"
 
-		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		tr := transport.WithPrivilegedRead(context.Background(), f, true)
 		rc, err := tr.Open("/opt/nginx-custom/nginx.conf")
 		require.NoError(t, err)
 		_ = rc.Close()
 
-		diags := transport.Diagnosticos(tr)
-		assert.Empty(t, severityOf(diags, transport.CodigoElevacaoForaDaArvore),
+		diags := transport.Diagnostics(tr)
+		assert.Empty(t, severityOf(diags, transport.CodeElevationOutsideTree),
 			"the configuration the operator named is not news, wherever it lives")
 	})
 }

@@ -95,7 +95,7 @@ func TestHostKeyUnknownHostRefusesAndTeachesHowToAdd(t *testing.T) {
 	presented := generateKey(t)
 	diag := diagnosticOf(t, callback(testHost, remoteAddr(), presented))
 
-	assert.Equal(t, CodigoHostDesconhecido, diag.Code)
+	assert.Equal(t, CodeUnknownHost, diag.Code)
 	assert.Equal(t, output.SeverityError, diag.Severity)
 	assert.Contains(t, diag.Message, "10.0.0.9", "the message says which host")
 	assert.Contains(t, diag.Message, path, "the message says which file")
@@ -116,7 +116,7 @@ func TestHostKeyChangedKeyReportsPossibleAttack(t *testing.T) {
 	presented := generateKey(t)
 	diag := diagnosticOf(t, callback(testHost, remoteAddr(), presented))
 
-	assert.Equal(t, CodigoHostKeyAlterada, diag.Code)
+	assert.Equal(t, CodeHostKeyChanged, diag.Code)
 	assert.Equal(t, output.SeverityError, diag.Severity)
 
 	lower := strings.ToLower(diag.Message)
@@ -192,9 +192,9 @@ func TestHostKeyRevokedKeyHasItsOwnOutcome(t *testing.T) {
 
 	diag := diagnosticOf(t, callback(testHost, remoteAddr(), revoked))
 
-	assert.Equal(t, CodigoHostKeyRevogada, diag.Code)
-	assert.NotEqual(t, CodigoHostDesconhecido, diag.Code)
-	assert.NotEqual(t, CodigoHostKeyAlterada, diag.Code)
+	assert.Equal(t, CodeHostKeyRevoked, diag.Code)
+	assert.NotEqual(t, CodeUnknownHost, diag.Code)
+	assert.NotEqual(t, CodeHostKeyChanged, diag.Code)
 	assert.Contains(t, strings.ToLower(diag.Message), "revoked")
 	assert.Equal(t, path, diag.File, "reports the file of the revocation")
 	assert.Equal(t, 2, diag.Line, "reports the line of the revocation")
@@ -215,8 +215,8 @@ func TestHostKeyMissingKnownHostsHasItsOwnOutcome(t *testing.T) {
 	assert.Empty(t, diags)
 
 	diag := diagnosticOf(t, err)
-	assert.Equal(t, CodigoKnownHostsAusente, diag.Code)
-	assert.NotEqual(t, CodigoHostDesconhecido, diag.Code,
+	assert.Equal(t, CodeKnownHostsMissing, diag.Code)
+	assert.NotEqual(t, CodeUnknownHost, diag.Code,
 		"a missing file is not the same as a host missing from the file")
 	assert.Contains(t, diag.Message, path)
 	assert.Contains(t, diag.Message, "--insecure-host-key",
@@ -239,7 +239,7 @@ func TestHostKeyUnreadableKnownHostsIsNotAMissingFile(t *testing.T) {
 	require.Error(t, err)
 
 	diag := diagnosticOf(t, err)
-	assert.NotEqual(t, CodigoKnownHostsAusente, diag.Code,
+	assert.NotEqual(t, CodeKnownHostsMissing, diag.Code,
 		"an unreadable file has a different cause and a different fix than a missing one")
 	assert.Contains(t, diag.Message, path)
 }
@@ -261,7 +261,7 @@ func TestHostKeyInsecureAcceptsAnyKeyButWarns(t *testing.T) {
 	// But never in silence.
 	require.Len(t, diags, 1, "using the escape hatch has to show up in the output")
 	assert.Equal(t, output.SeverityWarning, diags[0].Severity)
-	assert.Equal(t, CodigoAvisoHostKeyInsegura, diags[0].Code)
+	assert.Equal(t, CodeInsecureHostKeyWarning, diags[0].Code)
 	assert.Contains(t, diags[0].Message, "--insecure-host-key")
 	assert.Contains(t, diags[0].Message, "10.0.0.9")
 	assert.Contains(t, strings.ToLower(diags[0].Message), "man-in-the-middle",

@@ -76,7 +76,7 @@ func TestTestConfigIdenticalLocalAndRemote(t *testing.T) {
 func TestParseDiagnosticosLocationAtEndOfMessage(t *testing.T) {
 	text := `nginx: [emerg] invalid number of arguments in "listen" directive in /etc/nginx/nginx.conf:12`
 
-	diags := ParseDiagnosticos(text)
+	diags := ParseDiagnostics(text)
 	require.Len(t, diags, 1)
 	assert.Equal(t, `invalid number of arguments in "listen" directive`, diags[0].Message)
 	assert.Equal(t, "/etc/nginx/nginx.conf", diags[0].File)
@@ -84,7 +84,7 @@ func TestParseDiagnosticosLocationAtEndOfMessage(t *testing.T) {
 }
 
 func TestParseDiagnosticosWithoutLocation(t *testing.T) {
-	diags := ParseDiagnosticos(`nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Address already in use)`)
+	diags := ParseDiagnostics(`nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Address already in use)`)
 	require.Len(t, diags, 1)
 	assert.Empty(t, diags[0].File)
 	assert.Zero(t, diags[0].Line)
@@ -94,13 +94,13 @@ func TestParseDiagnosticosWithoutLocation(t *testing.T) {
 // An unknown level must not become info: underrating what is not recognized
 // hides exactly the new case.
 func TestParseDiagnosticosUnknownLevelBecomesError(t *testing.T) {
-	diags := ParseDiagnosticos("nginx: [xyz] something unexpected")
+	diags := ParseDiagnostics("nginx: [xyz] something unexpected")
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 }
 
 func TestParseDiagnosticosListIsNeverNil(t *testing.T) {
-	diags := ParseDiagnosticos("")
+	diags := ParseDiagnostics("")
 	require.NotNil(t, diags)
 
 	raw, err := json.Marshal(map[string]any{"diagnostics": diags})

@@ -15,24 +15,24 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// CodigoLeituraPrivilegiada reports that a file can only be read with
+// CodePrivilegedRead reports that a file can only be read with
 // privilege. Info severity: it is not a problem, it is the record that an
 // escalation happened -- reading a server configuration with sudo cannot
 // happen silently.
-const CodigoLeituraPrivilegiada = "NGX-0230"
+const CodePrivilegedRead = "NGX-0230"
 
-// CodigoPrivilegioNegado covers the case where not even privilege worked.
-const CodigoPrivilegioNegado = "NGX-0231"
+// CodePrivilegeDenied covers the case where not even privilege worked.
+const CodePrivilegeDenied = "NGX-0231"
 
-// CodigoLeituraPeloDump reports that the content came from `nginx -T` because
+// CodeReadViaDump reports that the content came from `nginx -T` because
 // neither the direct read nor the `sudo cat` reached the file.
-const CodigoLeituraPeloDump = "NGX-0232"
+const CodeReadViaDump = "NGX-0232"
 
-// CodigoElevacaoForaDaArvore marks a privileged read of a path outside any
+// CodeElevationOutsideTree marks a privileged read of a path outside any
 // directory the configuration had already reached without privilege. Warning
 // severity, not error: it is legitimate and does not block -- but it is news,
 // and news involving sudo deserves to be seen.
-const CodigoElevacaoForaDaArvore = "NGX-0233"
+const CodeElevationOutsideTree = "NGX-0233"
 
 // privilegedTransport wraps a Transport and, when a plain read runs into permissions,
 // repeats the read of that file with privilege.
@@ -82,18 +82,18 @@ type privilegedTransport struct {
 	refused          map[string]string
 }
 
-// ComLeituraPrivilegiada returns a Transport that repeats with privilege the
+// WithPrivilegedRead returns a Transport that repeats with privilege the
 // read that was refused for permissions. Passing enabled=false returns the
 // original transport untouched: the decision to escalate belongs to the
 // caller, and DR5 requires it to be explicit.
-func ComLeituraPrivilegiada(ctx context.Context, tr Transport, enabled bool) Transport {
-	return ComLeituraPrivilegiadaEDump(ctx, tr, enabled, nil)
+func WithPrivilegedRead(ctx context.Context, tr Transport, enabled bool) Transport {
+	return WithPrivilegedReadAndDump(ctx, tr, enabled, nil)
 }
 
-// ComLeituraPrivilegiadaEDump adds the last resort: a function that returns
+// WithPrivilegedReadAndDump adds the last resort: a function that returns
 // the whole effective configuration (in practice, `nginx -T` with privilege),
 // consulted only when the per-file read did not reach it.
-func ComLeituraPrivilegiadaEDump(
+func WithPrivilegedReadAndDump(
 	ctx context.Context,
 	tr Transport,
 	enabled bool,
@@ -312,10 +312,10 @@ func (p *privilegedTransport) recordRefusal(filePath, reason string) {
 	p.refused[filePath] = reason
 }
 
-// Diagnosticos reports what required privilege and what did not work even with
+// Diagnostics reports what required privilege and what did not work even with
 // it. Escalating in silence would hide from the operator that reading their
 // server configuration went through sudo.
-func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
+func (p *privilegedTransport) Diagnostics() []output.Diagnostic {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -325,7 +325,7 @@ func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
 		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityInfo,
-			Code:     CodigoLeituraPrivilegiada,
+			Code:     CodePrivilegedRead,
 			Message: fmt.Sprintf(
 				"%d path(s) could only be read with privilege, because --sudo was "+
 					"requested: %s", len(list), summarizePaths(list)),
@@ -336,7 +336,7 @@ func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
 		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityWarning,
-			Code:     CodigoElevacaoForaDaArvore,
+			Code:     CodeElevationOutsideTree,
 			Message: fmt.Sprintf(
 				"%d path(s) were read with privilege OUTSIDE any directory the "+
 					"configuration already reached without it: %s. Check whether the "+
@@ -350,7 +350,7 @@ func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
 		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityInfo,
-			Code:     CodigoLeituraPeloDump,
+			Code:     CodeReadViaDump,
 			Message: fmt.Sprintf(
 				"%d path(s) came from `nginx -T` with privilege, because sudo on the "+
 					"target does not allow reading the file directly: %s",
@@ -361,7 +361,7 @@ func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
 	for filePath, reason := range p.refused {
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoPrivilegioNegado,
+			Code:     CodePrivilegeDenied,
 			File:     filePath,
 			Message: fmt.Sprintf(
 				"not even with privilege was it possible to read this path (%s); check "+
@@ -402,13 +402,13 @@ func summarizePaths(list []string) string {
 		strings.Join(list[:maxShown], ", "), len(list)-maxShown)
 }
 
-// Diagnosticos collects what a transport observed, when it has something to
+// Diagnostics collects what a transport observed, when it has something to
 // tell. It exists as a function and not as an interface method because only
 // the privileged transport has something to report: adding this to Transport
 // would force every implementation to carry an empty method.
-func Diagnosticos(tr Transport) []output.Diagnostic {
-	if d, ok := tr.(interface{ Diagnosticos() []output.Diagnostic }); ok {
-		return d.Diagnosticos()
+func Diagnostics(tr Transport) []output.Diagnostic {
+	if d, ok := tr.(interface{ Diagnostics() []output.Diagnostic }); ok {
+		return d.Diagnostics()
 	}
 	return nil
 }

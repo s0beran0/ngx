@@ -39,14 +39,14 @@ func Verify(data, checksums, signature []byte, publicKey, fileName string) error
 			"the signature of %s does not match the embedded public key: the "+
 				"files were downloaded from a source that is not the project, were "+
 				"tampered with along the way, or the release was signed with another key. "+
-				"Nothing was installed and the current ngx stays in place", NomeChecksums)
+				"Nothing was installed and the current ngx stays in place", ChecksumsName)
 	}
 
 	expected, ok := checksumFor(checksums, fileName)
 	if !ok {
 		return newError(CodigoChecksumAusente,
 			"the file %s does not appear in %s, so the download cannot be verified",
-			fileName, NomeChecksums)
+			fileName, ChecksumsName)
 	}
 
 	sum := sha256.Sum256(data)

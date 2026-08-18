@@ -480,7 +480,7 @@ func TestParseIOFailureInIncludeDoesNotBlameIncludingFile(t *testing.T) {
 		"the diagnostic has to point at the file that could not be read, not at the one doing the include")
 	require.NotEqual(t, top, p.File,
 		"the file doing the include is intact: blaming it sends the consumer off debugging the wrong file")
-	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe,
+	require.Equal(t, config.RefusalReadFailure, p.Classe,
 		"an I/O failure has to carry a class of its own, not come out as a crossplane refusal")
 	require.NotContains(t, p.Message, raw,
 		"the message is ours: it does not forward the raw Go runtime string")
@@ -511,7 +511,7 @@ func TestParseIOFailureAtTopHasOwnClassAndMessage(t *testing.T) {
 	p := problems[0]
 
 	require.Equal(t, "remote/nginx.conf", p.File)
-	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe)
+	require.Equal(t, config.RefusalReadFailure, p.Classe)
 	require.NotContains(t, p.Message, raw,
 		"the message is ours: it does not forward the raw Go runtime string")
 }

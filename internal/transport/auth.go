@@ -35,12 +35,12 @@ const (
 )
 
 // Names of the authentication methods, in the order they are tried. They show
-// up in Autenticacao.Nomes so that whoever consumes the output knows what was
+// up in Authentication.Nomes so that whoever consumes the output knows what was
 // offered to the server without having to infer it from a failure.
 const (
-	MetodoSSHAgent = "ssh-agent"
-	MetodoChave    = "key"
-	MetodoSenha    = "password"
+	MethodSSHAgent = "ssh-agent"
+	MethodKey      = "key"
+	MethodPassword = "password"
 )
 
 // Environment variables the secrets may come from.
@@ -51,12 +51,12 @@ const (
 // terminal prompt — in that order — and any password flag added here must be
 // rejected in review.
 const (
-	// EnvSenhaSSH carries the password of the user on the remote host.
-	EnvSenhaSSH = "NGX_SSH_PASSWORD"
+	// EnvSSHPassword carries the password of the user on the remote host.
+	EnvSSHPassword = "NGX_SSH_PASSWORD"
 
-	// EnvPassphraseChaveSSH carries the passphrase that unlocks the private
+	// EnvSSHKeyPassphrase carries the passphrase that unlocks the private
 	// key.
-	EnvPassphraseChaveSSH = "NGX_SSH_KEY_PASSPHRASE"
+	EnvSSHKeyPassphrase = "NGX_SSH_KEY_PASSPHRASE"
 
 	// EnvSocketSSHAgent is the standard OpenSSH variable pointing at the
 	// ssh-agent channel. It is honored on every platform; on Windows, when
@@ -70,7 +70,7 @@ const (
 // path there is expected.
 var errNoSSHAgent = errors.New("ssh-agent unavailable")
 
-// Autenticacao is the list of methods ngx offers the server, in DR2 order:
+// Authentication is the list of methods ngx offers the server, in DR2 order:
 // ssh-agent, key file, password.
 //
 // The order is the main product of this type. The ssh-agent comes first
@@ -80,7 +80,7 @@ var errNoSSHAgent = errors.New("ssh-agent unavailable")
 //
 // Metodos and Nomes are parallel: Nomes[i] describes Metodos[i]. Neither is
 // nil.
-type Autenticacao struct {
+type Authentication struct {
 	Metodos []ssh.AuthMethod
 	Nomes   []string
 
@@ -90,7 +90,7 @@ type Autenticacao struct {
 // Close releases the resources opened while assembling — today, the ssh-agent
 // connection. Call it after the handshake, and never before: the ssh-agent
 // method queries the keys during authentication. Calling it twice is safe.
-func (a *Autenticacao) Close() error {
+func (a *Authentication) Close() error {
 	if a == nil {
 		return nil
 	}
@@ -131,7 +131,7 @@ func defaultAuthEnv() authEnv {
 	}
 }
 
-// MontarAutenticacao assembles the authentication methods for the given
+// BuildAuthentication assembles the authentication methods for the given
 // options.
 //
 // It returns three things for the same reason VerificadorHostKey does: the
@@ -141,12 +141,12 @@ func defaultAuthEnv() authEnv {
 // ssh-agent is not a failure; no method at all is.
 //
 // The list of diagnostics is never nil.
-func MontarAutenticacao(opts SSHOptions) (*Autenticacao, []output.Diagnostic, error) {
+func BuildAuthentication(opts SSHOptions) (*Authentication, []output.Diagnostic, error) {
 	return buildAuth(opts, defaultAuthEnv())
 }
 
-func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic, error) {
-	auth := &Autenticacao{Metodos: []ssh.AuthMethod{}, Nomes: []string{}}
+func buildAuth(opts SSHOptions, env authEnv) (*Authentication, []output.Diagnostic, error) {
+	auth := &Authentication{Metodos: []ssh.AuthMethod{}, Nomes: []string{}}
 	diags := []output.Diagnostic{}
 
 	add := func(name string, method ssh.AuthMethod, diag *output.Diagnostic) {
@@ -197,7 +197,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic
 		}
 		if method != nil {
 			signerSources = append(signerSources, method)
-			auth.Nomes = append(auth.Nomes, MetodoChave)
+			auth.Nomes = append(auth.Nomes, MethodKey)
 		}
 	}
 
@@ -210,7 +210,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic
 		}
 		if source != nil {
 			signerSources = append(signerSources, source)
-			auth.Nomes = append(auth.Nomes, MetodoSSHAgent)
+			auth.Nomes = append(auth.Nomes, MethodSSHAgent)
 		}
 	}
 
@@ -221,7 +221,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic
 		}
 		if method != nil {
 			signerSources = append(signerSources, method)
-			auth.Nomes = append(auth.Nomes, MetodoChave)
+			auth.Nomes = append(auth.Nomes, MethodKey)
 		}
 	}
 
@@ -242,7 +242,7 @@ func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic
 		}))
 	}
 
-	add(MetodoSenha, passwordMethod(opts, env), nil)
+	add(MethodPassword, passwordMethod(opts, env), nil)
 
 	if len(auth.Metodos) == 0 {
 		_ = auth.Close()
@@ -283,7 +283,7 @@ func agentSigners(env authEnv) (signerSource, func() error, *output.Diagnostic) 
 //
 // The third case is what keeps ngx usable by an AI agent: running under a
 // pipe, it fails fast instead of blocking on a keystroke that will never come.
-// ChavesPadrao are the identity files OpenSSH tries when nobody points at one.
+// DefaultKeyFiles are the identity files OpenSSH tries when nobody points at one.
 // The order is its own. `ssh` searching on its own is exactly what makes
 // `ssh web1` work with no configuration, and DR2 promises that
 // `ngx --host web1` works for whoever already has that — so ngx searches too.
@@ -294,7 +294,7 @@ func agentSigners(env authEnv) (signerSource, func() error, *output.Diagnostic) 
 //
 // id_dsa is left out: OpenSSH disabled DSA by default, and offering a key the
 // server refuses only spends one of the few MaxAuthTries attempts.
-var ChavesPadrao = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
+var DefaultKeyFiles = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
 
 func keyMethod(opts SSHOptions, env authEnv) (signerSource, *output.Diagnostic) {
 	if opts.KeyPath == "" {
@@ -319,11 +319,11 @@ func keyMethod(opts SSHOptions, env authEnv) (signerSource, *output.Diagnostic) 
 		return nil, &d
 	}
 
-	if passphrase := env.getenv(EnvPassphraseChaveSSH); passphrase != "" {
+	if passphrase := env.getenv(EnvSSHKeyPassphrase); passphrase != "" {
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(pem, []byte(passphrase))
 		if err != nil {
 			d := warnKeyUnavailable(opts.KeyPath,
-				fmt.Sprintf("the passphrase in %s does not unlock the key (%v)", EnvPassphraseChaveSSH, err))
+				fmt.Sprintf("the passphrase in %s does not unlock the key (%v)", EnvSSHKeyPassphrase, err))
 			return nil, &d
 		}
 		return fixedSigners(signer), nil
@@ -333,7 +333,7 @@ func keyMethod(opts SSHOptions, env authEnv) (signerSource, *output.Diagnostic) 
 		d := warnKeyUnavailable(opts.KeyPath, fmt.Sprintf(
 			"the key is protected by a passphrase and standard input is not a terminal, "+
 				"so there is no way to ask; set %s in the environment to use this key",
-			EnvPassphraseChaveSSH))
+			EnvSSHKeyPassphrase))
 		return nil, &d
 	}
 
@@ -364,7 +364,7 @@ func passwordMethod(opts SSHOptions, env authEnv) ssh.AuthMethod {
 	if opts.Password != "" {
 		return ssh.Password(opts.Password)
 	}
-	if password := env.getenv(EnvSenhaSSH); password != "" {
+	if password := env.getenv(EnvSSHPassword); password != "" {
 		return ssh.Password(password)
 	}
 	if !env.stdinIsTerminal() {
@@ -382,7 +382,7 @@ func passwordMethod(opts SSHOptions, env authEnv) ssh.AuthMethod {
 func readSecretFromTerminal(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return "", fmt.Errorf("standard input is not a terminal; set %s in the environment", EnvSenhaSSH)
+		return "", fmt.Errorf("standard input is not a terminal; set %s in the environment", EnvSSHPassword)
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	secret, err := term.ReadPassword(fd)
@@ -448,7 +448,7 @@ func noAuthMethodError(opts SSHOptions) error {
 					"using --key (or set %s); or put the password in %s. The password is never "+
 					"accepted by flag, because a flag shows up in `ps`, in the shell history "+
 					"and in the CI log",
-				readableTarget(opts), EnvPassphraseChaveSSH, EnvSenhaSSH),
+				readableTarget(opts), EnvSSHKeyPassphrase, EnvSSHPassword),
 		},
 	}
 }
@@ -484,7 +484,7 @@ func defaultKeysMethod(env authEnv) (signerSource, *output.Diagnostic) {
 	}
 
 	signers := []ssh.Signer{}
-	for _, name := range ChavesPadrao {
+	for _, name := range DefaultKeyFiles {
 		pem, err := os.ReadFile(filepath.Join(home, ".ssh", name))
 		if err != nil {
 			continue

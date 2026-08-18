@@ -45,7 +45,7 @@ Host web1
   IdentityFile /keys/web1_ed25519
 `)
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
@@ -62,7 +62,7 @@ Host web*
   Port 2222
 `)
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web42"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web42"}, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
@@ -78,19 +78,19 @@ Host web1
   Port 2222
 `)
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "db1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "db1"}, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags, "a host missing from the file is not an anomaly")
 	assert.Equal(t, "db1", opts.Host)
-	assert.Equal(t, PortaSSHPadrao, opts.Port)
+	assert.Equal(t, DefaultSSHPort, opts.Port)
 	assert.Equal(t, expectedUser(t), opts.User)
 }
 
 func TestResolverMissingFileUsesDefaultsWithoutWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nao-existe", "config")
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags, "whoever has no ~/.ssh/config does not deserve a warning")
@@ -109,23 +109,23 @@ Host web1
 `)
 
 	// Flag beats file: User and Port come from the flag.
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1", User: "root", Port: 22022}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1", User: "root", Port: 22022}, path)
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 	assert.Equal(t, "root", opts.User)
 	assert.Equal(t, 22022, opts.Port)
 
 	// File beats default: with no flag, the file's values hold.
-	opts, _, err = ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, _, err = ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 	require.NoError(t, err)
 	assert.Equal(t, "deploy", opts.User)
 	assert.Equal(t, 2222, opts.Port)
 
 	// The default covers the rest: a host the file does not mention.
-	opts, _, err = ResolverSSHConfig(SSHOptions{Host: "outro"}, path)
+	opts, _, err = ResolveSSHConfig(SSHOptions{Host: "outro"}, path)
 	require.NoError(t, err)
 	assert.Equal(t, expectedUser(t), opts.User)
-	assert.Equal(t, PortaSSHPadrao, opts.Port)
+	assert.Equal(t, DefaultSSHPort, opts.Port)
 }
 
 // TestResolverEmptyFlagDoesNotOverrideFile locks down the classic precedence
@@ -141,7 +141,7 @@ Host web1
 `)
 
 	flags := SSHOptions{Host: "web1", User: "", Port: 0, KeyPath: ""}
-	opts, diags, err := ResolverSSHConfig(flags, path)
+	opts, diags, err := ResolveSSHConfig(flags, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
@@ -164,7 +164,7 @@ func TestResolverUnsupportedMatchDegradesWithWarning(t *testing.T) {
 			"Match user deploy\n"+ // line 6
 			"  IdentityFile /keys/deploy\n") // line 7
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1", User: "root"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1", User: "root"}, path)
 
 	// Side 1: it resolves anyway, from the flag and the defaults. Nothing
 	// from the file gets in — not even the Host web1 block, which on its
@@ -172,7 +172,7 @@ func TestResolverUnsupportedMatchDegradesWithWarning(t *testing.T) {
 	require.NoError(t, err, "an unreadable file never aborts")
 	assert.Equal(t, "web1", opts.Host, "the HostName from the file was not read")
 	assert.Equal(t, "root", opts.User, "the explicit flag still holds")
-	assert.Equal(t, PortaSSHPadrao, opts.Port, "the Port from the file was not read")
+	assert.Equal(t, DefaultSSHPort, opts.Port, "the Port from the file was not read")
 
 	// Side 2: the warning comes out, and says where. A resolver that merely
 	// avoids aborting, and stays quiet, passes side 1 and fails here — and
@@ -180,7 +180,7 @@ func TestResolverUnsupportedMatchDegradesWithWarning(t *testing.T) {
 	require.Len(t, diags, 1)
 	d := diags[0]
 	assert.Equal(t, output.SeverityWarning, d.Severity, "warning, not error: the command carries on")
-	assert.Equal(t, CodigoAvisoSSHConfig, d.Code)
+	assert.Equal(t, CodeSSHConfigWarning, d.Code)
 	assert.Equal(t, path, d.File)
 	assert.Equal(t, 6, d.Line, "the line of the Match the library does not understand")
 	assert.Positive(t, d.Column)
@@ -196,7 +196,7 @@ func TestResolverUnsupportedMatchDegradesWithWarning(t *testing.T) {
 func TestResolverMatchExecDegradesWithWarning(t *testing.T) {
 	path := writeConfig(t, "Match exec \"true\"\n  User deploy\n")
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
@@ -213,27 +213,27 @@ func TestResolverUnreadableFileDegradesWithWarning(t *testing.T) {
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityWarning, diags[0].Severity)
-	assert.Equal(t, CodigoAvisoSSHConfig, diags[0].Code)
+	assert.Equal(t, CodeSSHConfigWarning, diags[0].Code)
 	assert.Equal(t, path, diags[0].File)
 	assert.Zero(t, diags[0].Line, "no line when the problem is not on a line")
-	assert.Equal(t, PortaSSHPadrao, opts.Port)
+	assert.Equal(t, DefaultSSHPort, opts.Port)
 }
 
 func TestResolverInvalidPortInFileWarnsAndUsesDefault(t *testing.T) {
 	path := writeConfig(t, "Host web1\n  Port setenta\n")
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityWarning, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "setenta")
-	assert.Equal(t, PortaSSHPadrao, opts.Port)
+	assert.Equal(t, DefaultSSHPort, opts.Port)
 }
 
 func TestResolverExpandsTildeInIdentityFile(t *testing.T) {
@@ -243,7 +243,7 @@ func TestResolverExpandsTildeInIdentityFile(t *testing.T) {
 
 	path := writeConfig(t, "Host web1\n  IdentityFile ~/.ssh/id_web1\n")
 
-	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, path)
+	opts, diags, err := ResolveSSHConfig(SSHOptions{Host: "web1"}, path)
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
@@ -259,7 +259,7 @@ func TestResolverPreservesFieldsTheFileDoesNotAffect(t *testing.T) {
 		Password:        "segredo",
 	}
 
-	opts, _, err := ResolverSSHConfig(flags, path)
+	opts, _, err := ResolveSSHConfig(flags, path)
 
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/known_hosts", opts.KnownHostsPath)
@@ -270,7 +270,7 @@ func TestResolverPreservesFieldsTheFileDoesNotAffect(t *testing.T) {
 func TestResolverWithoutHostIsUsageError(t *testing.T) {
 	path := writeConfig(t, "Host web1\n  User deploy\n")
 
-	_, diags, err := ResolverSSHConfig(SSHOptions{Host: "  "}, path)
+	_, diags, err := ResolveSSHConfig(SSHOptions{Host: "  "}, path)
 
 	require.Error(t, err)
 	assert.Equal(t, output.ExitUsage, output.CodeOf(err))

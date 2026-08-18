@@ -19,7 +19,7 @@ import (
 // It is a Context field, and not a direct call to transport, for the same
 // reason GlobalSettingsPath is a field: a CLI test needs to exercise the flag
 // wiring without opening a socket. In production the value is always
-// transport.SSHComDiagnosticos.
+// transport.SSHWithDiagnostics.
 type ConectarSSH func(transport.SSHOptions) (transport.Transport, []output.Diagnostic, error)
 
 // flagsDeConexao are the flags that only make sense with --host. Passing any
@@ -36,7 +36,7 @@ var flagsDeConexao = []string{"host", "user", "port", "key", "known-hosts", "ins
 // There is no password flag, and that is a security decision, not an
 // oversight: a flag's value shows up in `ps`, in the shell history and in the
 // log of any CI. The secret comes from NGX_SSH_PASSWORD or from a prompt with
-// no echo, both handled inside transport.MontarAutenticacao.
+// no echo, both handled inside transport.BuildAuthentication.
 //
 // --port starts at 0, and not at 22, because zero is what distinguishes "not
 // given" from "given as 22". DR2's precedence depends on that distinction: an
@@ -83,7 +83,7 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 		KnownHostsPath:  f.KnownHosts,
 		InsecureHostKey: f.InsecureHostKey,
 		Timeout:         f.Timeout,
-		// Password is left empty on purpose: transport.MontarAutenticacao
+		// Password is left empty on purpose: transport.BuildAuthentication
 		// reads NGX_SSH_PASSWORD or asks on the terminal. No secret crosses
 		// the command line.
 	}
@@ -96,7 +96,7 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 	// DR2's precedence belongs entirely to transport: an explicit flag beats
 	// ~/.ssh/config, which beats the default. Reimplementing it here would
 	// create a second source of truth that can disagree with the first.
-	resolvido, diags, err := transport.ResolverSSHConfig(opts, caminhoConfig)
+	resolvido, diags, err := transport.ResolveSSHConfig(opts, caminhoConfig)
 	ctx.TransportDiags = append(ctx.TransportDiags, diags...)
 	if err != nil {
 		return err
@@ -143,11 +143,11 @@ func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 		return ctx.SSHConfigPath, nil
 	}
 
-	caminho, err := transport.CaminhoSSHConfigPadrao()
+	caminho, err := transport.DefaultSSHConfigPath()
 	if err != nil {
 		return "", &output.Diagnostic{
 			Severity: output.SeverityWarning,
-			Code:     transport.CodigoAvisoSSHConfig,
+			Code:     transport.CodeSSHConfigWarning,
 			Message: fmt.Sprintf(
 				"~/.ssh/config was not consulted (%v); only the flags and the defaults apply",
 				err,
@@ -161,13 +161,13 @@ func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 // and not in Execute, so that a Context assembled by hand by a test about
 // another subject keeps working.
 //
-// It is SSHComDiagnosticos, never SSH: the latter discards the host key and
+// It is SSHWithDiagnostics, never SSH: the latter discards the host key and
 // ssh-agent diagnostics, and a lost warning is a warning that does not exist.
 func (c *Context) conectar() ConectarSSH {
 	if c.ConectarSSH != nil {
 		return c.ConectarSSH
 	}
-	return transport.SSHComDiagnosticos
+	return transport.SSHWithDiagnostics
 }
 
 // transporte returns the target of the operations, falling back to the local
@@ -199,7 +199,7 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 
 // NovoRuntime builds the runtime on top of the context's transport.
 //
-// ComSudo carries the --sudo flag directly: without it, a command that needs
+// WithSudo carries the --sudo flag directly: without it, a command that needs
 // privilege is reported, never retried with sudo (DR5).
 // TransporteDeLeitura returns the transport the commands use to READ
 // configuration, already with privileged reading when --sudo was asked for.
@@ -213,7 +213,7 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 // asked for, never inferred.
 func (c *Context) TransporteDeLeitura(ctx context.Context) transport.Transport {
 	sudo := c.Flags != nil && c.Flags.Sudo
-	return transport.ComLeituraPrivilegiadaEDump(ctx, c.transporte(), sudo, c.dumpDeFallback)
+	return transport.WithPrivilegedReadAndDump(ctx, c.transporte(), sudo, c.dumpDeFallback)
 }
 
 // dumpDeFallback delivers the effective configuration via `nginx -T`, the last
@@ -232,11 +232,11 @@ func (c *Context) dumpDeFallback(ctx context.Context) (map[string][]byte, error)
 	return arquivos, nil
 }
 
-// DiagnosticosDeLeitura collects what the reading transport observed -- which
+// ReadDiagnostics collects what the reading transport observed -- which
 // paths required privilege, which did not open even with it. Reading a
 // server's configuration with sudo cannot happen silently.
-func DiagnosticosDeLeitura(tr transport.Transport) []output.Diagnostic {
-	return transport.Diagnosticos(tr)
+func ReadDiagnostics(tr transport.Transport) []output.Diagnostic {
+	return transport.Diagnostics(tr)
 }
 
 func (c *Context) NovoRuntime() *runtime.Runtime {
@@ -244,8 +244,8 @@ func (c *Context) NovoRuntime() *runtime.Runtime {
 		return runtime.New(c.transporte())
 	}
 	return runtime.New(c.transporte(),
-		runtime.ComBinario(c.Flags.NginxBin),
-		runtime.ComSudo(c.Flags.Sudo),
+		runtime.WithBinary(c.Flags.NginxBin),
+		runtime.WithSudo(c.Flags.Sudo),
 	)
 }
 

@@ -17,18 +17,18 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// PortaSSHPadrao is the port used when neither the flag nor ~/.ssh/config says
+// DefaultSSHPort is the port used when neither the flag nor ~/.ssh/config says
 // what it is. The parsing library does not apply defaults — (*Config).Get
 // returns an empty string for a missing key, never "22" —, so the default is
 // ours.
-const PortaSSHPadrao = 22
+const DefaultSSHPort = 22
 
-// CodigoAvisoSSHConfig identifies the DR7 diagnostic: ~/.ssh/config exists but
+// CodeSSHConfigWarning identifies the DR7 diagnostic: ~/.ssh/config exists but
 // cannot be read in full.
 //
 // The NGX-000N codes mirror exit codes and are always errors. Warnings, which
 // by definition do not bring the command down, use the NGX-W### range.
-const CodigoAvisoSSHConfig = "NGX-0210"
+const CodeSSHConfigWarning = "NGX-0210"
 
 // SSHOptions describes how ngx reaches a remote host. Host is the final target
 // of the connection — if ~/.ssh/config translates the alias through HostName,
@@ -55,7 +55,7 @@ type SSHOptions struct {
 // message.
 var errorPositionRe = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 
-// ResolverSSHConfig resolves the connection options for the requested host,
+// ResolveSSHConfig resolves the connection options for the requested host,
 // applying the DR2 precedence: an explicit flag beats the file, the file beats
 // the default.
 //
@@ -65,7 +65,7 @@ var errorPositionRe = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 //
 // The file path is a parameter, and not derived from os.UserHomeDir() in here,
 // so that the resolution is testable without depending on the HOME of whoever
-// runs it. Use CaminhoSSHConfigPadrao for the production path.
+// runs it. Use DefaultSSHConfigPath for the production path.
 //
 // An absent file is neither an error nor a warning: whoever has no
 // ~/.ssh/config simply falls back to the defaults. A file that exists and
@@ -74,7 +74,7 @@ var errorPositionRe = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 // in silence.
 //
 // The list of diagnostics is never nil.
-func ResolverSSHConfig(flags SSHOptions, configPath string) (SSHOptions, []output.Diagnostic, error) {
+func ResolveSSHConfig(flags SSHOptions, configPath string) (SSHOptions, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	alias := strings.TrimSpace(flags.Host)
@@ -97,7 +97,7 @@ func ResolverSSHConfig(flags SSHOptions, configPath string) (SSHOptions, []outpu
 	// Defaults: the last level of the precedence, applied over whatever is
 	// still empty after flags and file.
 	if resolved.Port == 0 {
-		resolved.Port = PortaSSHPadrao
+		resolved.Port = DefaultSSHPort
 	}
 	if resolved.User == "" {
 		resolved.User = currentUser()
@@ -106,10 +106,10 @@ func ResolverSSHConfig(flags SSHOptions, configPath string) (SSHOptions, []outpu
 	return resolved, diags, nil
 }
 
-// CaminhoSSHConfigPadrao returns ~/.ssh/config. filepath.Join uses the native
+// DefaultSSHConfigPath returns ~/.ssh/config. filepath.Join uses the native
 // separator, so the same code produces /home/x/.ssh/config and
 // C:\Users\x\.ssh\config.
-func CaminhoSSHConfigPadrao() (string, error) {
+func DefaultSSHConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("could not locate the user's home directory; "+
@@ -180,7 +180,7 @@ func applyFile(
 			n, err := strconv.Atoi(port)
 			if err != nil || n <= 0 || n > 65535 {
 				diags = append(diags, warnSSHConfig(path, 0, 0,
-					fmt.Sprintf("Port %q is not a valid port number; using %d", port, PortaSSHPadrao)))
+					fmt.Sprintf("Port %q is not a valid port number; using %d", port, DefaultSSHPort)))
 			} else {
 				opts.Port = n
 			}
@@ -203,12 +203,12 @@ func applyFile(
 func warnSSHConfig(path string, line, column int, reason string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
-		Code:     CodigoAvisoSSHConfig,
+		Code:     CodeSSHConfigWarning,
 		Message: fmt.Sprintf(
 			"%s could not be read (%s); the ssh_config resolution was skipped and only "+
 				"the explicit flags (--host, --user, --port, --key) and the defaults "+
 				"(port %d, current user) apply",
-			path, reason, PortaSSHPadrao),
+			path, reason, DefaultSSHPort),
 		File:   path,
 		Line:   line,
 		Column: column,

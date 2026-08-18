@@ -633,7 +633,7 @@ func TestSSHDescribe(t *testing.T) {
 	s := startSSHServer(t, func(string) execResponse { return execResponse{} })
 	opts := optionsFor(t, s)
 
-	tr, _, err := SSHComDiagnosticos(opts)
+	tr, _, err := SSHWithDiagnostics(opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tr.Close() })
 
@@ -655,7 +655,7 @@ func TestSSHUnknownHostKeyIsRefused(t *testing.T) {
 	// Empty known_hosts: the host becomes unknown.
 	require.NoError(t, os.WriteFile(opts.KnownHostsPath, []byte("\n"), 0o600))
 
-	tr, _, err := SSHComDiagnosticos(opts)
+	tr, _, err := SSHWithDiagnostics(opts)
 
 	require.Error(t, err)
 	assert.Nil(t, tr)
@@ -667,7 +667,7 @@ func TestSSHUnknownHostKeyIsRefused(t *testing.T) {
 	// verification refusal look like a network or credential failure.
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoHostDesconhecido, e.Diag.Code)
+	assert.Equal(t, CodeUnknownHost, e.Diag.Code)
 }
 
 func TestSSHRefusedConnectionHasActionableDiagnostic(t *testing.T) {
@@ -675,7 +675,7 @@ func TestSSHRefusedConnectionHasActionableDiagnostic(t *testing.T) {
 	opts := optionsFor(t, s)
 	opts.Password = "errada"
 
-	tr, diags, err := SSHComDiagnosticos(opts)
+	tr, diags, err := SSHWithDiagnostics(opts)
 
 	require.Error(t, err)
 	assert.Nil(t, tr)
@@ -685,7 +685,7 @@ func TestSSHRefusedConnectionHasActionableDiagnostic(t *testing.T) {
 }
 
 func TestSSHWithoutHostIsUsageError(t *testing.T) {
-	tr, diags, err := SSHComDiagnosticos(SSHOptions{Host: "  "})
+	tr, diags, err := SSHWithDiagnostics(SSHOptions{Host: "  "})
 
 	require.Error(t, err)
 	assert.Nil(t, tr)
@@ -753,7 +753,7 @@ func TestSSHGlobPropagatesErrorAfterConnectionDrops(t *testing.T) {
 
 func connect(t *testing.T, s *testSSHServer) Transport {
 	t.Helper()
-	tr, diags, err := SSHComDiagnosticos(optionsFor(t, s))
+	tr, diags, err := SSHWithDiagnostics(optionsFor(t, s))
 	require.NoError(t, err)
 	require.NotNil(t, diags)
 	t.Cleanup(func() { _ = tr.Close() })

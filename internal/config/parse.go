@@ -144,7 +144,7 @@ func parseGuarded(path string, opts *crossplane.ParseOptions) (payload *crosspla
 		err = ParseErrors{{
 			File:    path,
 			Message: fmt.Sprintf("the dependency parser panicked on this configuration: %v", r),
-			Classe:  RecusaPanicoDoCrossplane,
+			Classe:  RefusalCrossplanePanic,
 		}}
 	}()
 	return crossplane.Parse(path, opts)
@@ -316,7 +316,7 @@ func rejectNonRegularTarget(path string, rc io.ReadCloser) ParseErrors {
 	return ParseErrors{{
 		File:    path,
 		Message: fmt.Sprintf("%s: a configuration has to be a regular file", kind),
-		Classe:  RecusaAlvoNaoERegular,
+		Classe:  RefusalTargetNotRegular,
 	}}
 }
 
@@ -472,11 +472,11 @@ func cloneArgs(args []string) []string {
 // readFailureClass separates permission from every other read failure.
 // The distinction is not cosmetic: --sudo fixes one and does nothing for the
 // other, so a caller needs to tell them apart without reading the message.
-func readFailureClass(err error) ClasseRecusa {
+func readFailureClass(err error) RefusalClass {
 	if errors.Is(err, fs.ErrPermission) {
-		return RecusaPermissaoNegada
+		return RefusalPermissionDenied
 	}
-	return RecusaFalhaDeLeitura
+	return RefusalReadFailure
 }
 
 func readFailureMessage(err error) string {

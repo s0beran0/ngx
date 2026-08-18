@@ -35,11 +35,11 @@ const (
 	CodigoSessaoSFTP = "NGX-0207"
 )
 
-// TimeoutSSHPadrao caps the handshake when SSHOptions.Timeout says nothing.
+// DefaultSSHTimeout caps the handshake when SSHOptions.Timeout says nothing.
 // Without a timeout, a host that accepts the TCP connection and never answers
 // the handshake leaves ngx hanging forever — and whoever is waiting for the
 // output has no way of knowing whether the command is slow or dead.
-const TimeoutSSHPadrao = 30 * time.Second
+const DefaultSSHTimeout = 30 * time.Second
 
 // globMetacharacters are the characters that make a pattern a pattern. The
 // backslash is in there because path.Match treats it as an escape: a pattern
@@ -75,22 +75,22 @@ type sshTransport struct {
 
 // SSH connects to the host described by opts and returns the remote transport.
 //
-// It discards the connection diagnostics. Use SSHComDiagnosticos in any path
+// It discards the connection diagnostics. Use SSHWithDiagnostics in any path
 // that builds an envelope: the --insecure-host-key warning and the missing
 // ssh-agent one explain to whoever reads the output what ngx operated against,
 // and losing them makes the DR1 escape hatch silent.
 func SSH(opts SSHOptions) (Transport, error) {
-	tr, _, err := SSHComDiagnosticos(opts)
+	tr, _, err := SSHWithDiagnostics(opts)
 	return tr, err
 }
 
-// SSHComDiagnosticos connects and also returns what the assembly observed
+// SSHWithDiagnostics connects and also returns what the assembly observed
 // along the way: host key accepted without verification, ssh-agent
 // unavailable, unreadable key. None of these brings the connection down, and
 // none of them may disappear.
 //
 // The list of diagnostics is never nil.
-func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error) {
+func SSHWithDiagnostics(opts SSHOptions) (Transport, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	host := strings.TrimSpace(opts.Host)
@@ -100,7 +100,7 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 
 	port := opts.Port
 	if port == 0 {
-		port = PortaSSHPadrao
+		port = DefaultSSHPort
 	}
 	user := opts.User
 	if user == "" {
@@ -115,7 +115,7 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		return nil, diags, err
 	}
 
-	auth, authDiags, err := MontarAutenticacao(opts)
+	auth, authDiags, err := BuildAuthentication(opts)
 	if len(authDiags) > 0 {
 		diags = append(diags, authDiags...)
 	}
@@ -125,7 +125,7 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = TimeoutSSHPadrao
+		timeout = DefaultSSHTimeout
 	}
 
 	address := net.JoinHostPort(host, strconv.Itoa(port))

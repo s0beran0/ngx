@@ -11,7 +11,7 @@ import (
 	"github.com/Microsoft/go-winio"
 )
 
-// PipeSSHAgentWindows is the named pipe that the OpenSSH ssh-agent for Windows
+// WindowsSSHAgentPipe is the named pipe that the OpenSSH ssh-agent for Windows
 // creates. The Windows ssh-agent is not a Unix socket.
 //
 // The name was not guessed: ssh-agent.exe itself creates it with this literal
@@ -19,7 +19,7 @@ import (
 // contrib/win32/win32compat/ssh-agent/agent.c:50 —
 // `#define AGENT_PIPE_ID L"\\\\.\\pipe\\openssh-ssh-agent"` — used in the
 // CreateNamedPipeW right below it.
-const PipeSSHAgentWindows = `\\.\pipe\openssh-ssh-agent`
+const WindowsSSHAgentPipe = `\\.\pipe\openssh-ssh-agent`
 
 // sshAgentPipeTimeout caps the wait on a busy pipe. ERROR_PIPE_BUSY is
 // transient and go-winio does the retry for us, but without a ceiling a stuck
@@ -46,7 +46,7 @@ const sshAgentPipeTimeout = 2 * time.Second
 func connectSSHAgent() (net.Conn, error) {
 	pipePath := os.Getenv(EnvSocketSSHAgent)
 	if pipePath == "" {
-		pipePath = PipeSSHAgentWindows
+		pipePath = WindowsSSHAgentPipe
 	}
 
 	timeout := sshAgentPipeTimeout

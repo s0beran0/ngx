@@ -51,13 +51,13 @@ func newScenario(t *testing.T, version, binaryContent string, opts ...func(*scen
 		served = c.served
 	}
 	c.srv.respondBytes("/dl/"+c.assetName, served)
-	c.srv.respondBytes("/dl/"+NomeChecksums, checksums)
-	c.srv.respondBytes("/dl/"+NomeAssinatura, sig)
+	c.srv.respondBytes("/dl/"+ChecksumsName, checksums)
+	c.srv.respondBytes("/dl/"+SignatureName, sig)
 
 	rel := Release{Version: "v" + version, Assets: []Asset{
 		{Name: c.assetName, URL: c.srv.URL + "/dl/" + c.assetName},
-		{Name: NomeChecksums, URL: c.srv.URL + "/dl/" + NomeChecksums},
-		{Name: NomeAssinatura, URL: c.srv.URL + "/dl/" + NomeAssinatura},
+		{Name: ChecksumsName, URL: c.srv.URL + "/dl/" + ChecksumsName},
+		{Name: SignatureName, URL: c.srv.URL + "/dl/" + SignatureName},
 	}}
 	c.srv.respondJSON("/repos/s0beran0/ngx/releases/latest", rel)
 	c.srv.respondJSON("/repos/s0beran0/ngx/releases", []Release{rel})
@@ -76,15 +76,15 @@ func corruptArtifact(t *testing.T) func(*scenario) {
 	}
 }
 
-func (c *scenario) options(path, currentVersion string) Opcoes {
-	return Opcoes{
-		Canal:                ChannelStable,
-		VersaoAtual:          currentVersion,
-		CaminhoBinario:       path,
-		ChavePublicaOverride: c.key,
-		Cliente:              c.srv.client(),
-		SO:                   "linux",
-		Arch:                 "amd64",
+func (c *scenario) options(path, currentVersion string) Options {
+	return Options{
+		Channel:           ChannelStable,
+		CurrentVersion:    currentVersion,
+		BinaryPath:        path,
+		PublicKeyOverride: c.key,
+		Cliente:           c.srv.client(),
+		SO:                "linux",
+		Arch:              "amd64",
 	}
 }
 
@@ -92,13 +92,13 @@ func TestExecutarUpdatesOnTheHappyPath(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
-	res, err := Executar(context.Background(), c.options(path, "v0.2.0"))
+	res, err := Run(context.Background(), c.options(path, "v0.2.0"))
 
 	require.NoError(t, err)
-	assert.True(t, res.Atualizado)
-	assert.True(t, res.Disponivel)
-	assert.Equal(t, "v0.3.0", res.VersaoRemota)
-	assert.Equal(t, ChannelStable, res.Canal)
+	assert.True(t, res.Updated)
+	assert.True(t, res.Available)
+	assert.Equal(t, "v0.3.0", res.RemoteVersion)
+	assert.Equal(t, ChannelStable, res.Channel)
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
@@ -112,7 +112,7 @@ func TestExecutarWithFailingVerificationPreservesTheCurrentBinary(t *testing.T) 
 	before, err := os.Stat(path)
 	require.NoError(t, err)
 
-	res, err := Executar(context.Background(), c.options(path, "v0.2.0"))
+	res, err := Run(context.Background(), c.options(path, "v0.2.0"))
 
 	require.Nil(t, res)
 	assert.Equal(t, CodigoChecksumDivergente, codeOf(t, err))
@@ -134,9 +134,9 @@ func TestExecutarWithSignatureFromAnotherKeyPreservesTheCurrentBinary(t *testing
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
 	opts := c.options(path, "v0.2.0")
-	opts.ChavePublicaOverride = keyText(t, otherPub)
+	opts.PublicKeyOverride = keyText(t, otherPub)
 
-	_, err := Executar(context.Background(), opts)
+	_, err := Run(context.Background(), opts)
 
 	assert.Equal(t, CodigoAssinaturaInvalida, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
@@ -150,11 +150,11 @@ func TestExecutarWithoutPublicKeyRefusesBeforeDownloadingAnything(t *testing.T) 
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
 	opts := c.options(path, "v0.2.0")
-	opts.ChavePublicaOverride = ""
+	opts.PublicKeyOverride = ""
 	// The package key is empty by default as well (the pair does not exist yet).
-	require.Empty(t, ChavePublica, "ChavePublica must be born empty until the real key exists")
+	require.Empty(t, PublicKey, "PublicKey must be born empty until the real key exists")
 
-	_, err := Executar(context.Background(), opts)
+	_, err := Run(context.Background(), opts)
 
 	assert.Equal(t, CodigoSemChavePublica, codeOf(t, err))
 	assert.Empty(t, c.srv.visited(), "it should not have touched the network")
@@ -166,14 +166,14 @@ func TestExecutarCheckOnlyNeedsNoKeyAndSwapsNothing(t *testing.T) {
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
 	opts := c.options(path, "v0.2.0")
-	opts.ChavePublicaOverride = ""
-	opts.SomenteVerificar = true
+	opts.PublicKeyOverride = ""
+	opts.CheckOnly = true
 
-	res, err := Executar(context.Background(), opts)
+	res, err := Run(context.Background(), opts)
 
 	require.NoError(t, err)
-	assert.True(t, res.Disponivel)
-	assert.False(t, res.Atualizado)
+	assert.True(t, res.Available)
+	assert.False(t, res.Updated)
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 }
 
@@ -182,13 +182,13 @@ func TestExecutarCheckOnlyWhenAlreadyUpToDate(t *testing.T) {
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
 	opts := c.options(path, "v0.3.0")
-	opts.SomenteVerificar = true
+	opts.CheckOnly = true
 
-	res, err := Executar(context.Background(), opts)
+	res, err := Run(context.Background(), opts)
 
 	require.NoError(t, err)
-	assert.False(t, res.Disponivel)
-	assert.False(t, res.Atualizado)
+	assert.False(t, res.Available)
+	assert.False(t, res.Updated)
 }
 
 func TestExecutarDoesNotDowngradeUnasked(t *testing.T) {
@@ -197,11 +197,11 @@ func TestExecutarDoesNotDowngradeUnasked(t *testing.T) {
 	c := newScenario(t, "0.2.0", "ngx v0.2.0")
 	path := testBinary(t, "ngx v0.9.0", 0o755)
 
-	res, err := Executar(context.Background(), c.options(path, "v0.9.0"))
+	res, err := Run(context.Background(), c.options(path, "v0.9.0"))
 
 	require.NoError(t, err)
-	assert.False(t, res.Atualizado)
-	assert.False(t, res.Disponivel)
+	assert.False(t, res.Updated)
+	assert.False(t, res.Available)
 	assert.Equal(t, "ngx v0.9.0", contentOf(t, path))
 }
 
@@ -212,10 +212,10 @@ func TestExecutarDowngradesWhenTheVersionIsRequestedExplicitly(t *testing.T) {
 	opts := c.options(path, "v0.9.0")
 	opts.Versao = "v0.2.0"
 
-	res, err := Executar(context.Background(), opts)
+	res, err := Run(context.Background(), opts)
 
 	require.NoError(t, err)
-	assert.True(t, res.Atualizado)
+	assert.True(t, res.Updated)
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
 	assert.Contains(t, c.srv.visited(), "/repos/s0beran0/ngx/releases/tags/v0.2.0")
 }
@@ -227,10 +227,10 @@ func TestExecutarWithVersionEqualToInstalledSwapsNothing(t *testing.T) {
 	opts := c.options(path, "v0.3.0")
 	opts.Versao = "v0.3.0"
 
-	res, err := Executar(context.Background(), opts)
+	res, err := Run(context.Background(), opts)
 
 	require.NoError(t, err)
-	assert.False(t, res.Atualizado)
+	assert.False(t, res.Updated)
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
@@ -238,10 +238,10 @@ func TestExecutarDoesNotUpdateWhenAlreadyOnTheChannelVersion(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0 another build")
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
-	res, err := Executar(context.Background(), c.options(path, "v0.3.0"))
+	res, err := Run(context.Background(), c.options(path, "v0.3.0"))
 
 	require.NoError(t, err)
-	assert.False(t, res.Atualizado)
+	assert.False(t, res.Updated)
 	assert.Equal(t, "ngx v0.3.0", contentOf(t, path))
 }
 
@@ -252,10 +252,10 @@ func TestExecutarWithUnreadableCurrentVersionStillUpdates(t *testing.T) {
 	c := newScenario(t, "0.3.0", "ngx v0.3.0")
 	path := testBinary(t, "ngx dev", 0o755)
 
-	res, err := Executar(context.Background(), c.options(path, "dev-no-version"))
+	res, err := Run(context.Background(), c.options(path, "dev-no-version"))
 
 	require.NoError(t, err)
-	assert.True(t, res.Atualizado)
+	assert.True(t, res.Updated)
 }
 
 func TestExecutarOnBetaChannelQueriesTheReleaseList(t *testing.T) {
@@ -263,14 +263,14 @@ func TestExecutarOnBetaChannelQueriesTheReleaseList(t *testing.T) {
 	path := testBinary(t, "ngx v0.3.0", 0o755)
 
 	opts := c.options(path, "v0.3.0")
-	opts.Canal = ChannelBeta
+	opts.Channel = ChannelBeta
 
-	res, err := Executar(context.Background(), opts)
+	res, err := Run(context.Background(), opts)
 
 	require.NoError(t, err)
-	assert.True(t, res.Atualizado)
-	assert.Equal(t, ChannelBeta, res.Canal)
-	assert.Equal(t, "v0.4.0-rc.1", res.VersaoRemota)
+	assert.True(t, res.Updated)
+	assert.Equal(t, ChannelBeta, res.Channel)
+	assert.Equal(t, "v0.4.0-rc.1", res.RemoteVersion)
 	assert.Contains(t, c.srv.visited(), "/repos/s0beran0/ngx/releases")
 	assert.NotContains(t, c.srv.visited(), "/repos/s0beran0/ngx/releases/latest")
 }
@@ -280,9 +280,9 @@ func TestExecutarRefusesUnknownChannel(t *testing.T) {
 	path := testBinary(t, "ngx v0.2.0", 0o755)
 
 	opts := c.options(path, "v0.2.0")
-	opts.Canal = Channel("nightly")
+	opts.Channel = Channel("nightly")
 
-	_, err := Executar(context.Background(), opts)
+	_, err := Run(context.Background(), opts)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown channel")
@@ -296,7 +296,7 @@ func TestExecutarWithoutArtifactForThePlatformPreservesTheBinary(t *testing.T) {
 	opts := c.options(path, "v0.2.0")
 	opts.SO = "openbsd"
 
-	_, err := Executar(context.Background(), opts)
+	_, err := Run(context.Background(), opts)
 
 	assert.Equal(t, CodigoAssetAusente, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))
@@ -310,7 +310,7 @@ func TestExecutarWithInterruptedDownloadPreservesTheBinary(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	})
 
-	_, err := Executar(context.Background(), c.options(path, "v0.2.0"))
+	_, err := Run(context.Background(), c.options(path, "v0.2.0"))
 
 	assert.Equal(t, CodigoRede, codeOf(t, err))
 	assert.Equal(t, "ngx v0.2.0", contentOf(t, path))

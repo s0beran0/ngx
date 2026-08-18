@@ -10,8 +10,8 @@ import (
 )
 
 // UpdateData is the data of the `ngx update` envelope. It mirrors
-// update.Resultado so the update package does not need to know the envelope.
-type UpdateData = update.Resultado
+// update.Result so the update package does not need to know the envelope.
+type UpdateData = update.Result
 
 // newUpdateCmd registers `ngx update`: downloads the newest release of the
 // channel, verifies signature and checksum, and swaps the binary itself.
@@ -43,11 +43,11 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 				return output.Usage("%s", err.Error())
 			}
 
-			res, err := update.Executar(execCtx, update.Opcoes{
-				Canal:            c,
-				Versao:           versao,
-				VersaoAtual:      output.Version,
-				SomenteVerificar: conferir,
+			res, err := update.Run(execCtx, update.Options{
+				Channel:        c,
+				Versao:         versao,
+				CurrentVersion: output.Version,
+				CheckOnly:      conferir,
 			})
 			if err != nil {
 				return erroDeUpdate(err)
@@ -77,7 +77,7 @@ func canalEscolhido(ctx *Context, flag string) string {
 		return flag
 	}
 	if ctx.Getenv != nil {
-		return ctx.Getenv(update.EnvCanal)
+		return ctx.Getenv(update.EnvChannel)
 	}
 	return ""
 }

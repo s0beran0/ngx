@@ -99,7 +99,7 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 				Open: tr.Open,
 				Glob: tr.Glob,
 			})
-			diagsLeitura := DiagnosticosDeLeitura(tr)
+			diagsLeitura := ReadDiagnostics(tr)
 			if err != nil {
 				return erroDeParse(comDicaDeSudo(err, ctx), diagsLeitura...)
 			}
@@ -156,7 +156,7 @@ func comDicaDeSudo(err error, ctx *Context) error {
 		// the word "permissao" in the message, and translating the project to
 		// English removed the hint silently -- no test noticed, because no
 		// test covered the branch. Class survives rewording and translation.
-		if problemas[i].Classe != config.RecusaPermissaoNegada {
+		if problemas[i].Classe != config.RefusalPermissionDenied {
 			continue
 		}
 		problemas[i].Message += ". Run with --sudo so that ngx reads with privilege " +

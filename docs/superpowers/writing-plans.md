@@ -1,154 +1,153 @@
-# Escrevendo planos e revisando neste projeto
+# Writing plans and reviewing in this project
 
-Leia isto **antes de escrever um plano de implementação** ou de despachar um
-review. Não é invariante de código — por isso não está no `CLAUDE.md`.
+Read this **before you write an implementation plan** or ship one
+review. It is not code invariant — that's why it is not in `CLAUDE.md`.
 
-## Escrevendo planos de implementação
+## Writing implementation plans
 
-Estas regras vêm de defeitos reais desta base de código, não de teoria. Cada uma
-tem o custo que ela evita anotado.
+the cost it avoids is noted.These rules come from actual defects in this codebase, not from theory. Each
 
-### Código que depende de biblioteca de terceiro não se escreve de cabeça
+### Code that depends on a third-party library cannot be written from scratch
 
-Se uma tarefa integra uma biblioteca externa, o código do plano **precisa ser
-derivado do fonte dela**, não da lembrança de como ela funciona. Leia o fonte no
-module cache antes de escrever o passo, e cite no brief o arquivo e a função que
-definem o comportamento.
+If a task integrates an external library, the plan code **needs to be
+derived from its source**, not from the memory of how it works. Read the source on
+module cache before writing the step, and mention in the brief the file and function that
+define behavior.
 
-Um plano com código completo mas errado é pior que um plano com descrição: o
-implementador transcreve fielmente, os testes que você escreveu junto concordam
-com o código que você escreveu, e o defeito só aparece no review — ou em
-produção.
+A plan with complete but incorrect code is worse than a plan with description: the
+implementer transcribes faithfully, the tests you wrote together agree
+with the code you wrote, and the defect only appears in the review — or in
+production.
 
-*Custo evitado:* `Parse` ignorava `payload.Errors` do crossplane, então um
-`.conf` com erro de sintaxe produzia árvore vazia com exit 0. O tokenizador
-quebrava em `{` sem tratar `${var}`, fazendo o `ngx` rejeitar qualquer
-configuração com template de variável. Os dois passaram por implementação e só
-caíram no review.
+*Cost avoided:* `Parse` ignored crossplane `payload.Errors`, so a
+`.conf` with syntax error produced empty tree with exit 0. The tokenizer
+broke on `{` without treating `${var}`, making `ngx` reject any
+configuration with variable template. Both went through implementation and only
+fell in the review.
 
-### Quando não der para saber, mande investigar em vez de adivinhar
+### When you can't know, have it investigated instead of guessing
 
-Se você não consegue determinar o comportamento correto ao escrever o plano,
-**não escreva código provisório**. Escreva um passo que manda o implementador ler
-a fonte específica e derivar o comportamento, com o critério de aceitação
-explícito. Um brief que diz "leia `lex.go` e faça o tokenizador concordar com ele
-token a token" produz código melhor que um brief com um tokenizador plausível.
+If you cannot determine the correct behavior when writing the plan,
+**don't write interim code**. Write a step that tells the implementer to read
+the specific source and derive the behavior, with the acceptance criteria
+explicit. A brief that says "read `lex.go` and make the tokenizer agree to it
+token by token" produces better code than a brief with a plausible tokenizer.
 
-### Testes precisam de um oráculo externo
+### Tests need an external oracle
 
-Um teste cuja expectativa você derivou da mesma cabeça que escreveu a
-implementação só confirma que você foi consistente. Quando existir uma referência
-independente — a biblioteca que estamos espelhando, o binário real do nginx, um
-corpus de arquivos conhecidos — teste contra ela.
+A test whose expectation you derived from the same mind that wrote the
+implementation only confirms that you were consistent. When there is a reference
+independent — the library we are mirroring, the actual nginx binary, a
+corpus of known files — test against it.
 
-Cuidado particular com property tests e fuzz: verifique que a propriedade **pode
-falhar**. Antes de aceitar um fuzz como rede de segurança, quebre a implementação
-de propósito e confirme que ele acusa.
+Particular care with property tests and fuzz: check that the property **can
+fail**. Before accepting a fuzz as a safety net, break the implementation
+on purpose and confirm that he accuses.
 
-*Custo evitado:* o fuzz do tokenizador rodou 9,5 milhões de execuções e provava
-apenas ausência de panic. Suas quatro asserções eram tautologias — a principal,
-`src[Start:End] == Raw`, é impossível de falhar porque o código constrói `Raw`
-fatiando `src[start:pos]` e grava `Start`/`End` na mesma expressão. O bug do
-`${var}` sobreviveu por essa brecha. A substituição — comparar token a token
-contra `crossplane.Lex` — o teria achado em segundos.
+*Cost avoided:* the tokenizer fuzz ran 9.5 million executions and proved
+just absence of panic. His four assertions were tautologies — the main one,
+`src[Start:End] == Raw`, it is impossible to fail because the code constructs `Raw`
+slicing `src[start:pos]` and writes `Start`/`End` to the same expression. The bug
+`${var}` survived through this loophole. The Replacement — Compare Token to Token
+against `crossplane.Lex` — would have found it in seconds.
 
-### Fix rounds que exigem lógica nova são implementação, não conserto
+### Fix rounds that require new logic are implementation, not fix
 
-O momento de maior risco não é a implementação inicial: é a correção. Um
-implementador consertando um achado sob pressão inventa mecanismo novo sem o
-cuidado que teve na primeira passada, e ninguém revisou aquele mecanismo.
+The moment of greatest risk is not the initial implementation: it is the correction. One
+implementer fixing a finding under pressure invents new mechanism without the
+care taken on the first pass, and no one checked that mechanism.
 
-Quando um fix introduzir estrutura que não existia — um cache, um tipo de erro,
-uma goroutine, um lock — trate o re-review como review completo, no modelo mais
-capaz, e peça julgamento explícito sobre a lógica nova. Não use o re-review
-escopado barato, que só confere itens de uma lista.
+When a fix introduces structure that didn't exist — a cache, a type of error,
+a goroutine, a lock — treat the re-review as a complete review, in the most
+capable, and ask for explicit judgment on the new logic. Do not use re-review
+cheap scopado, which only checks items off a list.
 
-*Custo evitado:* o fix que corrigiu cinco achados no `Parse` introduziu um data
-race e um truncamento silencioso de arquivo. O truncamento era pior que o
-problema original: os spans ficavam coerentes com um `Source` truncado, e na v0.2
-uma escrita por substituição de bytes truncaria o arquivo real do usuário.
+*Cost avoided:* the fix that corrected five findings in `Parse` introduced a date
+race and silent file truncation. The truncation was worse than the
+original problem: the spans were coherent with a truncated `Source`, and in v0.2
+a byte replacement write would truncate the user's real file.
 
-### Nunca despache um loop sem condição de parada
+### Never dispatch a loop without stopping condition
 
-Instruções como "rode o fuzz e corrija os casos que ele encontrar" ou "itere
-até passar" não têm fim quando a busca é aberta. Cada correção revela o
-próximo caso, e o agente fica horas moendo rendimento decrescente sem
-perceber, porque a cada passo ele está de fato achando algo real.
+Instructions like "run fuzz and fix the cases it finds" or "iterate
+until it passes" have no end once the search is opened. Each correction reveals the
+next case, and the agent spends hours grinding diminishing returns without
+realize, because at every step he is actually finding something real.
 
-Dê sempre um teto explícito: um número de rodadas, um limite de tempo, ou um
-critério de suficiência ("pare quando os N itens listados estiverem
-endereçados, mesmo que o fuzz ainda ache casos"). E peça que o que sobrar
-vire **entregável** — uma lista de divergências conhecidas com entrada,
-comportamento esperado e observado — em vez de trabalho abandonado.
+Always give an explicit ceiling: a number of rounds, a time limit, or a
+sufficiency criterion ("stop when the N listed items are
+addressed, even though fuzz still finds cases"). And ask that whatever is left
+turn **deliverable** — a list of known divergences with input,
+expected and observed behavior — rather than abandoned work.
 
-*Custo evitado:* um fix de tokenizador rodou 37 minutos e 287 mil tokens
-porque o dispatch mandava corrigir tudo que o fuzz diferencial encontrasse. O
-achado que justificava a rodada — um bug que fazia o CLI recusar configuração
-válida — apareceu nos primeiros minutos; o resto foi cauda.
+*Cost avoided:* a tokenizer fix ran 37 minutes and 287 thousand tokens
+because dispatch ordered to correct everything that the differential fuzz found. O
+finding that justified the round — a bug that caused the CLI to refuse configuration
+valid — appeared within the first few minutes; the rest was tail.
 
-### Trave contratos com valores literais
+### Lock contracts with literal values
 
-Quando um valor é contrato — exit code, tag JSON, nome de campo consumido por
-outro módulo — o teste precisa assertar o **literal**, não a constante simbólica.
-`require.Equal(t, ExitDrift, CodeOf(err))` passa depois de alguém trocar
-`ExitDrift` de 7 para 8; `require.Equal(t, 7, int(ExitDrift))` não.
+When a value is contract — exit code, JSON tag, field name consumed by
+another module — the test needs to assert the **literal**, not the symbolic constant.
+`require.Equal(t, ExitDrift, CodeOf(err))` passes after someone switches
+`ExitDrift` from 7 to 8; `require.Equal(t, 7, int(ExitDrift))` does not.
 
-## Revisando
+## Reviewing
 
-- Diga ao revisor o que está em jogo naquela tarefa específica, não só "revise".
-  A qualidade do achado acompanha a qualidade do enquadramento.
-- Peça verificação negativa: que o revisor quebre o código e confirme que o teste
-  acusa. Um revisor que reverteu o `leituraEspelhada` e mediu 8 falhas em 8
-  execuções deu mais informação que o implementador, que reportou 2 em 3.
-- Nunca instrua um revisor a não sinalizar algo. Se você acha que um achado seria
-  falso positivo, deixe-o aparecer e decida depois, registrando a decisão.
+- Tell the reviewer what is at stake in that specific task, don't just "review".
+  The quality of the find follows the quality of the framing.
+- Ask for negative verification: for the reviewer to break the code and confirm that the test
+  accuses. A reviewer who reversed `mirroredreading` and measured 8 out of 8 failures
+  executions gave more information than the implementer, who reported 2 out of 3.
+- Never instruct a reviewer not to flag something. If you think a find would be
+  false positive, let it appear and decide later, recording the decision.
 
-## Despachando subagentes sem queimar contexto
+## Dispatching subagents without burning context
 
-Cada subagente é uma sessão própria: relê o próprio histórico a cada turno e
-não aparece no `/context` de quem coordena. Numa execução real deste projeto,
-os subagentes consumiram cerca de 1,7 milhão de tokens contra 1,1 milhão dos
-revisores — e o agente mais caro foi um Sonnet, não um Opus. **Trocar de modelo
-não é a alavanca; reduzir turnos e saída verbosa é.**
+Each subagent is its own session: it rereads its own history every turn and
+does not appear in the `/context` of the coordinator. In a real execution of this project,
+subagents consumed around 1.7 million tokens compared to 1.1 million for
+reviewers—and the most expensive agent was a Sonnet, not an Opus. **Switch model
+it is not the lever; reduce turns and verbose output is.**
 
-### O que escrever em todo dispatch
+### What to write in every dispatch
 
-- **`go test ./...` sem `-v` por padrão.** Use `-v` apenas quando algo falhar e
-  você precisar do detalhe. A saída verbosa da suíte deste projeto passa de
-  16 KB; a compacta cabe em 300 bytes.
-- **Nunca cole saída longa no relatório.** Reporte a conclusão e o caminho do
-  arquivo. Quem quiser o detalhe abre o arquivo.
-- **Relatório final curto e fixo:** STATUS, commits, uma linha de teste,
-  concerns. O detalhe vai no arquivo de relatório, não na resposta.
-- **Dê teto a qualquer busca aberta** — número de rodadas ou limite de tempo —
-  e peça que o que sobrar vire lista de divergências conhecidas. Ver a regra
-  sobre loops sem condição de parada.
+- **`go test ./...` without `-v` by default.** Use `-v` only when something fails and
+  you need the detail. The verbose output of this project's suite goes from
+  16 KB; the compact one fits in 300 bytes.
+- **Never paste long output into the report.** Report the completion and path of the
+  file. Anyone who wants the details opens the file.
+- **Short and fixed final report:** STATUS, commits, a test line,
+  concerns. The detail goes in the report file, not in the response.
+- **Cover any open quest** — number of rounds or time limit —
+  and ask what is left to become a list of known divergences. See the rule
+  over loops without stopping conditions.
 
-### RTK está ativo nesta máquina
+### RTK is active on this machine
 
-O `rtk` intercepta comandos de shell e comprime a saída antes de ela entrar no
-contexto. Está instalado via Homebrew (`homebrew-core`, Apache 2.0) e ligado
-por um hook `PreToolUse` global.
+`rtk` intercepts shell commands and compresses the output before it enters the
+context. It is installed via Homebrew (`homebrew-core`, Apache 2.0) and linked
+by a global `PreToolUse` hook.
 
-O que isso muda na prática:
+What does this change in practice:
 
-- `go test` é reescrito automaticamente. A suíte inteira reporta
-  `Go test: 160 passed in 5 packages` em vez de 16 KB de saída. **Falhas não
-  são escondidas** — verificado quebrando um teste de propósito: o RTK mostra
-  nome, arquivo, linha e mensagem, e informa o caminho da saída completa, que
-  ele salva em disco.
-- **`git` está excluído da interceptação**, de propósito. O fluxo de review
-  gera pacotes com `git diff a..b > arquivo`, e o proxy colapsaria o diff para
-  `--stat` — deixando o revisor com nomes de arquivo e nenhum conteúdo. Falha
-  silenciosa que nenhum teste acusaria. A exclusão está em
+**No faults
+  Exclusion is in
+  The review flow
+  It helps with `go test`, not everything.are hidden** — verified by breaking a test on purpose: RTK shows
   `~/Library/Application Support/rtk/config.toml`.
-- **`Read`, `Grep` e `Glob` do Claude Code não passam pelo hook.** Como boa
-  parte do consumo dos subagentes é leitura de arquivo, o ganho real aqui é
-  menor que os 60–90% anunciados. Ele ajuda em `go test`, não em tudo.
+generates packages with `git diff a..b > file`, and the proxy would collapse the diff to
+  - `go test` is automatically rewritten. `--stat` — leaving the reviewer with filenames and no content. name, file, line and message, and informs the path of the complete output, which
+  - **`Read`, `Grep` and `Glob` from Claude Code do not pass through the hook.** How good
+  The entire suite reports
+  Failure
+  it saves to disk.
+part of the subagents' consumption is file reading, the real gain here is
+  `Go test: 160 passed in 5 packages` instead of 16 KB output. silent that no test would show. - **`git` is excluded from interception**, on purpose. lower than the advertised 60–90%. 
 
-### O custo de um subagente é quadrático no número de turnos
+### The cost of a subagent is quadratic in the number of shifts
 
-Medido nos transcripts reais desta execução, não estimado:
+Measured on actual transcripts from this run, not estimated:
 
 | | |
 |---|---|
@@ -158,119 +157,114 @@ Medido nos transcripts reais desta execução, não estimado:
 | histórico relido, total | ~131 milhões de tokens |
 | conteúdo gerado pelo modelo, total | ~539 mil tokens |
 
-Para cada token que o modelo escreveu, 243 foram de histórico reenviado. Cada
-turno relê todo o contexto acumulado, e o contexto cresce a cada turno — então
-o custo não cresce com o número de turnos, cresce com o **quadrado** dele. Um
-agente de 232 turnos custou 44 milhões; um de 104 custou 11 milhões.
+the cost does not grow with the number of shifts, it grows with the **square** of it. One
+For every token the model wrote, 243 were resent history. 232 shift agent cost 44 million; Each
+one of 104 cost 11 million.turn rereads all the accumulated context, and the context grows with each turn — so
 
-**Consequência prática, que é contraintuitiva:** prefira **mais agentes
-curtos** a um agente longo. Dividir 232 turnos em dois agentes de 116 custa
-cerca de 45% menos, mesmo pagando a base de 15 mil tokens duas vezes.
+**Practical consequence, which is counterintuitive:** prefer **more agents
+short** to a long agent. Splitting 232 shifts into two 116 agents costs
+around 45% less, even paying the base 15 thousand tokens twice.
 
-**O que NÃO adianta:** comprimir a saída das ferramentas. Todo o conteúdo de
-resultado de ferramenta somado — Read, Bash, Edit, Write — dá ~245 mil tokens,
-ou 0,08% do histórico relido. Ferramentas de compressão de saída atacam essa
-fatia. Elas não são inúteis, mas não são a alavanca.
+or 0.08% of the reread history. Output compression tools attack this
+**What is NOT useful:** compressing the output of the tools. slice. All content of
+They are not useless, but they are not the lever.combined tool result — Read, Bash, Edit, Write — gives ~245 thousand tokens,
 
-**O que adianta, em ordem:**
+**What's the point, in order:**
 
-1. **Tetos de turno.** Toda busca aberta precisa de limite. O agente mais caro
-   desta execução foi o do loop de fuzz sem condição de parada.
-2. **Dividir tarefa longa em dois dispatches** em vez de um, com o segundo
-   recebendo o estado por arquivo em vez de por contexto herdado.
-3. **Dizer exatamente qual arquivo ler.** Cada turno de exploração custa o
-   contexto inteiro de novo.
-4. **Base menor** — menos skills e menos servidores MCP reduzem os ~14.900 de
-   todo agente, o que se multiplica pelo número deles.
+1. **Turn ceilings.** Every open search needs a limit. The most expensive agent
+   of this execution was the fuzz loop without stopping condition.
+2. **Split long task into two dispatches** instead of one, with the second
+   receiving state by file instead of by inherited context.
+3. **Tell exactly which file to read.** Each turn of exploration costs
+   whole context again.
+4. **Smaller base** — fewer skills and fewer MCP servers reduce the ~14,900
+   every agent, which multiplies by their number.
 
-### As tres regras de dispatch, e a evidencia de cada uma
+### The three dispatch rules, and the evidence for each
 
-Um estudo empirico em SWE-bench com Claude Sonnet, GPT-4.1 e Gemini 2.5 Pro
-mediu estrategias de controle de turno (arXiv 2510.16786). O resultado que
-importa: **limitar turnos nao piorou a qualidade — melhorou.** Orcamento
-apertado forca o agente a ir direto ao ponto em vez de explorar.
+An empirical study on SWE-bench with Claude Sonnet, GPT-4.1 and Gemini 2.5 Pro
+measured turn control strategies (arXiv 2510.16786). The result that
+matters: **limiting shifts didn’t make quality worse — it improved.** Budget
+tight forces the agent to get straight to the point instead of exploring.
 
 | Estrategia | Taxa de sucesso | Custo |
 |---|---|---|
 | Limite fixo no percentil 75 (Claude) | −5,3% | −23,6% |
 | Limite **dinamico** — comeca baixo, estende uma vez (Claude) | **+1,6%** | −15,6% adicionais |
 
-A Anthropic recomenda o mesmo caminho por outro angulo: compaction,
-note-taking externo, isolamento em sub-agentes e carregamento just-in-time —
-tudo arquitetura e disciplina, fechando com "faca a coisa mais simples que
-funciona". Nenhuma ferramenta e necessaria.
+Anthropic recommends the same path from another angle: compaction,
+external note-taking, isolation in sub-agents and just-in-time loading —
+everything architecture and discipline, closing with "do the simplest thing you can
+works." No tools are required.
 
-#### 1. Orcamento de turno: o teto e consequencia do escopo, nao um numero
+#### 1. Shift budget: the ceiling is a consequence of the scope, not a number
 
-**Nada aplica o teto.** Medido aqui: a ferramenta que lanca subagente nao tem
-parametro de orcamento, e hook `PreToolUse` **nao dispara dentro de
-subagente** — duas sondas, registradas no `settings.local.json` do projeto e
-tambem no `~/.claude/settings.json` global, 6 chamadas de ferramenta de
-subagente, zero entradas no log; so a sessao de quem coordena aparece.
-Portanto o teto e texto no prompt: um pedido, nunca uma barreira.
+**Nothing applies the ceiling.** Measured here: the tool that launches subagent does not have
+budget parameter, and hook `PreToolUse` **does not fire within
+subagent** — two probes, registered in the project's `settings.local.json` and
+also in the global `~/.claude/settings.json`, 6 tool calls
+subagent, zero log entries; Only the coordinator's session appears.
+Therefore the ceiling and text in the prompt: a request, never a barrier.
 
-Um pedido so e atendido se for atendivel. O mesmo agente, mesmo modelo, no
-mesmo dia:
+same day:A request is only fulfilled if it is fulfillable. The same agent, same model, in
 
 | dispatch | itens de trabalho | teto | usou |
 |---|---|---|---|
 | fix round 2 da Task 9 | 4 achados + 1 ruling + 2 opcionais | 50 | **70** |
 | adendo do `include .;` | 1 achado | 25 | **13** |
 
-O agente nao "desobedeceu" no primeiro: ele escolheu terminar o trabalho em
-vez de largar pela metade, o que era a decisao certa diante do que foi
-pedido. **Quando o teto e a tarefa se contradizem, ganha a tarefa.**
+The agent did not "disobey" at first: he chose to finish the job instead.
+instead of leaving halfway, which was the right decision given what was
+request. **When the ceiling and the task contradict each other, the task wins.**
 
-Entao a regra e sobre escopo, nao sobre o numero:
+So the rule is about scope, not number:
 
-- **Um defeito por dispatch.** Se voce esta escrevendo o terceiro item numa
-  lista, quebre em dois dispatches. Foi isso que fez o teto valer.
-- **A condicao de parada tem que ser verificavel, nao contavel.** Modelo nao
-  conta com precisao as proprias chamadas; ele sabe dizer se o teste ficou
-  verde. Prefira "pare quando a suite passar e commite" a "pare na chamada
+- **A dispatch defect.** If you are writing the third item in a
+  list, break it into two dispatches. That's what made the ceiling worth it.
+- **The stop condition must be verifiable, not countable.** Model not
+  accurately counts your own calls; Does he know how to tell if the test was successful?
+  green. Prefer "stop when the suite passes and commits" to "stop on call
   50".
-- **Peca o numero de volta no relatorio.** Nao impede o estouro, mas o torna
-  visivel — foi assim que o 70 contra 50 apareceu.
-- **A unica barreira real e quem coordena.** Se um agente passar do previsto,
-  mate e redespache com escopo menor; nao estenda por comodidade.
+- **Request the number back from the report.** It does not prevent the explosion, but it makes it
+  visible — that's how 70 versus 50 appeared.
+- **The only real barrier is who coordinates.** If an agent goes beyond what was expected,
+  kill and redispatch with smaller scope; do not extend for convenience.
 
-Calibragem observada neste projeto, ja com escopo unitario: transcricao de
-codigo do brief, 20-30; implementacao com investigacao, 40-50; review com
-sonda, 30-40. Acima de 60 o custo por turno ja dobrou em relacao ao inicio.
+probe, 30-40. Calibration observed in this project, already with a unitary scope: transcription of
+Above 60 the cost per shift has already doubled compared to the beginning.brief code, 20-30; implementation with research, 40-50; review com
 
-#### 2. Note-taking externo para quebrar o quadratico
+#### 2. External note-taking to break the quadratic
 
-Quando um agente atinge o teto, ele grava o estado num arquivo e **encerra**.
-A continuacao vai para um agente NOVO, que le o arquivo e comeca com ~15 mil
-tokens de contexto em vez de herdar 300 mil.
+context tokens instead of inheriting 300K.When an agent reaches the ceiling, it writes the state to a file and **terminates**.
+The continuation goes to a NEW agent, who reads the file and starts with ~15 thousand
 
-Isso converte um custo quadratico em varios lineares. Dois agentes de 116
-turnos custam cerca de 45% menos que um de 232, mesmo pagando a base duas
-vezes. **Nao retome um agente longo por comodidade** — retomar preserva o
-contexto inteiro e e justamente o que se quer evitar.
+This converts a quadratic cost into several linear ones. Two 116 agents
+shifts cost around 45% less than a 232, even paying the base two
+times. **Do not resume a long agent for convenience** — resuming preserves the
+entire context and is precisely what we want to avoid.
 
-#### 3. Just-in-time dirigido
+#### 3. Just-in-time directed
 
-Diga qual arquivo ler. Cada turno de exploracao repaga o contexto acumulado,
-entao "descubra onde esta X" custa muito mais que "leia X em caminho/y.go".
-Quando nao souber o caminho, mande localizar com uma chamada dirigida em vez
-de deixar o agente vagar.
+Tell which file to read. Each turn of exploration repays the accumulated context,
+So "find out where X is" costs a lot more than "read X on path/y.go".
+When you don't know the way, send a direct call instead.
+to let the agent wander.
 
-### O prompt de dispatch e relido a cada turno — corte-o
+### The dispatch prompt is reread every turn — cut it
 
-Medido nos transcripts: o prompt medio de dispatch tinha **896 tokens**, e o
-total relido por causa deles foi **1,74 milhao de tokens** — sete vezes tudo
-que uma ferramenta de compressao de saida poderia poupar. Um prompt de 1.234
-tokens num agente de 104 turnos custou 128 mil sozinho.
+Measured in transcripts: the average dispatch prompt had **896 tokens**, and the
+total reread because of them was **1.74 million tokens** — seven times all
+that an output compression tool could save. A 1,234 prompt
+tokens on a 104 shift agent cost 128 thousand alone.
 
-A maior parte era redundante: restricoes globais que **ja estao no CLAUDE.md**
-que o agente carrega, e requisitos que **ja estao no brief** que ele vai ler.
+Most of it was redundant: global restrictions that **are already in CLAUDE.md**
+that the agent carries, and requirements that **are already in the brief** that he will read.
 
-**Nao repita no dispatch o que o CLAUDE.md ja diz.** Commits sem mencao a IA,
-comentarios e saida em ingles, zero CGO, listas JSON como `[]` —
-tudo isso ja chega ao agente. Repetir custa a cada turno dele.
+**Do not repeat in dispatch what CLAUDE.md already says.** Commits without mention of AI,
+comments and output in English, zero CGO, JSON lists like `[]` —
+All of this already reaches the agent. Repeating costs each of his turns.
 
-#### Template de dispatch (alvo: 300-400 tokens)
+#### Dispatch template (target: 300-400 tokens)
 
 ```
 <uma frase: o que fazer e onde>
@@ -284,7 +278,7 @@ continue. Diga no relatorio quantas chamadas usou.
 ## Arquivos
 <caminhos exatos. Diga o que NAO precisa ler.>
 
-## O que fazer
+## What to do
 <so o que o brief nao cobre, ou o que mudou desde que ele foi escrito>
 
 ## Ao terminar
@@ -292,64 +286,62 @@ continue. Diga no relatorio quantas chamadas usou.
 Resposta final: STATUS, commit, uma linha de teste, uma linha por item.
 ```
 
-O "por que isto importa" motiva o agente e as vezes vale — mas cobra o preco
-a cada turno. Use uma frase, nao um paragrafo.
+The “why does this matter” motivates the agent and is sometimes worth it — but it takes a toll
+every turn. Use a sentence, not a paragraph.
 
-### Tres desperdicios menores, tambem medidos
+### Three minor wastes, also measured
 
-**`Write` falha em 16% das chamadas.** Agentes em worktree isolado tentam
-escrever o relatorio no `.superpowers/` do repo principal, o isolamento
-bloqueia, e eles tentam de novo. Cerca de 15 turnos perdidos. **Diga no
-dispatch para escrever direto na copia dentro do worktree**, sem tentar o
-caminho compartilhado.
+**`Write` fails on 16% of calls.** Agents in isolated worktree try
+write the report in `.superpowers/` of the main repo, isolation
+blocks, and they try again. About 15 shifts lost. **Say no
+dispatch to write directly to the copy within the worktree**, without trying to
+shared path.
 
-**89 comandos Bash repetidos pelo mesmo agente** — `cd` refeito 12 vezes, o
-mesmo fuzz rodado 9 vezes. O diretorio de trabalho **persiste** entre chamadas
-de Bash; diga isso quando o agente precisar navegar. E agrupe verificacoes num
-comando so em vez de uma por turno.
+**89 Bash commands repeated by the same agent** — `cd` redone 12 times, the
+same fuzz run 9 times. Working directory **persists** between calls
+from Bash; say this when the agent needs to navigate. And group checks into one
+command only instead of one per turn.
 
-**Bash e a ferramenta mais chamada** (642 contra 238 de Read). Como o custo e
-por turno, encadear tres verificacoes num unico comando vale mais que otimizar
-o que cada uma imprime.
+**Bash is the most called tool** (642 versus 238 for Read). As the cost and
+per turn, chaining three checks in a single command is worth more than optimizing
+what each one prints.
 
-### O maior gargalo e a sessao de coordenacao, nao os subagentes
+### The biggest bottleneck is the coordination session, not the subagents
 
-Medido nos transcripts desta execucao:
+Measured in the transcripts of this run:
 
 | | turnos | historico relido | por turno |
 |---|---|---|---|
 | 41 subagentes somados | 1.137 | 131,0 M | 115 mil |
 | a sessao de coordenacao | 687 | **309,5 M** | **450 mil** |
 
-**A sessao principal foi 70% do custo total.** O contexto dela comecou em 22
-mil tokens e chegou a 844 mil — e cada turno relê tudo.
+**The main session was 70% of the total cost.** Her context started on 22
+thousand tokens and reached 844 thousand — and each turn rereads everything.
 
-O que a inflou: **os relatorios dos subagentes voltam inteiros para ela.** Um
-review que retorna 3 mil tokens de analise, recebido 300 turnos antes do fim,
-custa ~900 mil tokens sozinho, porque e relido em cada turno seguinte.
+It costs ~900 thousand tokens alone, because it is reread on each subsequent turn.What inflamed her: **the subagents' reports come back to her in one piece.** A
+review that returns 3 thousand analysis tokens, received 300 turns before the end,
 
-Isso contraria a orientacao da Anthropic sobre sub-agentes, que e retornarem
-**sumarios condensados de 1.000 a 2.000 tokens** depois de explorar
-extensivamente.
+extensively.This goes against Anthropic's guidance on sub-agents, which are to return
+**condensed summaries of 1,000 to 2,000 tokens** after exploring
 
-#### A regra: o retorno do subagente e um sumario, nao o trabalho
+#### The rule: the subagent's return is a summary, not the work
 
-Todo dispatch precisa exigir, explicitamente:
+Every dispatch must explicitly require:
 
-> Escreva a analise completa em `<caminho do relatorio>`. Como resposta final,
-> devolva no maximo 15 linhas: veredito numa linha, cada achado como uma linha
-> (severidade + titulo + arquivo:linha), e o caminho do relatorio. **Nao repita
-> a analise na resposta** — quem coordena le o arquivo se precisar.
+> Write the full analysis in `<report path>`. As a final answer,
+> return a maximum of 15 lines: verdict in one line, each finding as one line
+> (severity + title + file:line), and the report path. **Do not repeat
+> analysis in the response** — whoever coordinates reads the file if necessary.
 
-O relatorio completo continua existindo e continua sendo lido — sob demanda,
-uma vez, por quem precisa. A diferenca e que ele deixa de ser reenviado a cada
-turno da sessao de coordenacao pelo resto da execucao.
+The full report continues to exist and continues to be read — on demand,
+once, for those who need it. The difference is that it stops being resent every
+coordination session shift for the rest of the run.
 
-#### E a coordenacao precisa de higiene de contexto
+#### And coordination needs context hygiene
 
-- **`/compact` ao fim de cada fase**, nao quando degradar. Um resumo feito de
-  uma sessao saudavel e melhor que um feito de uma sessao ja confusa.
-- **`/clear` ao trocar de assunto** — investigar consumo de tokens e executar
-  um plano de implementacao nao precisam compartilhar contexto.
-- **Nao imprimir arquivo inteiro no terminal** para "conferir". `wc -l`,
-  `grep -c` e `tail -5` respondem a mesma pergunta por uma fracao do custo.
+- **`/compact` at the end of each phase**, not when degrading. A summary made of
+  A healthy session is better than a messy session.
+- **`/clear` when changing subject** — investigate token consumption and execute
+  An implementation plan does not need to share context.
+- **Do not print entire file in the terminal** to "check". `wc -l`,
+  `grep -c` and `tail -5` answer the same question at a fraction of the cost.

@@ -61,8 +61,8 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 		// The dump goes to stdout; the diagnostics, to stderr. Here the
 		// channels are kept apart on purpose: mixing them would put
 		// diagnostic lines inside the content of a file.
-		Files:       DividirDump(e.stdout),
-		Diagnostics: ParseDiagnosticos(e.stderr),
+		Files:       SplitDump(e.stdout),
+		Diagnostics: ParseDiagnostics(e.stderr),
 		ConfigFile:  testedFile(e.stderr),
 	}
 	if d.ConfigFile == "" {
@@ -71,14 +71,14 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 	return d, nil
 }
 
-// DividirDump splits the stdout of `nginx -T` into the files that compose it.
+// SplitDump splits the stdout of `nginx -T` into the files that compose it.
 //
-// Like ParseDiagnosticos, it takes only the text: the same test holds for
+// Like ParseDiagnostics, it takes only the text: the same test holds for
 // bytes coming from a local pipe or from an SSH session.
 //
 // Content that appears before the first marker is discarded -- it belongs to
 // no file, and attributing it to the first one would be inventing provenance.
-func DividirDump(text string) []DumpFile {
+func SplitDump(text string) []DumpFile {
 	files := []DumpFile{}
 	if strings.TrimSpace(text) == "" {
 		return files

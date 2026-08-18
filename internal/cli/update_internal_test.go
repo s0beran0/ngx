@@ -16,7 +16,7 @@ import (
 func TestCanalEscolhidoRespeitaPrecedencia(t *testing.T) {
 	comEnv := func(v string) *Context {
 		return &Context{Getenv: func(k string) string {
-			if k == update.EnvCanal {
+			if k == update.EnvChannel {
 				return v
 			}
 			return ""

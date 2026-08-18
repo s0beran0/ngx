@@ -52,7 +52,7 @@ func TestStateUnreadablePidfileOmitsRunning(t *testing.T) {
 
 	assert.Nil(t, s.Running)
 	require.Len(t, s.Diagnostics, 1)
-	assert.Equal(t, CodigoPrivilegioNecessario, s.Diagnostics[0].Code)
+	assert.Equal(t, CodePrivilegeRequired, s.Diagnostics[0].Code)
 
 	raw, err := json.Marshal(s)
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestStateProcessOfAnotherUser(t *testing.T) {
 	assert.Nil(t, s.Running)
 	assert.Equal(t, 4242, s.MasterPID)
 	require.Len(t, s.Diagnostics, 1)
-	assert.Equal(t, CodigoPrivilegioNecessario, s.Diagnostics[0].Code)
+	assert.Equal(t, CodePrivilegeRequired, s.Diagnostics[0].Code)
 }
 
 func TestStatePidfileWithGarbage(t *testing.T) {
@@ -106,7 +106,7 @@ func TestStatePidfileWithGarbage(t *testing.T) {
 	assert.Nil(t, s.Running)
 	assert.Zero(t, s.MasterPID)
 	require.Len(t, s.Diagnostics, 1)
-	assert.Equal(t, CodigoEstadoProcesso, s.Diagnostics[0].Code)
+	assert.Equal(t, CodeProcessState, s.Diagnostics[0].Code)
 }
 
 func TestStateWithoutPidfilePath(t *testing.T) {
@@ -115,7 +115,7 @@ func TestStateWithoutPidfilePath(t *testing.T) {
 
 	assert.Nil(t, s.Running)
 	require.Len(t, s.Diagnostics, 1)
-	assert.Equal(t, CodigoEstadoProcesso, s.Diagnostics[0].Code)
+	assert.Equal(t, CodeProcessState, s.Diagnostics[0].Code)
 }
 
 // The state never carries workers nor the configuration load time: both
@@ -142,7 +142,7 @@ func TestStateDoesNotUseSudoOnKill(t *testing.T) {
 	f := newFake("local").respond("kill -0 7", response{})
 	f.files["/run/nginx.pid"] = "7"
 
-	_, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
+	_, err := New(f, WithSudo(true)).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
 
 	calls := f.calls()
@@ -169,7 +169,7 @@ func TestStateWithSudoConfirmsProcessOfAnotherUser(t *testing.T) {
 
 	t.Run("with sudo the field becomes available", func(t *testing.T) {
 		f := newTransport()
-		s, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
+		s, err := New(f, WithSudo(true)).State(context.Background(), "/run/nginx.pid")
 		require.NoError(t, err)
 
 		require.NotNil(t, s.Running, "with privilege authorized the state is known")

@@ -155,7 +155,7 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 	caminho := filepath.Join(t.TempDir(), "known_hosts")
 	require.NoError(t, os.WriteFile(caminho, nil, 0o600))
 
-	tr, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, caminho))
+	tr, _, err := transport.SSHWithDiagnostics(opcoesDaBancada(chave, porta, caminho))
 	if err == nil {
 		_ = tr.Close()
 		t.Fatal("the connection was accepted with an empty known_hosts")
@@ -163,7 +163,7 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
+	require.Equal(t, transport.CodeUnknownHost, e.Diag.Code)
 
 	// The line is found by its SHAPE, not by cutting on a sentence. Matching
 	// prose made this test break the moment the project was translated, and
@@ -188,7 +188,7 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 func montarFixtureRemota(t *testing.T, chave string, porta int, knownHosts string) {
 	t.Helper()
 
-	tr, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, knownHosts))
+	tr, _, err := transport.SSHWithDiagnostics(opcoesDaBancada(chave, porta, knownHosts))
 	require.NoError(t, err)
 	defer func() { _ = tr.Close() }()
 
@@ -211,7 +211,7 @@ FIM
 	require.Zerof(t, saida, "setting up the remote fixture failed: %s %s", stdout, stderr)
 
 	t.Cleanup(func() {
-		limpeza, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, knownHosts))
+		limpeza, _, err := transport.SSHWithDiagnostics(opcoesDaBancada(chave, porta, knownHosts))
 		if err != nil {
 			return
 		}

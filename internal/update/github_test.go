@@ -162,11 +162,11 @@ func TestPorVersaoAcceptsWithOrWithoutV(t *testing.T) {
 	s := newServer(t)
 	s.respondJSON("/repos/s0beran0/ngx/releases/tags/v0.1.0", Release{Version: "v0.1.0"})
 
-	rel, err := s.client().PorVersao(context.Background(), "0.1.0")
+	rel, err := s.client().ByVersion(context.Background(), "0.1.0")
 	require.NoError(t, err)
 	assert.Equal(t, "v0.1.0", rel.Version)
 
-	rel, err = s.client().PorVersao(context.Background(), "v0.1.0")
+	rel, err = s.client().ByVersion(context.Background(), "v0.1.0")
 	require.NoError(t, err)
 	assert.Equal(t, "v0.1.0", rel.Version)
 }
@@ -174,7 +174,7 @@ func TestPorVersaoAcceptsWithOrWithoutV(t *testing.T) {
 func TestPorVersaoNonexistent(t *testing.T) {
 	s := newServer(t)
 
-	_, err := s.client().PorVersao(context.Background(), "v9.9.9")
+	_, err := s.client().ByVersion(context.Background(), "v9.9.9")
 
 	assert.Equal(t, CodigoReleaseAusente, codeOf(t, err))
 }
@@ -211,7 +211,7 @@ func TestAssetDaPlataformaChoosesBySuffix(t *testing.T) {
 		{Name: "ngx_1.0.0_linux_amd64.tar.gz"},
 		{Name: "ngx_1.0.0_linux_arm64.tar.gz"},
 		{Name: "ngx_1.0.0_windows_amd64.zip"},
-		{Name: NomeChecksums},
+		{Name: ChecksumsName},
 	}}
 
 	a, err := rel.AssetDaPlataforma("linux", "arm64")
@@ -236,10 +236,10 @@ func TestAssetDaPlataformaMissingListsWhatExists(t *testing.T) {
 func TestAssetPorNomeMissing(t *testing.T) {
 	rel := &Release{Version: "v1.0.0", Assets: []Asset{}}
 
-	_, err := rel.AssetPorNome(NomeAssinatura)
+	_, err := rel.AssetByName(SignatureName)
 
 	assert.Equal(t, CodigoAssetAusente, codeOf(t, err))
-	assert.Contains(t, err.Error(), NomeAssinatura)
+	assert.Contains(t, err.Error(), SignatureName)
 }
 
 func TestBaixarRefusesErrorStatus(t *testing.T) {
@@ -281,15 +281,15 @@ func TestParseChannel(t *testing.T) {
 func TestCanalDoAmbiente(t *testing.T) {
 	// NGX_CHANNEL=beta is the only way into the prerelease channel without
 	// passing the flag: changing channel is possible, never accidental.
-	c, err := CanalDoAmbiente(func(string) string { return "beta" })
+	c, err := ChannelFromEnv(func(string) string { return "beta" })
 	require.NoError(t, err)
 	assert.Equal(t, ChannelBeta, c)
 
-	c, err = CanalDoAmbiente(func(string) string { return "" })
+	c, err = ChannelFromEnv(func(string) string { return "" })
 	require.NoError(t, err)
 	assert.Equal(t, ChannelStable, c)
 
-	_, err = CanalDoAmbiente(func(string) string { return "unstable" })
+	_, err = ChannelFromEnv(func(string) string { return "unstable" })
 	assert.Error(t, err)
 }
 

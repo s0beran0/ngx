@@ -2,57 +2,57 @@ package config
 
 import "fmt"
 
-// ClasseRecusa names the reason why ngx refused a configuration. It exists
+// RefusalClass names the reason why ngx refused a configuration. It exists
 // for one thing only: the FuzzAlinhamento oracle compares ngx against
 // crossplane and needs to tell "deliberate refusal, with a known token shape"
 // apart from "over-rejection, which is a bug". Each class below is one
 // enumerated, narrow divergence with a unit test of its own -- see
 // knownDivergence in fuzz_test.go. A refusal with no class
-// (RecusaCrossplane) is the refusal crossplane itself reported, and is never
+// (RefusalCrossplane) is the refusal crossplane itself reported, and is never
 // a divergence.
-type ClasseRecusa string
+type RefusalClass string
 
 const (
-	// RecusaCrossplane is the error that came out of the crossplane payload.
-	RecusaCrossplane ClasseRecusa = ""
+	// RefusalCrossplane is the error that came out of the crossplane payload.
+	RefusalCrossplane RefusalClass = ""
 
-	// RecusaAspaNaoFechada: the source ends inside an open quote.
-	RecusaAspaNaoFechada ClasseRecusa = "aspa_nao_fechada"
+	// RefusalUnclosedQuote: the source ends inside an open quote.
+	RefusalUnclosedQuote RefusalClass = "aspa_nao_fechada"
 
-	// RecusaTokenNoLugarDeDiretiva: some other token showed up where a
+	// RefusalTokenInsteadOfDirective: some other token showed up where a
 	// directive name was expected.
-	RecusaTokenNoLugarDeDiretiva ClasseRecusa = "token_no_lugar_de_diretiva"
+	RefusalTokenInsteadOfDirective RefusalClass = "token_no_lugar_de_diretiva"
 
-	// RecusaTokenInesperado: a token out of place at any other position of
+	// RefusalUnexpectedToken: a token out of place at any other position of
 	// the matching (argument, block close, comment). It is no known
 	// divergence at all: if it shows up in the fuzz, it is an aligner bug.
-	RecusaTokenInesperado ClasseRecusa = "token_inesperado"
+	RefusalUnexpectedToken RefusalClass = "token_inesperado"
 
-	// RecusaTerminadorAusente: the directive neither ends in ';' nor opens '{'.
-	RecusaTerminadorAusente ClasseRecusa = "terminador_ausente"
+	// RefusalMissingTerminator: the directive neither ends in ';' nor opens '{'.
+	RefusalMissingTerminator RefusalClass = "terminador_ausente"
 
-	// RecusaTokensSobrando: the tree ran out before the tokens did.
-	RecusaTokensSobrando ClasseRecusa = "tokens_sobrando"
+	// RefusalLeftoverTokens: the tree ran out before the tokens did.
+	RefusalLeftoverTokens RefusalClass = "tokens_sobrando"
 
-	// RecusaFimInesperado: the tokens ran out before the tree did.
-	RecusaFimInesperado ClasseRecusa = "fim_inesperado"
+	// RefusalUnexpectedEnd: the tokens ran out before the tree did.
+	RefusalUnexpectedEnd RefusalClass = "fim_inesperado"
 
-	// RecusaExpressaoIfInvalida: "if" with no parenthesized expression.
-	RecusaExpressaoIfInvalida ClasseRecusa = "expressao_if_invalida"
+	// RefusalInvalidIfExpression: "if" with no parenthesized expression.
+	RefusalInvalidIfExpression RefusalClass = "expressao_if_invalida"
 
-	// RecusaAlvoNaoERegular: the path exists and opened, but is not a
+	// RefusalTargetNotRegular: the path exists and opened, but is not a
 	// regular file -- directory, socket, fifo, device.
-	RecusaAlvoNaoERegular ClasseRecusa = "alvo_nao_e_arquivo_regular"
+	RefusalTargetNotRegular RefusalClass = "alvo_nao_e_arquivo_regular"
 
-	// RecusaPanicoDoCrossplane: crossplane panicked while parsing.
-	RecusaPanicoDoCrossplane ClasseRecusa = "panico_do_crossplane"
+	// RefusalCrossplanePanic: crossplane panicked while parsing.
+	RefusalCrossplanePanic RefusalClass = "panico_do_crossplane"
 
-	// RecusaFalhaDeLeitura: reading one of the configuration files failed
+	// RefusalReadFailure: reading one of the configuration files failed
 	// midway -- the .conf may well be intact, what failed was the I/O. Not a
 	// fuzz divergence: the fuzz reads from memory and never produces it.
-	RecusaFalhaDeLeitura ClasseRecusa = "falha_de_leitura"
+	RefusalReadFailure RefusalClass = "falha_de_leitura"
 
-	// RecusaPermissaoNegada is a read failure whose cause is specifically a
+	// RefusalPermissionDenied is a read failure whose cause is specifically a
 	// permission denial. It exists as a class of its own because callers act
 	// on it: the CLI suggests --sudo, which does resolve it, and would be
 	// wrong to suggest for a dropped connection.
@@ -62,7 +62,7 @@ const (
 	// That is not hypothetical here: the CLI used to match "permissao" in the
 	// message, and translating the project to English silently removed the
 	// --sudo hint, with no test noticing.
-	RecusaPermissaoNegada ClasseRecusa = "permissao_negada"
+	RefusalPermissionDenied RefusalClass = "permissao_negada"
 )
 
 // ParseError is a problem found while reading the configuration, with the
@@ -76,7 +76,7 @@ type ParseError struct {
 	File    string
 	Line    int
 	Message string
-	Classe  ClasseRecusa
+	Classe  RefusalClass
 	Token   string
 }
 

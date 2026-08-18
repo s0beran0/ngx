@@ -52,8 +52,8 @@ func TestDetectIdenticalLocalAndRemote(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, infoLocal, infoRemote)
-	assert.Equal(t, "local", New(local).Alvo())
-	assert.Equal(t, "ssh://opc@10.0.0.7:22", New(remote).Alvo())
+	assert.Equal(t, "local", New(local).Target())
+	assert.Equal(t, "ssh://opc@10.0.0.7:22", New(remote).Target())
 }
 
 // Some transports merge stdout and stderr. `-V` writes to stderr, but the
@@ -119,7 +119,7 @@ func TestDetectNginxMissingLocally(t *testing.T) {
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoNginxAusente, e.Diag.Code)
+	assert.Equal(t, CodeNginxMissing, e.Diag.Code)
 	assert.True(t, errors.Is(err, exec.ErrNotFound))
 }
 
@@ -136,7 +136,7 @@ func TestDetectNginxMissingRemotely(t *testing.T) {
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoNginxAusente, e.Diag.Code)
+	assert.Equal(t, CodeNginxMissing, e.Diag.Code)
 	assert.Contains(t, e.Diag.Message, "ssh://opc@10.0.0.7:22")
 }
 
@@ -153,7 +153,7 @@ func TestDetectUnrecognizedOutput(t *testing.T) {
 func TestDetectUsesGivenBinary(t *testing.T) {
 	f := newFake("local").respond("/opt/nginx/sbin/nginx -V", response{stderr: outputDashV})
 
-	info, err := New(f, ComBinario("/opt/nginx/sbin/nginx")).Detect(context.Background())
+	info, err := New(f, WithBinary("/opt/nginx/sbin/nginx")).Detect(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/nginx/sbin/nginx", info.Binary)
 }

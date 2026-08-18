@@ -112,7 +112,7 @@ func TestVerifyRejectsPlaceholderKey(t *testing.T) {
 	checksums := checksumsFor(map[string][]byte{"a.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, checksums)
 
-	err := Verify([]byte("x"), checksums, sig, PlaceholderChavePublica, "a.tar.gz")
+	err := Verify([]byte("x"), checksums, sig, PublicKeyPlaceholder, "a.tar.gz")
 
 	assert.Equal(t, CodigoChavePlaceholder, codeOf(t, err))
 }

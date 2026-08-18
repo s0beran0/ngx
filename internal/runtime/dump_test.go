@@ -75,7 +75,7 @@ func TestDumpWithoutPrivilegeReportsAndDoesNotEscalate(t *testing.T) {
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoPrivilegioNecessario, e.Diag.Code)
+	assert.Equal(t, CodePrivilegeRequired, e.Diag.Code)
 	assert.Equal(t, output.SeverityError, e.Diag.Severity)
 	assert.Contains(t, e.Diag.Message, "--sudo")
 	assert.Contains(t, e.Diag.Message, "sudo -n nginx -T")
@@ -95,7 +95,7 @@ func TestDumpWithSudoRunsEscalated(t *testing.T) {
 		stderr: outputTestOK,
 	})
 
-	d, err := New(f, ComSudo(true)).DumpConfig(context.Background())
+	d, err := New(f, WithSudo(true)).DumpConfig(context.Background())
 	require.NoError(t, err)
 	assert.True(t, d.OK)
 	assert.Len(t, d.Files, 2)
@@ -114,7 +114,7 @@ func TestDumpWithSudoEqualsWithoutSudo(t *testing.T) {
 
 	a, err := New(withoutSudo).DumpConfig(context.Background())
 	require.NoError(t, err)
-	b, err := New(withSudo, ComSudo(true)).DumpConfig(context.Background())
+	b, err := New(withSudo, WithSudo(true)).DumpConfig(context.Background())
 	require.NoError(t, err)
 
 	assert.Equal(t, a, b)
@@ -129,11 +129,11 @@ func TestDumpSudoRequiresPassword(t *testing.T) {
 		exit:   1,
 	})
 
-	_, err := New(f, ComSudo(true)).DumpConfig(context.Background())
+	_, err := New(f, WithSudo(true)).DumpConfig(context.Background())
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoSudoIndisponivel, e.Diag.Code)
+	assert.Equal(t, CodeSudoUnavailable, e.Diag.Code)
 }
 
 // With --sudo and still no permission, the message must not tell the user to
@@ -144,11 +144,11 @@ func TestDumpWithSudoStillWithoutPermission(t *testing.T) {
 		exit:   1,
 	})
 
-	_, err := New(f, ComSudo(true)).DumpConfig(context.Background())
+	_, err := New(f, WithSudo(true)).DumpConfig(context.Background())
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Equal(t, CodigoPrivilegioNecessario, e.Diag.Code)
+	assert.Equal(t, CodePrivilegeRequired, e.Diag.Code)
 	assert.Contains(t, e.Diag.Message, "with --sudo")
 }
 
@@ -163,7 +163,7 @@ func TestTestConfigSyntaxErrorDoesNotBecomePrivilege(t *testing.T) {
 }
 
 func TestDividirDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
-	files := DividirDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
+	files := SplitDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
 	require.Len(t, files, 1)
 	assert.Equal(t, "/a.conf", files[0].Path)
 	assert.Equal(t, "foo;\n", files[0].Content)
@@ -173,13 +173,13 @@ func TestDividirDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
 // only counts at the start of the line and with the trailing colon.
 func TestDividirDumpDoesNotConfuseComment(t *testing.T) {
 	text := "# configuration file /a.conf:\n    # configuration file /fake.conf:\nfoo;\n"
-	files := DividirDump(text)
+	files := SplitDump(text)
 	require.Len(t, files, 1)
 	assert.Contains(t, files[0].Content, "/fake.conf")
 }
 
 func TestDividirDumpEmpty(t *testing.T) {
-	files := DividirDump("")
+	files := SplitDump("")
 	require.NotNil(t, files)
 	assert.Empty(t, files)
 }

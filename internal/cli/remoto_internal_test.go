@@ -43,7 +43,7 @@ func (t *transporteFalso) Describe() string {
 	return t.descricao
 }
 
-// conectorFalso replaces transport.SSHComDiagnosticos and keeps the options
+// conectorFalso replaces transport.SSHWithDiagnostics and keeps the options
 // the resolution produced, which is what the precedence tests observe.
 type conectorFalso struct {
 	chamadas int
@@ -143,7 +143,7 @@ func TestSemHostInspectContinuaLendoODiscoLocal(t *testing.T) {
 }
 
 // DR2's precedence: an explicit flag beats ~/.ssh/config, which beats the
-// default. The one doing that is transport.ResolverSSHConfig; the test proves
+// default. The one doing that is transport.ResolveSSHConfig; the test proves
 // the CLI feeds it the right flags and does not reimplement the order on the
 // side.
 func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
@@ -192,7 +192,7 @@ func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 		code := executar(NewRoot(ctx), ctx, []string{"--host", "10.0.0.9", "version"}, &errBuf)
 
 		require.Equal(t, output.ExitOK, code)
-		require.Equal(t, transport.PortaSSHPadrao, con.opts.Port)
+		require.Equal(t, transport.DefaultSSHPort, con.opts.Port)
 		require.NotEmpty(t, con.opts.User)
 	})
 }
@@ -230,7 +230,7 @@ func TestFlagDeSenhaNaoExiste(t *testing.T) {
 }
 
 // The password is never assembled by the CLI either: the Password field
-// leaves the options empty, so that transport.MontarAutenticacao fetches it
+// leaves the options empty, so that transport.BuildAuthentication fetches it
 // from NGX_SSH_PASSWORD or from the prompt with no echo.
 func TestOCLINuncaPreencheASenhaNasOpcoes(t *testing.T) {
 	con := &conectorFalso{}
@@ -251,7 +251,7 @@ func TestAvisoDeHostKeyInseguraChegaNoEnvelope(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
-			Code:     transport.CodigoAvisoHostKeyInsegura,
+			Code:     transport.CodeInsecureHostKeyWarning,
 			Message:  "host key accepted without verification",
 		}},
 		tr: &transporteFalso{descricao: "ssh://deploy@10.0.0.9:22"},
@@ -270,7 +270,7 @@ func TestAvisoDeHostKeyInseguraChegaNoEnvelope(t *testing.T) {
 	require.True(t, env.OK, "a warning does not bring the command down")
 	require.Len(t, env.Diagnostics, 1)
 	require.Equal(t, output.SeverityWarning, env.Diagnostics[0].Severity)
-	require.Equal(t, transport.CodigoAvisoHostKeyInsegura, env.Diagnostics[0].Code)
+	require.Equal(t, transport.CodeInsecureHostKeyWarning, env.Diagnostics[0].Code)
 	require.Equal(t, "ssh://deploy@10.0.0.9:22", env.Meta.Target)
 }
 
@@ -280,7 +280,7 @@ func TestDiagnosticoDaConexaoSobreviveAoErroDoComando(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
-			Code:     transport.CodigoAvisoHostKeyInsegura,
+			Code:     transport.CodeInsecureHostKeyWarning,
 			Message:  "host key accepted without verification",
 		}},
 	}
@@ -307,7 +307,7 @@ func TestDiagnosticoDaConexaoSobreviveAoErroDoComando(t *testing.T) {
 	for _, d := range env.Diagnostics {
 		codigos = append(codigos, d.Code)
 	}
-	require.Contains(t, codigos, transport.CodigoAvisoHostKeyInsegura)
+	require.Contains(t, codigos, transport.CodeInsecureHostKeyWarning)
 	require.Contains(t, codigos, "NGX-0003")
 }
 
@@ -318,7 +318,7 @@ func TestFalhaDeConexaoPreservaODiagnosticoDoTransporte(t *testing.T) {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     transport.CodigoHostDesconhecido,
+			Code:     transport.CodeUnknownHost,
 			Message:  "unknown host",
 		},
 	}}
@@ -332,7 +332,7 @@ func TestFalhaDeConexaoPreservaODiagnosticoDoTransporte(t *testing.T) {
 
 	env := envelopeDe(t, out)
 	require.False(t, env.OK)
-	require.Equal(t, transport.CodigoHostDesconhecido, env.Diagnostics[0].Code)
+	require.Equal(t, transport.CodeUnknownHost, env.Diagnostics[0].Code)
 	require.Empty(t, env.Meta.Target, "an unconfirmed target cannot be estimated")
 }
 
@@ -455,7 +455,7 @@ func TestCodigosDeDiagnosticoSeguemOFormato(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
-			Code:     transport.CodigoAvisoSSHConfig,
+			Code:     transport.CodeSSHConfigWarning,
 			Message:  "warning",
 		}},
 	}
@@ -490,6 +490,6 @@ func TestCaminhoSSHConfigIndisponivelViraAvisoENaoErro(t *testing.T) {
 	}
 	require.Empty(t, caminho)
 	require.Equal(t, output.SeverityWarning, diag.Severity)
-	require.Equal(t, transport.CodigoAvisoSSHConfig, diag.Code)
+	require.Equal(t, transport.CodeSSHConfigWarning, diag.Code)
 	require.True(t, strings.HasPrefix(diag.Code, "NGX-"))
 }

@@ -40,20 +40,20 @@ import (
 // Severity never goes into the code: the Diagnostic already has a severity
 // field, and repeating it in the prefix would create two sources of truth.
 const (
-	// CodigoNginxAusente: there is no nginx binary on the target, or it is
+	// CodeNginxMissing: there is no nginx binary on the target, or it is
 	// not executable. Distinct from "nginx ran and rejected".
-	CodigoNginxAusente = "NGX-0220"
+	CodeNginxMissing = "NGX-0220"
 
-	// CodigoPrivilegioNecessario: the command exists and ran, but nginx
+	// CodePrivilegeRequired: the command exists and ran, but nginx
 	// could not read what it needed for lack of permission. Without --sudo
 	// ngx reports and stops -- it does not retry the command with sudo
 	// (DR5).
-	CodigoPrivilegioNecessario = "NGX-0221"
+	CodePrivilegeRequired = "NGX-0221"
 
-	// CodigoSudoIndisponivel: --sudo was requested, but the target's sudo
+	// CodeSudoUnavailable: --sudo was requested, but the target's sudo
 	// requires a password, requires a terminal or does not exist. Since ngx
 	// runs with no shell and no TTY, there is nowhere to send the password.
-	CodigoSudoIndisponivel = "NGX-0222"
+	CodeSudoUnavailable = "NGX-0222"
 
 	// CodigoSaidaNaoReconhecida: the command ran, but the output does not
 	// have the expected format. Inventing fields out of output that was not
@@ -65,17 +65,17 @@ const (
 	// severity, it does not become a code.
 	CodigoTesteConfig = "NGX-0224"
 
-	// CodigoEstadoProcesso: something about the state of the process -- the
+	// CodeProcessState: something about the state of the process -- the
 	// evidence that it is not running, or the reason why it could not be
 	// determined. An omitted field without this diagnostic alongside it
 	// would be degrading in silence.
-	CodigoEstadoProcesso = "NGX-0225"
+	CodeProcessState = "NGX-0225"
 )
 
-// BinarioPadrao is what ngx executes when nobody says otherwise. A plain
+// DefaultBinary is what ngx executes when nobody says otherwise. A plain
 // name, resolved by the target's PATH: an absolute path guessed here would be
 // wrong on half of the distributions.
-const BinarioPadrao = "nginx"
+const DefaultBinary = "nginx"
 
 // Runtime executes the nginx of a target through a Transport.
 type Runtime struct {
@@ -84,12 +84,12 @@ type Runtime struct {
 	sudo   bool
 }
 
-// Opcao configures a Runtime at construction time.
-type Opcao func(*Runtime)
+// Option configures a Runtime at construction time.
+type Option func(*Runtime)
 
-// ComBinario swaps the invoked binary. Useful when nginx is not on the
+// WithBinary swaps the invoked binary. Useful when nginx is not on the
 // target's PATH or when there is more than one installation.
-func ComBinario(path string) Opcao {
+func WithBinary(path string) Option {
 	return func(r *Runtime) {
 		if path != "" {
 			r.binary = path
@@ -97,24 +97,24 @@ func ComBinario(path string) Opcao {
 	}
 }
 
-// ComSudo turns on the explicit privilege escalation (DR5). Without it, a
+// WithSudo turns on the explicit privilege escalation (DR5). Without it, a
 // command that needs privilege is reported, never retried with sudo.
-func ComSudo(enabled bool) Opcao {
+func WithSudo(enabled bool) Option {
 	return func(r *Runtime) { r.sudo = enabled }
 }
 
 // New assembles the runtime on top of a transport.
-func New(tr transport.Transport, opts ...Opcao) *Runtime {
-	r := &Runtime{tr: tr, binary: BinarioPadrao}
+func New(tr transport.Transport, opts ...Option) *Runtime {
+	r := &Runtime{tr: tr, binary: DefaultBinary}
 	for _, o := range opts {
 		o(r)
 	}
 	return r
 }
 
-// Alvo identifies what this runtime operates against, for the envelope's
+// Target identifies what this runtime operates against, for the envelope's
 // meta.
-func (r *Runtime) Alvo() string { return r.tr.Describe() }
+func (r *Runtime) Target() string { return r.tr.Describe() }
 
 // argv assembles the command line. No shell, no interpolation: each argument
 // is one element of the list.
@@ -285,7 +285,7 @@ func privilegeError(r *Runtime, e *execution) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoPrivilegioNecessario,
+			Code:     CodePrivilegeRequired,
 			Message:  msg,
 		},
 	}
@@ -296,7 +296,7 @@ func sudoUnavailableError(r *Runtime, e *execution) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoSudoIndisponivel,
+			Code:     CodeSudoUnavailable,
 			Message: fmt.Sprintf(
 				"--sudo was requested, but the sudo on %s cannot be used without interaction: %s. "+
 					"ngx runs with no shell and no terminal, so there is nowhere to type a password; "+
@@ -312,7 +312,7 @@ func nginxMissingError(r *Runtime, e *execution, cause error) error {
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoNginxAusente,
+			Code:     CodeNginxMissing,
 			Message: fmt.Sprintf(
 				"there is no executable nginx on %s: `%s` cannot be executed. "+
 					"If the binary exists under another name or outside the PATH, give the path",

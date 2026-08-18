@@ -1,10 +1,10 @@
-# ngx v0.1 — Plano 1: Fundação e Árvore
+# ngx v0.1 — Plan 1: Foundation and Tree
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Construir a fundação do `ngx` — envelope JSON, exit codes, redação, configuração — e a árvore canônica de configuração nginx com spans de byte, IDs estáveis e hash, entregando o comando `ngx inspect` funcionando ponta a ponta.
+**Goal:** Build the `ngx` foundation — JSON envelope, exit codes, redaction, configuration — and the canonical nginx configuration tree with byte spans, stable IDs and hashing, delivering the `ngx inspect` command working end-to-end.
 
-**Architecture:** `nginx-go-crossplane` fornece a árvore semântica e a validação de diretivas; um tokenizador próprio fornece os offsets de byte; as duas estruturas são casadas por sequência de tokens em ordem de documento. A camada `output` é a única que serializa e a única que decide exit code; comandos devolvem valores tipados e erros tipados.
+**Architecture:** `nginx-go-crossplane` provides the semantic tree and directive validation; a proprietary tokenizer provides byte offsets; the two structures are matched by sequence of tokens in document order. The `output` layer is the only one that serializes and the only one that decides the exit code; commands return typed values and typed errors.
 
 **Tech Stack:** Go 1.25, `nginx-go-crossplane`, `cobra`, `koanf/v2`, `testify`.
 
@@ -12,39 +12,37 @@
 
 ## Global Constraints
 
-- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25 (`.tool-versions` já fixa `golang 1.25.9`).
-- **Zero CGO.** Nenhuma dependência que exija cgo.
-- Licença MIT em nome de Eduardo Benck. Sem qualquer menção, branding ou copyright da SEA Tecnologia.
-- **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`, sem "Generated with". Autoria exclusiva do Eduardo.
-- Nenhum `exec` de shell. Toda invocação externa usa `exec.Command` com argv explícito.
-- Todo campo JSON de lista serializa como `[]`, nunca `null` — um agente que faz `.length` numa lista nula quebra.
-- Campo desconhecido ou indisponível é **omitido**, nunca estimado ou preenchido com valor falso.
-- Comentários de código em português, como o resto do projeto.
+- MIT License in the name of Eduardo Benck. Every external invocation uses `exec.Command` with explicit argv.
+Without any mention, branding or copyright of SEA Tecnologia.
+- Every JSON list field serializes as `[]`, never `null` — an agent that does `.length` on a null list breaks it.
+- Go module: `github.com/s0beran0/ngx`. - Unknown or unavailable field is **omitted**, never estimated or filled in with a false value.
+- **Commit messages never mention Claude or IA.** No `Co-Authored-By` trailer, no "Generated with". Go 1.25 (`.tool-versions` already fixes `golang 1.25.9`).
+- Code comments in Portuguese, like the rest of the project.Exclusive authorship by Eduardo.
+- **Zero CGO.** No dependencies that require cgo.
+- No shell `exec`. 
 
 ---
 
-### Task 1: Bootstrap do módulo e envelope de saída
+### Task 1: Module bootstrap and output envelope
 
-**Files:**
+- Test: `internal/output/envelope_test.go`**Files:**
 - Create: `go.mod`, `LICENSE`, `internal/output/envelope.go`
-- Test: `internal/output/envelope_test.go`
 
-**Interfaces:**
-- Consumes: nada (primeira tarefa)
-- Produces: `output.Envelope`, `output.Diagnostic`, `output.Meta`, `output.Severity`, `output.New(command string) *Envelope`, `(*Envelope).AddDiagnostic(Diagnostic)`, `output.Version`
+- Produces: `output.Envelope`, `output.Diagnostic`, `output.Meta`, `output.Severity`, `output.New(command string) *Envelope`, `(*Envelope).AddDiagnostic(Diagnostic)`, `output.Version`**Interfaces:**
+- Consumptions: nothing (first task)
 
-- [ ] **Step 1: Inicializar o módulo e a licença**
+- [ ] **Step 1: Initialize the module and license**
 
 ```bash
 go mod init github.com/s0beran0/ngx
 go get github.com/stretchr/testify@latest
 ```
 
-Criar `LICENSE` com o texto padrão MIT, `Copyright (c) 2026 Eduardo Benck`.
+Create `LICENSE` with the default text MIT, `Copyright (c) 2026 Eduardo Benck`.
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/output/envelope_test.go`:
+Create `internal/output/envelope_test.go`:
 
 ```go
 package output_test
@@ -107,14 +105,14 @@ func TestDiagnosticOmiteCamposVazios(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/output/ -run TestEnvelope -v`
-Expected: FAIL — o pacote `internal/output` não existe ainda.
+Expected: FAIL — package `internal/output` does not exist yet.
 
-- [ ] **Step 4: Escrever a implementação mínima**
+- [ ] **Step 4: Write the minimum implementation**
 
-Criar `internal/output/envelope.go`:
+Create `internal/output/envelope.go`:
 
 ```go
 // Package output define o envelope de saida do ngx, os diagnosticos e a
@@ -185,10 +183,10 @@ func (e *Envelope) AddDiagnostic(d Diagnostic) {
 }
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/output/ -v`
-Expected: PASS — 4 testes.
+Expected: PASS — 4 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -199,19 +197,18 @@ git commit -m "feat(output): envelope de saida e diagnosticos"
 
 ---
 
-### Task 2: Erros tipados e exit codes
+### Task 2: Typed errors and exit codes
 
-**Files:**
+- Test: `internal/output/errors_test.go`**Files:**
 - Create: `internal/output/errors.go`
-- Test: `internal/output/errors_test.go`
 
 **Interfaces:**
 - Consumes: `output.Diagnostic`, `output.SeverityError` (Task 1)
-- Produces: `output.ExitCode` e as constantes `ExitOK`/`ExitInternal`/`ExitUsage`/`ExitInvalidConfig`/`ExitDrift`/`ExitHashMismatch`; `output.Error` com campos `Code`/`Diag`/`Err`; construtores `output.Usage`, `output.Internal`, `output.InvalidConfig`, `output.Drift`, `output.HashMismatch`; `output.CodeOf(error) ExitCode`
+- Produces: `output.ExitCode` and the constants `ExitOK`/`ExitInternal`/`ExitUsage`/`ExitInvalidConfig`/`ExitDrift`/`ExitHashMismatch`; `output.Error` with fields `Code`/`Diag`/`Err`; constructors `output.Usage`, `output.Internal`, `output.InvalidConfig`, `output.Drift`, `output.HashMismatch`; `output.CodeOf(error) ExitCode`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/output/errors_test.go`:
+Create `internal/output/errors test.go`:
 
 ```go
 package output_test
@@ -283,14 +280,14 @@ func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
-Run: `go test ./internal/output/ -run "TestCodeOf|TestConstrutores|TestErro|TestHashMismatch" -v`
+Run: `go test ./internal/output/ -run "TestCodeOf|TestConstructors|TestErro|TestHashMismatch" -v`
 Expected: FAIL — `undefined: output.ExitOK`, `undefined: output.CodeOf` etc.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/output/errors.go`:
+Create `internal/output/errors.go`:
 
 ```go
 package output
@@ -384,10 +381,10 @@ func CodeOf(err error) ExitCode {
 }
 ```
 
-- [ ] **Step 4: Rodar os testes para verificar que passam**
+- [ ] **Step 4: Run the tests to check that they pass**
 
 Run: `go test ./internal/output/ -v`
-Expected: PASS — todos os testes de Task 1 e Task 2.
+Expected: PASS — all Task 1 and Task 2 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -398,19 +395,18 @@ git commit -m "feat(output): erros tipados carregando exit code"
 
 ---
 
-### Task 3: Redação de valores sensíveis
+### Task 3: Writing sensitive values
 
-**Files:**
+- Test: `internal/output/redact_test.go`**Files:**
 - Create: `internal/output/redact.go`
-- Test: `internal/output/redact_test.go`
 
 **Interfaces:**
-- Consumes: nada de tasks anteriores
-- Produces: `output.RedactRule` com `Matches(directive string, args []string) bool`; `output.RedactSet` com `Matches(directive string, args []string) bool` e `Empty() bool`; `output.ParseRedactRule(string) (RedactRule, error)`; `output.NewRedactSet([]string) (RedactSet, error)`; `output.RedactedValue` (a constante `"***"`); a interface `output.Redactable { Redacted(RedactSet) any }`
+- Consumptions: no previous tasks
+- Produces: `output.RedactRule` with `Matches(directive string, args []string) bool`; `output.RedactSet` with `Matches(directive string, args []string) bool` and `Empty() bool`; `output.ParseRedactRule(string) (RedactRule, error)`; `output.NewRedactSet([]string) (RedactSet, error)`; `output.RedactedValue` (the constant `"***"`); the interface `output.Redactable { Redacted(RedactSet) any }`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/output/redact_test.go`:
+Create `internal/output/redact_test.go`:
 
 ```go
 package output_test
@@ -496,14 +492,14 @@ func TestNewRedactSetPropagaRegraInvalida(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
 Run: `go test ./internal/output/ -run Redact -v`
 Expected: FAIL — `undefined: output.ParseRedactRule`.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/output/redact.go`:
+Create `internal/output/redact.go`:
 
 ```go
 package output
@@ -601,7 +597,7 @@ func (s RedactSet) Matches(directive string, args []string) bool {
 }
 ```
 
-- [ ] **Step 4: Rodar os testes para verificar que passam**
+- [ ] **Step 4: Run the tests to check that they pass**
 
 Run: `go test ./internal/output/ -v`
 Expected: PASS.
@@ -615,19 +611,18 @@ git commit -m "feat(output): redacao de valores sensiveis"
 
 ---
 
-### Task 4: Renderers e o portão de `--no-redact`
+### Task 4: Renderers and the `--no-redact` gate
 
-**Files:**
+- Test: `internal/output/render_test.go`**Files:**
 - Create: `internal/output/render.go`
-- Test: `internal/output/render_test.go`
 
 **Interfaces:**
 - Consumes: `output.Envelope` (Task 1), `output.Usage` (Task 2), `output.RedactSet`, `output.Redactable` (Task 3)
-- Produces: `output.Format` com `FormatAuto`/`FormatJSON`/`FormatHuman`; `output.Renderer` com campos `Out`, `Format`, `IsTTY`, `Redact`, `NoRedact`, `Quiet` e método `Render(*Envelope) error`; a interface `output.HumanRenderable { RenderHuman(io.Writer) error }`
+- Produces: `output.Format` with `FormatAuto`/`FormatJSON`/`FormatHuman`; `output.Renderer` with fields `Out`, `Format`, `IsTTY`, `Redact`, `NoRedact`, `Quiet` and method `Render(*Envelope) error`; the interface `output.HumanRenderable { RenderHuman(io.Writer) error }`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/output/render_test.go`:
+Create `internal/output/render_test.go`:
 
 ```go
 package output_test
@@ -747,14 +742,14 @@ func TestQuietSuprimeSucessoMasNaoErro(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
 Run: `go test ./internal/output/ -run "TestFormat|TestNoRedact|TestRender|TestQuiet" -v`
 Expected: FAIL — `undefined: output.Renderer`.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/output/render.go`:
+Create `internal/output/render.go`:
 
 ```go
 package output
@@ -868,7 +863,7 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 }
 ```
 
-- [ ] **Step 4: Rodar os testes para verificar que passam**
+- [ ] **Step 4: Run the tests to check that they pass**
 
 Run: `go test ./internal/output/ -v`
 Expected: PASS.
@@ -882,17 +877,16 @@ git commit -m "feat(output): renderers json e humano com portao de --no-redact"
 
 ---
 
-### Task 5: Arquivo de configuração do ngx
+### Task 5: ngx configuration file
 
-**Files:**
+- Test: `internal/settings/settings_test.go`**Files:**
 - Create: `internal/settings/settings.go`
-- Test: `internal/settings/settings_test.go`
 
 **Interfaces:**
-- Consumes: nada de tasks anteriores
-- Produces: `settings.Settings` com `Nginx settings.Nginx` (campos `Binary`, `Config`) e `Output settings.Output` (campos `Format`, `Redact []string`); `settings.Load(globalPath, localPath string) (*Settings, error)`; `settings.Defaults() *Settings`
+- Consumptions: no previous tasks
+- Produces: `settings.Settings` with `Nginx settings.Nginx` (fields `Binary`, `Config`) and `Output settings.Output` (fields `Format`, `Redact []string`); `settings.Load(globalPath, localPath string) (*Settings, error)`; `settings.Defaults() *Settings`
 
-- [ ] **Step 1: Instalar as dependências**
+- [ ] **Step 1: Install dependencies**
 
 ```bash
 go get github.com/knadh/koanf/v2@latest
@@ -900,9 +894,9 @@ go get github.com/knadh/koanf/providers/file@latest
 go get github.com/knadh/koanf/parsers/yaml@latest
 ```
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/settings/settings_test.go`:
+Create `internal/settings/settings test.go`:
 
 ```go
 package settings_test
@@ -1026,14 +1020,14 @@ output:
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/settings/ -v`
-Expected: FAIL — o pacote não existe.
+Expected: FAIL — package does not exist.
 
-- [ ] **Step 4: Escrever a implementação mínima**
+- [ ] **Step 4: Write the minimum implementation**
 
-Criar `internal/settings/settings.go`:
+Create `internal/settings/settings.go`:
 
 ```go
 // Package settings carrega o arquivo de configuracao do proprio ngx.
@@ -1111,12 +1105,12 @@ func Load(globalPath, localPath string) (*Settings, error) {
 }
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/settings/ -v`
-Expected: PASS — 6 testes.
+Expected: PASS — 6 tests.
 
-> Se `TestRedactDeclaradoSubstituiODefault` falhar porque o koanf concatenou as listas em vez de substituir, a correção é limpar `s.Output.Redact` antes do `Unmarshal` quando `k.Exists("output.redact")` for verdadeiro, e só então restaurar o default se a chave não existir. Faça essa correção dentro deste passo; não altere o teste.
+> If `TestRedactDeclaradoSubstituiODefault` fails because the koanf concatenated the lists instead of replacing, the fix is to clear `s.Output.Redact` before `Unmarshal` when `k.Exists("output.redact")` is true, and only then restore the default if the key does not exist. Make this correction within this step; do not change the test.
 
 - [ ] **Step 6: Commit**
 
@@ -1127,25 +1121,24 @@ git commit -m "feat(settings): carregamento do arquivo de configuracao do ngx"
 
 ---
 
-### Task 6: CLI root e tradução de exit code
+### Task 6: CLI root and exit code translation
 
-**Files:**
+- Test: `internal/cli/root_test.go`**Files:**
 - Create: `cmd/ngx/main.go`, `internal/cli/root.go`
-- Test: `internal/cli/root_test.go`
 
 **Interfaces:**
 - Consumes: `output.Renderer`, `output.Format`, `output.CodeOf`, `output.New`, `output.Usage`, `output.NewRedactSet` (Tasks 1–4); `settings.Load`, `settings.Settings` (Task 5)
-- Produces: `cli.GlobalFlags` com campos `ConfigPath`, `JSON`, `Human`, `Quiet`, `NoColor`, `NginxBin`, `NginxVersion`, `Timeout`, `Profile`, `NoRedact`; `cli.Context` com campos `Flags *GlobalFlags`, `Settings *settings.Settings`, `Renderer *output.Renderer`; `cli.Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCode`; `cli.NewRoot(ctx *Context) *cobra.Command`
+- Produces: `cli.GlobalFlags` with fields `ConfigPath`, `JSON`, `Human`, `Quiet`, `NoColor`, `NginxBin`, `NginxVersion`, `Timeout`, `Profile`, `NoRedact`; `cli.Context` with fields `Flags *GlobalFlags`, `Settings *settings.Settings`, `Renderer *output.Renderer`; `cli.Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCode`; `cli.NewRoot(ctx *Context) *cobra.Command`
 
-- [ ] **Step 1: Instalar o cobra**
+- [ ] **Step 1: Install cobra**
 
 ```bash
 go get github.com/spf13/cobra@latest
 ```
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/cli/root_test.go`:
+Create `internal/cli/root_test.go`:
 
 ```go
 package cli_test
@@ -1215,14 +1208,14 @@ func TestErroDeExecucaoSaiNoEnvelope(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/cli/ -v`
-Expected: FAIL — o pacote não existe.
+Expected: FAIL — package does not exist.
 
-- [ ] **Step 4: Escrever a implementação mínima**
+- [ ] **Step 4: Write the minimum implementation**
 
-Criar `internal/cli/root.go`:
+Create `internal/cli/root.go`:
 
 ```go
 // Package cli monta a arvore de comandos. Comandos produzem valores e erros
@@ -1400,7 +1393,7 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 }
 ```
 
-Criar `internal/cli/errors.go`:
+Create `internal/cli/errors.go`:
 
 ```go
 package cli
@@ -1427,7 +1420,7 @@ func comandoDe(ctx *Context) string {
 }
 ```
 
-Criar `cmd/ngx/main.go`:
+Create `cmd/ngx/main.go`:
 
 ```go
 // Command ngx e o ponto de entrada. A unica responsabilidade aqui e o wiring
@@ -1452,12 +1445,12 @@ func main() {
 go get golang.org/x/term@latest
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./... -v`
-Expected: PASS em `internal/output`, `internal/settings` e `internal/cli`.
+Expected: PASS in `internal/output`, `internal/settings` and `internal/cli`.
 
-- [ ] **Step 6: Verificar o binário à mão**
+- [ ] **Step 6: Check torque by hand**
 
 ```bash
 go build -o /tmp/ngx ./cmd/ngx
@@ -1465,7 +1458,7 @@ go build -o /tmp/ngx ./cmd/ngx
 /tmp/ngx --json --human version; echo "exit=$?"
 ```
 
-Expected: a primeira linha é um envelope JSON com `"command":"version"`; a segunda imprime um envelope com `NGX-0002` e `exit=2`.
+Expected: the first line is a JSON envelope with `"command":"version"`; the second prints an envelope with `NGX-0002` and `exit=2`.
 
 - [ ] **Step 7: Commit**
 
@@ -1476,23 +1469,22 @@ git commit -m "feat(cli): comando raiz, flags globais e traducao de exit code"
 
 ---
 
-### Task 7: A árvore e o parse via crossplane
+### Task 7: The tree and parse via crossplane
 
-**Files:**
+- Test: `internal/config/parse_test.go`, `internal/config/testdata/simples.conf`**Files:**
 - Create: `internal/config/node.go`, `internal/config/parse.go`
-- Test: `internal/config/parse_test.go`, `internal/config/testdata/simples.conf`
 
 **Interfaces:**
 - Consumes: `output.RedactSet`, `output.Redactable`, `output.RedactedValue` (Task 3)
-- Produces: `config.Span` (`Start`, `End`), `config.Origin` (`File`, `Line`), `config.Node` (campos conforme §4.1 da spec), `config.File` (`Path string`, `Source []byte`, `Nodes []*Node`), `config.Tree` (`Files []*File`, `Hash string`), `config.ParseOptions` (`Path string`, `Open func(string) (io.ReadCloser, error)`), `config.Parse(ParseOptions) (*Tree, error)`, `(*Node).IsComment() bool`, `(*Node).HasBlock() bool`, `(*Tree).Walk(func(*Node) bool)`
+- Produces: `config.Span` (`Start`, `End`), `config.Origin` (`File`, `Line`), `config.Node` (fields as per §4.1 of the spec), `config.File` (`Path string`, `Source []byte`, `Nodes []*Node`), `config.Tree` (`Files []*File`, `Hash string`), `config.ParseOptions` (`Path string`, `Open func(string) (io.ReadCloser, error)`), `config.Parse(ParseOptions) (*Tree, error)`, `(*Node).IsComment() bool`, `(*Node).HasBlock() bool`, `(*Tree).Walk(func(*Node) bool)`
 
-- [ ] **Step 1: Instalar o crossplane e criar a fixture**
+- [ ] **Step 1: Install the crossplane and create the fixture**
 
 ```bash
 go get github.com/nginxinc/nginx-go-crossplane@latest
 ```
 
-Criar `internal/config/testdata/simples.conf`:
+Create `internal/config/testdata/simples.conf`:
 
 ```nginx
 # configuracao de exemplo
@@ -1527,9 +1519,9 @@ http {
 }
 ```
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/config/parse_test.go`:
+Create `internal/config/parse_test.go`:
 
 ```go
 package config_test
@@ -1643,14 +1635,14 @@ func TestArvoreEmMemoriaNaoEhRedigida(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/config/ -v`
-Expected: FAIL — o pacote não existe.
+Expected: FAIL — package does not exist.
 
-- [ ] **Step 4: Escrever o modelo de dados**
+- [ ] **Step 4: Write the data model**
 
-Criar `internal/config/node.go`:
+Create `internal/config/node.go`:
 
 ```go
 // Package config e a representacao canonica da configuracao do nginx: a
@@ -1734,9 +1726,9 @@ func walkNodes(nodes []*Node, fn func(*Node) bool) {
 }
 ```
 
-- [ ] **Step 5: Escrever o parse**
+- [ ] **Step 5: Write the parse**
 
-Criar `internal/config/parse.go`:
+Create `internal/config/parse.go`:
 
 ```go
 package config
@@ -1833,12 +1825,12 @@ func converterDirectives(ds crossplane.Directives, file string) []*Node {
 }
 ```
 
-- [ ] **Step 6: Rodar os testes para verificar que passam**
+- [ ] **Step 6: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS — 6 testes.
+Expected: PASS — 6 tests.
 
-> `temBloco` vem de `d.Block != nil`. Se o crossplane devolver uma slice vazia não-nil para blocos vazios e nil para diretivas simples, isso já está correto. Se devolver nil para os dois, `TestParseMonstaBlocosAninhados` ainda passa (os blocos do fixture não são vazios), mas o Task 9 corrigirá a detecção usando o próximo token. Não invente um teste de bloco vazio aqui.
+> `hasBlock` comes from `d.Block != nil`. If the crossplane returns a non-nil empty slice for empty blocks and nil for simple directives, this is already correct. If you return nil for both, `TestParseMonstaBlocosAninhados` still passes (the fixture blocks are not empty), but Task 9 will correct the detection using the next token. Don't invent an empty block test here.
 
 - [ ] **Step 7: Commit**
 
@@ -1849,19 +1841,18 @@ git commit -m "feat(config): arvore canonica e parse via crossplane"
 
 ---
 
-### Task 8: Tokenizador com offsets de byte
+### Task 8: Tokenizer with byte offsets
 
-**Files:**
+- Test: `internal/config/tokens_test.go`, `internal/config/fuzz_test.go`**Files:**
 - Create: `internal/config/tokens.go`
-- Test: `internal/config/tokens_test.go`, `internal/config/fuzz_test.go`
 
 **Interfaces:**
-- Consumes: nada de tasks anteriores
-- Produces: `config.TokenKind` com `TokenWord`/`TokenSemicolon`/`TokenBlockStart`/`TokenBlockEnd`/`TokenComment`; `config.Token` (`Kind`, `Value`, `Raw`, `Start`, `End`, `Line`, `Column`, `Quoted`); `config.Tokenize(src []byte) ([]Token, error)`
+- Consumptions: no previous tasks
+- Produces: `config.TokenKind` with `TokenWord`/`TokenSemicolon`/`TokenBlockStart`/`TokenBlockEnd`/`TokenComment`; `config.Token` (`Kind`, `Value`, `Raw`, `Start`, `End`, `Line`, `Column`, `Quoted`); `config.Tokenize(src []byte) ([]Token, error)`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/config/tokens_test.go`:
+Create `internal/config/tokens_test.go`:
 
 ```go
 package config_test
@@ -2003,7 +1994,7 @@ func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 }
 ```
 
-Criar `internal/config/fuzz_test.go`:
+Create `internal/config/fuzz_test.go`:
 
 ```go
 package config_test
@@ -2050,14 +2041,14 @@ func FuzzTokenizeSpans(f *testing.F) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
 Run: `go test ./internal/config/ -run Token -v`
 Expected: FAIL — `undefined: config.Tokenize`.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/config/tokens.go`:
+Create `internal/config/tokens.go`:
 
 ```go
 package config
@@ -2220,15 +2211,15 @@ func ehEspaco(c byte) bool {
 }
 ```
 
-- [ ] **Step 4: Rodar os testes para verificar que passam**
+- [ ] **Step 4: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS — 9 testes de token mais os 6 de parse.
+Expected: PASS — 9 token tests plus 6 parse tests.
 
-- [ ] **Step 5: Rodar o fuzz por 30 segundos**
+- [ ] **Step 5: Run the fuzz for 30 seconds**
 
 Run: `go test ./internal/config/ -run FuzzTokenizeSpans -fuzz FuzzTokenizeSpans -fuzztime 30s`
-Expected: `elapsed: 30s` sem falhas. Se o fuzz encontrar um caso, ele grava em `testdata/fuzz/`; corrija o tokenizador e mantenha o caso como regressão.
+Expected: `elapsed: 30s` without fail. If fuzz finds a case, it writes to `testdata/fuzz/`; fix the tokenizer and keep the case as regression.
 
 - [ ] **Step 6: Commit**
 
@@ -2239,20 +2230,20 @@ git commit -m "feat(config): tokenizador com offsets de byte"
 
 ---
 
-### Task 9: Alinhamento token↔árvore
+### Task 9: Token↔tree alignment
 
 **Files:**
 - Create: `internal/config/align.go`
-- Modify: `internal/config/parse.go` — chamar o alinhamento ao final de `Parse`
+- Modify: `internal/config/parse.go` — call the alignment at the end of `Parse`
 - Test: `internal/config/align_test.go`
 
 **Interfaces:**
-- Consumes: `config.Node`, `config.File`, `config.Tree`, `config.Span` (Task 7); `config.Token`, `config.Tokenize` (Task 8)
-- Produces: `config.alinhar(f *File) error` (não exportada; chamada por `Parse`). Após o Task 9, todo `*Node` devolvido por `Parse` tem `Span`, `HeadSpan`, `Line` e `Column` preenchidos, e `HasBlock()` reflete a presença real de `{`.
+- Consumptions: `config.Node`, `config.File`, `config.Tree`, `config.Span` (Task 7); `config.Token`, `config.Tokenize` (Task 8)
+- Produces: `config.alinhar(f *File) error` (not exported; called by `Parse`). After Task 9, every `*Node` returned by `Parse` has `Span`, `HeadSpan`, `Line` and `Column` populated, and `HasBlock()` reflects the actual presence of `{`.
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/config/align_test.go`:
+Create `internal/config/align_test.go`:
 
 ```go
 package config_test
@@ -2425,14 +2416,14 @@ func TestBlocoVazioEhReconhecido(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
-Run: `go test ./internal/config/ -run "TestHeadSpan|TestSpan|TestLinha|TestAlinhamento|TestBloco" -v`
-Expected: FAIL — os spans estão todos zerados.
+Run: `go test ./internal/config/ -run "TestHeadSpan|TestSpan|TestLine|TestAlignment|TestBlock" -v`
+Expected: FAIL — spans are all reset.
 
-- [ ] **Step 3: Escrever o alinhamento**
+- [ ] **Step 3: Write the alignment**
 
-Criar `internal/config/align.go`:
+Create `internal/config/align.go`:
 
 ```go
 package config
@@ -2561,9 +2552,9 @@ func (a *aligner) consumir(kind TokenKind) (Token, error) {
 }
 ```
 
-- [ ] **Step 4: Chamar o alinhamento no parse**
+- [ ] **Step 4: Call the alignment in parse**
 
-Em `internal/config/parse.go`, dentro do laço sobre `payload.Config`, substituir o bloco que monta o `File` por:
+In `internal/config/parse.go`, inside the loop over `payload.Config`, replace the block that assembles the `File` with:
 
 ```go
 		arquivo := &File{
@@ -2577,14 +2568,14 @@ Em `internal/config/parse.go`, dentro do laço sobre `payload.Config`, substitui
 		tree.Files = append(tree.Files, arquivo)
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS — todos, incluindo os 8 novos de alinhamento.
+Expected: PASS — all, including the 8 new lineup.
 
-- [ ] **Step 6: Rodar o fuzz do alinhamento**
+- [ ] **Step 6: Run the alignment fuzz**
 
-Adicionar em `internal/config/fuzz_test.go`:
+Add to `internal/config/fuzz_test.go`:
 
 ```go
 // Alinhar nunca pode entrar em panico nem produzir span fora dos limites,
@@ -2623,10 +2614,10 @@ func FuzzAlinhamento(f *testing.F) {
 }
 ```
 
-Adicionar os imports `os` e `path/filepath` ao arquivo de fuzz.
+Add the imports `os` and `path/filepath` to the fuzz file.
 
-Run: `go test ./internal/config/ -run FuzzAlinhamento -fuzz FuzzAlinhamento -fuzztime 60s`
-Expected: sem falhas. Casos encontrados ficam em `testdata/fuzz/` como regressão — commite-os.
+Run: `go test ./internal/config/ -run FuzzAlignment -fuzz FuzzAlignment -fuzztime 60s`
+Expected: flawless. Cases found are in `testdata/fuzz/` as regression — commit them.
 
 - [ ] **Step 7: Commit**
 
@@ -2637,20 +2628,20 @@ git commit -m "feat(config): alinhamento token-arvore com spans de byte"
 
 ---
 
-### Task 10: IDs estáveis
+### Task 10: Stable IDs
 
 **Files:**
 - Create: `internal/config/ids.go`
-- Modify: `internal/config/parse.go` — atribuir IDs após o alinhamento
+- Modify: `internal/config/parse.go` — assign IDs after alignment
 - Test: `internal/config/ids_test.go`
 
 **Interfaces:**
 - Consumes: `config.Node`, `config.Tree` (Task 7)
-- Produces: `config.AtribuirIDs(nodes []*Node, prefixo string)`; `config.FindByID(t *Tree, id string) *Node`
+- Produces: `config.AtribuirIDs(nodes []*Node, prefix string)`; `config.FindByID(t *Tree, id string) *Node`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/config/ids_test.go`:
+Create `internal/config/ids_test.go`:
 
 ```go
 package config_test
@@ -2794,14 +2785,14 @@ func TestFindByIDDevolveNilQuandoNaoAcha(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
-Run: `go test ./internal/config/ -run "TestBlocos|TestServers|TestIndice|TestDiretivas|TestComentarios|TestLocations|TestDiretiva|TestFindByID" -v`
-Expected: FAIL — `undefined: config.FindByID`, IDs vazios.
+Run: `go test ./internal/config/ -run "TestBlocos|TestServers|TestIndice|TestDiretivas|TestCommentarios|TestLocations|TestDiretiva|TestFindByID" -v`
+Expected: FAIL — `undefined: config.FindByID`, empty IDs.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/config/ids.go`:
+Create `internal/config/ids.go`:
 
 ```go
 package config
@@ -2906,18 +2897,18 @@ func FindByID(t *Tree, id string) *Node {
 }
 ```
 
-- [ ] **Step 4: Atribuir IDs no parse**
+- [ ] **Step 4: Assign IDs in the parse**
 
-Em `internal/config/parse.go`, logo após `alinhar(arquivo)`:
+In `internal/config/parse.go`, right after `align(file)`:
 
 ```go
 		AtribuirIDs(arquivo.Nodes, "")
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS — 9 testes novos de ID mais todos os anteriores.
+Expected: PASS — 9 new ID tests plus all previous ones.
 
 - [ ] **Step 6: Commit**
 
@@ -2928,20 +2919,19 @@ git commit -m "feat(config): IDs estaveis contados entre irmaos do mesmo tipo"
 
 ---
 
-### Task 11: Hash canônico da configuração
+### Task 11: Configuration canonical hash
 
 **Files:**
 - Create: `internal/config/hash.go`
-- Modify: `internal/config/parse.go` — calcular o hash ao final de `Parse`
+- Modify: `internal/config/parse.go` — calculate the hash at the end of `Parse`
 - Test: `internal/config/hash_test.go`
 
-**Interfaces:**
+- Produces: `config.Hash(t *Tree) string` (returns `"sha256:<hex>"`)**Interfaces:**
 - Consumes: `config.Node`, `config.Tree` (Task 7)
-- Produces: `config.Hash(t *Tree) string` (devolve `"sha256:<hex>"`)
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Write the test that fails**
 
-Criar `internal/config/hash_test.go`:
+Create `internal/config/hash_test.go`:
 
 ```go
 package config_test
@@ -3020,14 +3010,14 @@ func TestDiretivasDiferentesNaoColidem(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Rodar o teste para verificar que falha**
+- [ ] **Step 2: Run the test to verify that it fails**
 
 Run: `go test ./internal/config/ -run TestHash -v`
-Expected: FAIL — `tree.Hash` vazio.
+Expected: FAIL — empty `tree.Hash`.
 
-- [ ] **Step 3: Escrever a implementação mínima**
+- [ ] **Step 3: Write the minimum implementation**
 
-Criar `internal/config/hash.go`:
+Create `internal/config/hash.go`:
 
 ```go
 package config
@@ -3082,20 +3072,20 @@ func escreverCampo(h hash.Hash, s string) {
 }
 ```
 
-- [ ] **Step 4: Calcular o hash no parse**
+- [ ] **Step 4: Calculate the hash in parse**
 
-Em `internal/config/parse.go`, antes do `return tree, nil`:
+In `internal/config/parse.go`, before the `return tree, nil`:
 
 ```go
 	tree.Hash = Hash(tree)
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
 Expected: PASS.
 
-> `TestFormatacaoDiferenteProduzMesmoHash` e `TestComentariosNaoEntramNoHash` usam arquivos em `t.TempDir()` diferentes, e o caminho do arquivo entra no hash via `escreverCampo(h, f.Path)`. Isso fará os dois testes falharem. A correção é usar apenas o **nome base** do arquivo no hash, não o caminho absoluto — o que também é o comportamento certo: mover a configuração de diretório não muda seu significado. Aplique essa correção neste passo; não altere os testes.
+> `TestFormatacaoDiferenteProduzEvenHash` and `TestCommentariosNaoEntramNoHash` use different files in `t.TempDir()`, and the file path enters the hash via `epilarCampo(h, f.Path)`. This will cause both tests to fail. The fix is to only use the **base name** of the file in the hash, not the absolute path — which is also the right behavior: moving the directory configuration doesn't change its meaning. Apply this correction in this step; do not change the tests.
 
 - [ ] **Step 6: Commit**
 
@@ -3106,19 +3096,17 @@ git commit -m "feat(config): hash canonico ancorando os IDs"
 
 ---
 
-### Task 12: Resolução de include com rastreio de origem
+### Task 12: Resolving include with source tracking
 
-**Files:**
+- Test: `internal/config/combine_test.go`, `internal/config/testdata/combine/nginx.conf`, `internal/config/testdata/combine/conf.d/api.conf`**Files:**
 - Create: `internal/config/combine.go`
-- Test: `internal/config/combine_test.go`, `internal/config/testdata/combine/nginx.conf`, `internal/config/testdata/combine/conf.d/api.conf`
 
-**Interfaces:**
+- Produces: `config.Combine(t *Tree) (*Tree, error)` — returns a new tree with a single `File`, where each `include` has been replaced by the included file nodes and each node carries `Origin`**Interfaces:**
 - Consumes: `config.Tree`, `config.File`, `config.Node`, `config.Origin`, `config.AtribuirIDs` (Tasks 7, 10)
-- Produces: `config.Combine(t *Tree) (*Tree, error)` — devolve uma nova árvore com um único `File`, onde cada `include` foi substituído pelos nós dos arquivos incluídos e cada nó carrega `Origin`
 
-- [ ] **Step 1: Criar as fixtures**
+- [ ] **Step 1: Create the fixtures**
 
-Criar `internal/config/testdata/combine/nginx.conf`:
+Create `internal/config/testdata/combine/nginx.conf`:
 
 ```nginx
 events {}
@@ -3133,7 +3121,7 @@ http {
 }
 ```
 
-Criar `internal/config/testdata/combine/conf.d/api.conf`:
+Create `internal/config/testdata/combine/conf.d/api.conf`:
 
 ```nginx
 server {
@@ -3142,9 +3130,9 @@ server {
 }
 ```
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/config/combine_test.go`:
+Create `internal/config/combine_test.go`:
 
 ```go
 package config_test
@@ -3269,14 +3257,14 @@ func TestCombineRecalculaOHash(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/config/ -run Combine -v`
 Expected: FAIL — `undefined: config.Combine`.
 
-- [ ] **Step 4: Escrever a implementação mínima**
+- [ ] **Step 4: Write the minimum implementation**
 
-Criar `internal/config/combine.go`:
+Create `internal/config/combine.go`:
 
 ```go
 package config
@@ -3395,7 +3383,7 @@ func (c *combinador) arquivosDoInclude(n *Node) []*File {
 }
 ```
 
-Criar também, no mesmo arquivo, o casamento de caminho:
+Also create, in the same file, the path matching:
 
 ```go
 // casaInclude decide se um arquivo parseado corresponde ao padrao de um
@@ -3415,14 +3403,14 @@ func casaInclude(caminho, padrao, declaradoEm string) bool {
 }
 ```
 
-Adicionar `"path/filepath"` aos imports.
+Add `"path/filepath"` to imports.
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./internal/config/ -v`
-Expected: PASS — 7 testes de combine mais todos os anteriores.
+Expected: PASS — 7 combine tests plus all of the above.
 
-> `TestCombineRenumeraIDsSobreAEstruturaResolvida` exige que o `server` do arquivo incluído venha **antes** do `server` declarado em `nginx.conf`, porque o `include` aparece antes. Se falhar, o problema é a ordem em `expandir`, não o teste.
+> `TestCombineRenumeraIDsSobreAEstruturaResolvida` requires that the `server` of the included file comes **before** the `server` declared in `nginx.conf`, because `include` appears before. If it fails, the problem is the order in `expand`, not the test.
 
 - [ ] **Step 6: Commit**
 
@@ -3433,20 +3421,20 @@ git commit -m "feat(config): resolucao de include com rastreio de origem"
 
 ---
 
-### Task 13: Comando `inspect`
+### Task 13: `inspect` command
 
 **Files:**
 - Create: `internal/cli/inspect.go`
-- Modify: `internal/cli/root.go` — registrar o comando
-- Test: `internal/cli/inspect_test.go`, `internal/cli/testdata/exemplo.conf`
+- Modify: `internal/cli/root.go` — register the command
+- Test: `internal/cli/inspect_test.go`, `internal/cli/testdata/example.conf`
 
 **Interfaces:**
 - Consumes: `cli.Context`, `cli.NewRoot` (Task 6); `config.Parse`, `config.Combine`, `config.Tree` (Tasks 7–12); `output.New`, `output.Usage`, `output.Internal`, `output.RedactSet`, `output.RedactedValue` (Tasks 1–4)
-- Produces: `cli.InspectData` (`Config []*config.File`, `Summary cli.Summary`); `cli.Summary` (`Files`, `Servers`, `Locations`, `Upstreams int`); método `(InspectData).Redacted(output.RedactSet) any`
+- Produces: `cli.InspectData` (`Config []*config.File`, `Summary cli.Summary`); `cli.Summary` (`Files`, `Servers`, `Locations`, `Upstreams int`); method `(InspectData).Redacted(output.RedactSet) any`
 
-- [ ] **Step 1: Criar a fixture**
+- [ ] **Step 1: Create the fixture**
 
-Criar `internal/cli/testdata/exemplo.conf`:
+Create `internal/cli/testdata/example.conf`:
 
 ```nginx
 events {}
@@ -3472,9 +3460,9 @@ http {
 }
 ```
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Criar `internal/cli/inspect_test.go`:
+Create `internal/cli/inspect_test.go`:
 
 ```go
 package cli_test
@@ -3594,14 +3582,14 @@ func TestInspectCombineResolveIncludes(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Rodar o teste para verificar que falha**
+- [ ] **Step 3: Run the test to verify that it fails**
 
 Run: `go test ./internal/cli/ -run Inspect -v`
-Expected: FAIL — comando `inspect` desconhecido.
+Expected: FAIL — unknown `inspect` command.
 
-- [ ] **Step 4: Escrever a implementação mínima**
+- [ ] **Step 4: Write the minimum implementation**
 
-Criar `internal/cli/inspect.go`:
+Create `internal/cli/inspect.go`:
 
 ```go
 package cli
@@ -3724,21 +3712,21 @@ func resumir(t *config.Tree) Summary {
 }
 ```
 
-Em `internal/cli/root.go`, registrar o comando junto do `version`:
+In `internal/cli/root.go`, register the command with `version`:
 
 ```go
 	root.AddCommand(newVersionCmd(ctx))
 	root.AddCommand(newInspectCmd(ctx))
 ```
 
-- [ ] **Step 5: Rodar os testes para verificar que passam**
+- [ ] **Step 5: Run the tests to check that they pass**
 
 Run: `go test ./... -v`
-Expected: PASS em todos os pacotes.
+Expected: PASS on all packages.
 
-> `TestInspectResumeAConfiguracao` conta `server` como diretiva. A fixture tem `server 10.0.0.1:8080;` **dentro** do upstream, que também se chama `server`. Se o teste contar 2 servers, a correção é contar apenas `server` que abre bloco (`n.HasBlock()`), o que também é o comportamento correto — `server` dentro de `upstream` é outra diretiva. Aplique a correção; não altere o teste.
+> `TestInspectResumeAConfiguracao` counts `server` as directive. The fixture has `server 10.0.0.1:8080;` **inside** the upstream, which is also called `server`. If the test counts 2 servers, the fix is to only count `server` that opens block (`n.HasBlock()`), which is also the correct behavior — `server` inside `upstream` is another directive. Apply the fix; do not change the test.
 
-- [ ] **Step 6: Verificar o binário à mão**
+- [ ] **Step 6: Check torque by hand**
 
 ```bash
 go build -o /tmp/ngx ./cmd/ngx
@@ -3746,7 +3734,7 @@ go build -o /tmp/ngx ./cmd/ngx
 /tmp/ngx inspect -c internal/cli/testdata/exemplo.conf | grep -c 'private/api.key'
 ```
 
-Expected: um envelope JSON com a árvore; o `grep -c` imprime `0`, confirmando que a chave privada não vazou.
+Expected: a JSON envelope with the tree; `grep -c` prints `0`, confirming that the private key was not leaked.
 
 - [ ] **Step 7: Commit**
 
@@ -3757,17 +3745,16 @@ git commit -m "feat(cli): comando inspect"
 
 ---
 
-### Task 14: README, vet e verificação final do plano
+### Task 14: README, vet and final plan check
 
 **Files:**
 - Create: `README.md`, `Makefile`
-- Test: nenhum novo; roda a suíte inteira
+- Test: none new; runs the entire suite
 
-**Interfaces:**
-- Consumes: tudo
-- Produces: `make test`, `make fuzz`, `make build`
+- Produces: `make test`, `make fuzz`, `make build`**Interfaces:**
+- Consumption: everything
 
-- [ ] **Step 1: Criar o Makefile**
+- [ ] **Step 1: Create the Makefile**
 
 ```makefile
 .PHONY: build test vet fuzz clean
@@ -3789,9 +3776,9 @@ clean:
 	rm -rf bin/
 ```
 
-- [ ] **Step 2: Criar o README**
+- [ ] **Step 2: Create the README**
 
-Criar `README.md`:
+Create `README.md`:
 
 ````markdown
 # ngx
@@ -3833,9 +3820,8 @@ padrão antes de sair. `--no-redact` só é aceito quando a saída é um termina
 ## Construindo
 
 ```console
-$ make build      # compila em bin/ngx
-$ make test       # suíte completa com race detector
-$ make fuzz       # fuzzers do tokenizador e do alinhamento
+$ make fuzz # tokenizer and alignment fuzzers$ make build # compiles to bin/ngx
+$ make test # complete suite with race detector
 ```
 
 Requer Go 1.25. O `.tool-versions` fixa a versão para quem usa asdf.
@@ -3850,15 +3836,15 @@ As decisões de arquitetura e o porquê de cada uma estão em
 MIT. Copyright (c) 2026 Eduardo Benck.
 ````
 
-- [ ] **Step 3: Rodar a suíte completa com race detector**
+- [ ] **Step 3: Run the complete suite with race detector**
 
 Run: `make vet && make test`
-Expected: PASS em todos os pacotes, sem avisos do vet.
+Expected: PASS on all packages, without vet warnings.
 
-- [ ] **Step 4: Rodar os fuzzers**
+- [ ] **Step 4: Run the fuzzers**
 
 Run: `make fuzz`
-Expected: sem falhas. Casos novos em `testdata/fuzz/` devem ser commitados como regressão.
+Expected: flawless. New cases in `testdata/fuzz/` must be committed as regression.
 
 - [ ] **Step 5: Commit**
 
@@ -3869,7 +3855,7 @@ git commit -m "chore: makefile e readme"
 
 ---
 
-## Verificação de cobertura da spec
+## Spec coverage check
 
 | Seção da spec | Task |
 |---|---|
@@ -3892,4 +3878,4 @@ git commit -m "chore: makefile e readme"
 | §10 repositório, licença | 1, 14 |
 | §10 CI e goreleaser | **Plano 3** |
 
-**Refinamento de §9 da spec:** a spec descreve a propriedade dos spans como "reconstituem o arquivo byte a byte". A formulação concreta e verificável adotada aqui é mais forte e está em `TestSpansRaizCobremTodoByteSignificativo` mais `TestSpansDeFilhosEstaoContidosNoPai`: todo byte não-branco pertence ao span de algum nó raiz, spans de filhos estão contidos nos dos pais, e irmãos não se sobrepõem. Vale atualizar a spec para essa redação quando o Plano 1 fechar.
+**Refinement of §9 of the spec:** the spec describes the property of spans as "reconstituting the file byte by byte". The concrete and verifiable formulation adopted here is stronger and is in `TestSpansRaizCobremTodoByteSignificativo` plus `TestSpansDeFilhosEstaoContidosNoPai`: every non-white byte belongs to the span of some root node, spans of children are contained in those of parents, and siblings do not overlap. It's worth updating the spec for this wording when Plan 1 closes.

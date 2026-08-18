@@ -42,7 +42,7 @@ const (
 	CodigoArtefatoInvalido   = "NGX-0315"
 )
 
-// ChavePublica is the minisign public key embedded in the binary (DD2/DD3).
+// PublicKey is the minisign public key embedded in the binary (DD2/DD3).
 //
 // WARNING -- PLACEHOLDER: THE REAL PUBLIC KEY DOES NOT EXIST YET.
 //
@@ -58,20 +58,20 @@ const (
 // D2), which does not exist yet; while it does not, the command wiring must
 // assign the value to this variable at initialization. The key is never
 // downloaded at runtime (DD3).
-var ChavePublica = ""
+var PublicKey = ""
 
-// PlaceholderChavePublica is the text that signals "key not generated yet".
+// PublicKeyPlaceholder is the text that signals "key not generated yet".
 // It exists so that a placeholder forgotten somewhere in the build chain
 // fails with a message of its own instead of becoming an obscure parse error.
-const PlaceholderChavePublica = "CHAVE-MINISIGN-PENDENTE-NAO-GERADA"
+const PublicKeyPlaceholder = "CHAVE-MINISIGN-PENDENTE-NAO-GERADA"
 
 // Channel is the update channel. The channels are derived from the semver of
 // the tag (DD1), not from branches: "v0.2.0" is stable, "v0.2.0-rc.1" is a
-// prerelease. EnvCanal is the variable install.sh already uses to pick the
+// prerelease. EnvChannel is the variable install.sh already uses to pick the
 // channel. `ngx update` honors it for the same reason: whoever installed
 // through the beta expects to stay on the beta without repeating the flag on
 // every update.
-const EnvCanal = "NGX_CHANNEL"
+const EnvChannel = "NGX_CHANNEL"
 
 type Channel string
 
@@ -97,58 +97,58 @@ func ParseChannel(s string) (Channel, error) {
 	}
 }
 
-// CanalDoAmbiente reads NGX_CHANNEL. It takes the reading function so it can
+// ChannelFromEnv reads NGX_CHANNEL. It takes the reading function so it can
 // be tested without touching the process environment.
-func CanalDoAmbiente(getenv func(string) string) (Channel, error) {
+func ChannelFromEnv(getenv func(string) string) (Channel, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
 	return ParseChannel(getenv("NGX_CHANNEL"))
 }
 
-// Opcoes describes one update run.
-type Opcoes struct {
-	// Canal is the channel consulted when Versao is empty.
-	Canal Channel
+// Options describes one update run.
+type Options struct {
+	// Channel is the channel consulted when Versao is empty.
+	Channel Channel
 	// Versao, when filled in, installs exactly that version -- including one
 	// older than the current one. It is the only path to a downgrade:
 	// without it, an older release is never applied.
 	Versao string
-	// VersaoAtual is the version of this binary (output.Version).
-	VersaoAtual string
-	// CaminhoBinario is the executable to be replaced. Empty uses
+	// CurrentVersion is the version of this binary (output.Version).
+	CurrentVersion string
+	// BinaryPath is the executable to be replaced. Empty uses
 	// os.Executable().
-	CaminhoBinario string
-	// ChavePublica overrides the embedded key. It exists for testing; in
-	// production it stays empty and the package uses ChavePublica.
-	ChavePublicaOverride string
+	BinaryPath string
+	// PublicKey overrides the embedded key. It exists for testing; in
+	// production it stays empty and the package uses PublicKey.
+	PublicKeyOverride string
 	// Cliente is the GitHub API client. Empty uses the default one.
 	Cliente *Cliente
-	// SomenteVerificar downloads and swaps nothing: it only reports whether
+	// CheckOnly downloads and swaps nothing: it only reports whether
 	// there is a new version.
-	SomenteVerificar bool
+	CheckOnly bool
 	// SO and Arch select the artifact. Empty use the ones of the process.
 	SO   string
 	Arch string
 }
 
-// Resultado is what the command reports. The JSON names follow what Task D4
+// Result is what the command reports. The JSON names follow what Task D4
 // specifies for the envelope's data field.
-type Resultado struct {
-	VersaoAtual  string  `json:"current_version"`
-	VersaoRemota string  `json:"latest_version"`
-	Canal        Channel `json:"channel"`
-	Atualizado   bool    `json:"updated"`
-	// Disponivel is true when there is a version newer than the current
-	// one. With SomenteVerificar, it is the only information that matters.
-	Disponivel bool `json:"update_available"`
+type Result struct {
+	CurrentVersion string  `json:"current_version"`
+	RemoteVersion  string  `json:"latest_version"`
+	Channel        Channel `json:"channel"`
+	Updated        bool    `json:"updated"`
+	// Available is true when there is a version newer than the current
+	// one. With CheckOnly, it is the only information that matters.
+	Available bool `json:"update_available"`
 }
 
-// Executar resolves, downloads, verifies and swaps the binary. It is the
+// Run resolves, downloads, verifies and swaps the binary. It is the
 // function the `ngx update` command calls; it prints nothing and picks no
 // exit code.
-func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
-	channel := opts.Canal
+func Run(ctx context.Context, opts Options) (*Result, error) {
+	channel := opts.Channel
 	if channel == "" {
 		channel = ChannelStable
 	}
@@ -162,14 +162,14 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		cli = NovoCliente(0)
 	}
 
-	key := opts.ChavePublicaOverride
+	key := opts.PublicKeyOverride
 	if key == "" {
-		key = ChavePublica
+		key = PublicKey
 	}
 	// The key is checked BEFORE any download: a binary that cannot verify
 	// anything should not even start downloading. Only --check escapes,
 	// because it swaps no binary at all.
-	if !opts.SomenteVerificar {
+	if !opts.CheckOnly {
 		if err := validateKey(key); err != nil {
 			return nil, err
 		}
@@ -180,16 +180,16 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		return nil, err
 	}
 
-	res := &Resultado{
-		VersaoAtual:  opts.VersaoAtual,
-		VersaoRemota: rel.Version,
-		Canal:        channel,
+	res := &Result{
+		CurrentVersion: opts.CurrentVersion,
+		RemoteVersion:  rel.Version,
+		Channel:        channel,
 	}
 
 	explicit := opts.Versao != ""
-	res.Disponivel = newerThan(rel.Version, opts.VersaoAtual)
+	res.Available = newerThan(rel.Version, opts.CurrentVersion)
 
-	if opts.SomenteVerificar {
+	if opts.CheckOnly {
 		return res, nil
 	}
 
@@ -197,16 +197,16 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		// Without --version, it only moves forward. Never go back a
 		// version by accident: if the channel's release is older (or
 		// equal), the update is a no-op.
-		if !res.Disponivel {
+		if !res.Available {
 			return res, nil
 		}
-	} else if sameVersion(rel.Version, opts.VersaoAtual) {
+	} else if sameVersion(rel.Version, opts.CurrentVersion) {
 		// --version pointing at the already installed version: nothing to
 		// do, and it is not an error.
 		return res, nil
 	}
 
-	path := opts.CaminhoBinario
+	path := opts.BinaryPath
 	if path == "" {
 		path, err = os.Executable()
 		if err != nil {
@@ -230,11 +230,11 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	if err != nil {
 		return nil, err
 	}
-	checksums, err := rel.AssetPorNome(NomeChecksums)
+	checksums, err := rel.AssetByName(ChecksumsName)
 	if err != nil {
 		return nil, err
 	}
-	signature, err := rel.AssetPorNome(NomeAssinatura)
+	signature, err := rel.AssetByName(SignatureName)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,7 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		return nil, err
 	}
 
-	res.Atualizado = true
+	res.Updated = true
 	return res, nil
 }
 
@@ -281,18 +281,18 @@ func validateKey(key string) error {
 				"the releases page and check `checksums.txt` with minisign, or use an "+
 				"official binary, which already ships with the key embedded")
 	}
-	if c == PlaceholderChavePublica {
+	if c == PublicKeyPlaceholder {
 		return newError(CodigoChavePlaceholder,
 			"the embedded public key is still the placeholder %q: no minisign key pair "+
 				"has been generated for the project. Updating without real verification "+
-				"is not an option", PlaceholderChavePublica)
+				"is not an option", PublicKeyPlaceholder)
 	}
 	return nil
 }
 
 func resolveRelease(ctx context.Context, cli *Cliente, channel Channel, version string) (*Release, error) {
 	if version != "" {
-		return cli.PorVersao(ctx, version)
+		return cli.ByVersion(ctx, version)
 	}
 	return cli.Latest(ctx, channel)
 }

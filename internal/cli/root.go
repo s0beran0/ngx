@@ -83,7 +83,7 @@ type Context struct {
 	SSHConfigPath string
 
 	// ConectarSSH opens the remote connection. Empty means
-	// transport.SSHComDiagnosticos.
+	// transport.SSHWithDiagnostics.
 	ConectarSSH ConectarSSH
 
 	// Getenv reads an environment variable. Injectable so that a test does
@@ -348,8 +348,8 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 			//
 			// An unavailable field is omitted: a binary with no key does not
 			// show the field, instead of showing it empty.
-			if update.ChavePublica != "" && update.ChavePublica != update.PlaceholderChavePublica {
-				dados["update_public_key"] = update.ChavePublica
+			if update.PublicKey != "" && update.PublicKey != update.PublicKeyPlaceholder {
+				dados["update_public_key"] = update.PublicKey
 			}
 
 			env.Data = dados

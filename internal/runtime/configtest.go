@@ -45,7 +45,7 @@ func buildTestResult(e *execution) *TestResult {
 	text := e.combinedOutput()
 	res := &TestResult{
 		OK:          e.exit == 0,
-		Diagnostics: ParseDiagnosticos(text),
+		Diagnostics: ParseDiagnostics(text),
 		Raw:         strings.TrimRight(text, "\n"),
 	}
 	res.ConfigFile = testedFile(text)
@@ -67,7 +67,7 @@ var (
 		`configuration file (\S+) (?:syntax is ok|test (?:is successful|failed))`)
 )
 
-// ParseDiagnosticos translates the textual output of nginx into structured
+// ParseDiagnostics translates the textual output of nginx into structured
 // diagnostics.
 //
 // The function is exported and takes nothing beyond the text: it is the heart
@@ -77,7 +77,7 @@ var (
 //
 // The nginx level becomes severity; the code is always the same, because
 // severity never goes into the code.
-func ParseDiagnosticos(text string) []output.Diagnostic {
+func ParseDiagnostics(text string) []output.Diagnostic {
 	diags := []output.Diagnostic{}
 
 	for _, line := range strings.Split(text, "\n") {

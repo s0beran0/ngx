@@ -102,7 +102,7 @@ func diagnosticWithCode(diags []output.Diagnostic, code string) *output.Diagnost
 // the private key is never read by ngx.
 func TestBuildAuthNamedKeyComesBeforeAgent(t *testing.T) {
 	env := withSSHAgent(t, withEnv(emptyEnv(t), map[string]string{
-		EnvSenhaSSH: "s3nha",
+		EnvSSHPassword: "s3nha",
 	}))
 
 	auth, diags, err := buildAuth(SSHOptions{
@@ -113,7 +113,7 @@ func TestBuildAuthNamedKeyComesBeforeAgent(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoChave, MetodoSSHAgent, MetodoSenha}, auth.Nomes,
+	require.Equal(t, []string{MethodKey, MethodSSHAgent, MethodPassword}, auth.Nomes,
 		"a key named in --key precedes the ssh-agent so it does not hit MaxAuthTries")
 
 	// Two key sources, ONE public key method (plus the password one).
@@ -132,7 +132,7 @@ func TestBuildAuthNamedKeyComesBeforeAgent(t *testing.T) {
 
 func TestBuildAuthWithoutNamedKeyKeepsAgentFirst(t *testing.T) {
 	env := withSSHAgent(t, withEnv(emptyEnv(t), map[string]string{
-		EnvSenhaSSH: "s3nha",
+		EnvSSHPassword: "s3nha",
 	}))
 
 	auth, _, err := buildAuth(SSHOptions{
@@ -142,7 +142,7 @@ func TestBuildAuthWithoutNamedKeyKeepsAgentFirst(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSSHAgent, MetodoSenha}, auth.Nomes,
+	require.Equal(t, []string{MethodSSHAgent, MethodPassword}, auth.Nomes,
 		"without --key the ssh-agent comes first: the private key is never read by ngx")
 }
 
@@ -150,13 +150,13 @@ func TestBuildAuthWithoutNamedKeyKeepsAgentFirst(t *testing.T) {
 // informational diagnostic. Confusing the two would make ngx fail on any
 // machine that does not have the agent running.
 func TestMissingSSHAgentIsNotAnError(t *testing.T) {
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", User: "deploy"}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 
 	d := diagnosticWithCode(diags, CodigoAvisoSSHAgentAusente)
 	require.NotNil(t, d, "the absence of the ssh-agent has to be reported, not silent")
@@ -168,13 +168,13 @@ func TestMissingSSHAgentIsNotAnError(t *testing.T) {
 // The password comes from the environment, and coming from the environment
 // waives any prompt: the readSecret of emptyEnv fails the test if called.
 func TestPasswordComesFromEnvironment(t *testing.T) {
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, _, err := buildAuth(SSHOptions{Host: "web1", User: "deploy"}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 }
 
 // Running under a pipe — which is how an AI agent uses ngx — there is no way
@@ -192,7 +192,7 @@ func TestNoTerminalNoEnvironmentFailsWithClearMessage(t *testing.T) {
 	require.ErrorAs(t, err, &outErr)
 	require.Equal(t, CodigoSemMetodoAuth, outErr.Diag.Code)
 	require.Equal(t, output.SeverityError, outErr.Diag.Severity)
-	require.Contains(t, outErr.Diag.Message, EnvSenhaSSH,
+	require.Contains(t, outErr.Diag.Message, EnvSSHPassword,
 		"the message has to say which environment variable to set")
 	require.Contains(t, outErr.Diag.Message, "deploy@web1")
 }
@@ -212,20 +212,20 @@ func TestWithTerminalDoesNotPromptWhileAssembling(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 }
 
 // An encrypted key with the passphrase in the environment is unlocked at
 // assembly time, with no prompt.
 func TestEncryptedKeyWithPassphraseInEnvironment(t *testing.T) {
 	path := writeKey(t, "abre-te")
-	env := withEnv(emptyEnv(t), map[string]string{EnvPassphraseChaveSSH: "abre-te"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHKeyPassphrase: "abre-te"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoChave}, auth.Nomes)
+	require.Equal(t, []string{MethodKey}, auth.Nomes)
 	require.Nil(t, diagnosticWithCode(diags, CodigoAvisoChaveIndisponivel))
 }
 
@@ -234,18 +234,18 @@ func TestEncryptedKeyWithPassphraseInEnvironment(t *testing.T) {
 // pipe.
 func TestEncryptedKeyWithoutTerminalLeavesListWithWarning(t *testing.T) {
 	path := writeKey(t, "abre-te")
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 
 	d := diagnosticWithCode(diags, CodigoAvisoChaveIndisponivel)
 	require.NotNil(t, d)
 	require.Equal(t, output.SeverityWarning, d.Severity)
-	require.Contains(t, d.Message, EnvPassphraseChaveSSH)
+	require.Contains(t, d.Message, EnvSSHKeyPassphrase)
 	require.Equal(t, path, d.File)
 }
 
@@ -254,13 +254,13 @@ func TestEncryptedKeyWithoutTerminalLeavesListWithWarning(t *testing.T) {
 // falling back to the password quietly would make a wrong path look right.
 func TestMissingKeyBecomesWarningNotError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nao-existe")
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 
 	d := diagnosticWithCode(diags, CodigoAvisoChaveIndisponivel)
 	require.NotNil(t, d)
@@ -271,13 +271,13 @@ func TestMissingKeyBecomesWarningNotError(t *testing.T) {
 func TestMalformedKeyBecomesWarning(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lixo")
 	require.NoError(t, os.WriteFile(path, []byte("this is not a key"), 0o600))
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 	require.NotNil(t, diagnosticWithCode(diags, CodigoAvisoChaveIndisponivel))
 }
 
@@ -286,19 +286,19 @@ func TestMalformedKeyBecomesWarning(t *testing.T) {
 func TestWrongPassphraseInEnvironmentBecomesWarning(t *testing.T) {
 	path := writeKey(t, "abre-te")
 	env := withEnv(emptyEnv(t), map[string]string{
-		EnvPassphraseChaveSSH: "errada",
-		EnvSenhaSSH:           "s3nha",
+		EnvSSHKeyPassphrase: "errada",
+		EnvSSHPassword:      "s3nha",
 	})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 
 	d := diagnosticWithCode(diags, CodigoAvisoChaveIndisponivel)
 	require.NotNil(t, d)
-	require.Contains(t, d.Message, EnvPassphraseChaveSSH)
+	require.Contains(t, d.Message, EnvSSHKeyPassphrase)
 }
 
 // No secret may escape through a diagnostic or an error message. Whoever reads
@@ -309,8 +309,8 @@ func TestSecretDoesNotLeakInDiagnostic(t *testing.T) {
 
 	path := writeKey(t, "abre-te")
 	env := withEnv(emptyEnv(t), map[string]string{
-		EnvSenhaSSH:           password,
-		EnvPassphraseChaveSSH: passphrase,
+		EnvSSHPassword:      password,
+		EnvSSHKeyPassphrase: passphrase,
 	})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1", KeyPath: path}, env)
@@ -334,14 +334,14 @@ func TestCloseIsIdempotent(t *testing.T) {
 	require.NoError(t, auth.Close())
 	require.NoError(t, auth.Close())
 
-	var nilAuth *Autenticacao
+	var nilAuth *Authentication
 	require.NoError(t, nilAuth.Close())
 }
 
 // The assembly never returns a nil list or nil names: an agent calling .length
 // on a null list breaks.
 func TestListsAreNeverNil(t *testing.T) {
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "s3nha"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "s3nha"})
 
 	auth, diags, err := buildAuth(SSHOptions{Host: "web1"}, env)
 	require.NoError(t, err)
@@ -355,14 +355,14 @@ func TestListsAreNeverNil(t *testing.T) {
 // A password already resolved by the caller beats the environment. The field
 // exists to receive what came from the environment, never from a flag.
 func TestPasswordFromOptionsBeatsEnvironment(t *testing.T) {
-	env := withEnv(emptyEnv(t), map[string]string{EnvSenhaSSH: "do-ambiente"})
+	env := withEnv(emptyEnv(t), map[string]string{EnvSSHPassword: "do-ambiente"})
 
 	auth, _, err := buildAuth(
 		SSHOptions{Host: "web1", Password: "das-opcoes"}, env)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MethodPassword}, auth.Nomes)
 }
 
 // No password flag may exist on the package surface: a flag shows up in `ps`,

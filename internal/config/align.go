@@ -31,7 +31,7 @@ func align(f *File) error {
 				File:    f.Path,
 				Line:    quote.Linha,
 				Message: quote.Error(),
-				Classe:  RecusaAspaNaoFechada,
+				Classe:  RefusalUnclosedQuote,
 				Token:   quote.Aspa,
 			}}
 		}
@@ -48,7 +48,7 @@ func align(f *File) error {
 			File:    f.Path,
 			Line:    leftover.Line,
 			Message: fmt.Sprintf("%d tokens left over after aligning the tree", len(a.toks)-a.pos),
-			Classe:  RecusaTokensSobrando,
+			Classe:  RefusalLeftoverTokens,
 			Token:   leftover.Raw,
 		}}
 	}
@@ -150,7 +150,7 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 			// argument loop stops at "}" (parse.go:285), so "x { if (a) }"
 			// is an "if" with no terminator, not an "if" with "}" as an
 			// argument. Stopping here is what makes the refusal come out
-			// classified as RecusaTerminadorAusente -- a known divergence --
+			// classified as RefusalMissingTerminator -- a known divergence --
 			// instead of an unexpected token, which is the aligner's bug class.
 			if next.Kind == TokenSemicolon || next.Kind == TokenBlockStart ||
 				next.Kind == TokenBlockEnd {
@@ -211,7 +211,7 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 			File:    a.file,
 			Line:    next.Line,
 			Message: fmt.Sprintf("expected ';' or '{' after %q, found %q", n.Directive, next.Raw),
-			Classe:  RecusaTerminadorAusente,
+			Classe:  RefusalMissingTerminator,
 			Token:   next.Raw,
 		}}
 	}
@@ -259,7 +259,7 @@ func (a *aligner) peek() (Token, error) {
 		return Token{}, ParseErrors{{
 			File:    a.file,
 			Message: "unexpected end of configuration",
-			Classe:  RecusaFimInesperado,
+			Classe:  RefusalUnexpectedEnd,
 		}}
 	}
 	return a.toks[a.pos], nil
@@ -271,7 +271,7 @@ func (a *aligner) consume(kind TokenKind) (Token, error) {
 		return Token{}, err
 	}
 	if tok.Kind != kind {
-		return Token{}, a.unexpectedToken(tok, RecusaTokenInesperado)
+		return Token{}, a.unexpectedToken(tok, RefusalUnexpectedToken)
 	}
 	a.pos++
 	return tok, nil
@@ -291,13 +291,13 @@ func (a *aligner) consumeDirectiveName() (Token, error) {
 		return Token{}, err
 	}
 	if tok.Kind != TokenWord {
-		return Token{}, a.unexpectedToken(tok, RecusaTokenNoLugarDeDiretiva)
+		return Token{}, a.unexpectedToken(tok, RefusalTokenInsteadOfDirective)
 	}
 	a.pos++
 	return tok, nil
 }
 
-func (a *aligner) unexpectedToken(tok Token, class ClasseRecusa) error {
+func (a *aligner) unexpectedToken(tok Token, class RefusalClass) error {
 	return ParseErrors{{
 		File:    a.file,
 		Line:    tok.Line,

@@ -54,7 +54,7 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 	s := &State{PIDFile: pidPath, Diagnostics: []output.Diagnostic{}}
 
 	if pidPath == "" {
-		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+		s.diag(output.SeverityWarning, CodeProcessState,
 			"the pidfile path is not known, so the state of the process cannot be determined")
 		return s, nil
 	}
@@ -69,15 +69,15 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 			// the other cases.
 			notRunning := false
 			s.Running = &notRunning
-			s.diag(output.SeverityInfo, CodigoEstadoProcesso,
+			s.diag(output.SeverityInfo, CodeProcessState,
 				fmt.Sprintf("the pidfile %s does not exist, so the master is not running", pidPath))
 		case errors.Is(err, fs.ErrPermission):
-			s.diag(output.SeverityWarning, CodigoPrivilegioNecessario,
+			s.diag(output.SeverityWarning, CodePrivilegeRequired,
 				fmt.Sprintf("the pidfile %s exists but cannot be read for lack of permission on %s; "+
 					"the state of the process stays unavailable until ngx runs with read access to that file",
 					pidPath, r.tr.Describe()))
 		default:
-			s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+			s.diag(output.SeverityWarning, CodeProcessState,
 				fmt.Sprintf("the pidfile %s cannot be read on %s: %v", pidPath, r.tr.Describe(), err))
 		}
 		return s, nil
@@ -86,14 +86,14 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 
 	content, err := io.ReadAll(f)
 	if err != nil {
-		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+		s.diag(output.SeverityWarning, CodeProcessState,
 			fmt.Sprintf("failed to read the pidfile %s on %s: %v", pidPath, r.tr.Describe(), err))
 		return s, nil
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(content)))
 	if err != nil || pid <= 0 {
-		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+		s.diag(output.SeverityWarning, CodeProcessState,
 			fmt.Sprintf("the pidfile %s does not contain a pid: %q", pidPath, summarize(string(content))))
 		return s, nil
 	}
@@ -104,7 +104,7 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 	// escalating here would go against DR5 with no gain at all.
 	_, stderr, exit, err := r.tr.Run(ctx, []string{"kill", "-0", strconv.Itoa(pid)})
 	if err != nil {
-		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+		s.diag(output.SeverityWarning, CodeProcessState,
 			fmt.Sprintf("could not check whether the pid %d is alive on %s: %v",
 				pid, r.tr.Describe(), err))
 		return s, nil
@@ -132,13 +132,13 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 			s.Running = &running
 			break
 		}
-		s.diag(output.SeverityWarning, CodigoPrivilegioNecessario,
+		s.diag(output.SeverityWarning, CodePrivilegeRequired,
 			fmt.Sprintf("the pid %d exists but belongs to another user, and checking its state "+
 				"on %s requires privilege", pid, r.tr.Describe()))
 	default:
 		notRunning := false
 		s.Running = &notRunning
-		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
+		s.diag(output.SeverityWarning, CodeProcessState,
 			fmt.Sprintf("the pidfile %s points to the pid %d, which does not exist: stale pidfile",
 				pidPath, pid))
 	}

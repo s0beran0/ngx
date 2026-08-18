@@ -67,7 +67,7 @@ func TestIfWithEmptyExpressionIsTypedRefusalNotPanic(t *testing.T) {
 	} {
 		t.Run(src, func(t *testing.T) {
 			pe := refusal(t, src)
-			require.Equal(t, config.RecusaExpressaoIfInvalida, pe.Classe)
+			require.Equal(t, config.RefusalInvalidIfExpression, pe.Classe)
 			require.NotZero(t, pe.Line)
 		})
 	}
@@ -223,7 +223,7 @@ func TestDivergenceUnclosedQuote(t *testing.T) {
 			require.Error(t, err)
 			var problems config.ParseErrors
 			require.True(t, errors.As(err, &problems))
-			require.Equal(t, config.RecusaAspaNaoFechada, problems[0].Classe)
+			require.Equal(t, config.RefusalUnclosedQuote, problems[0].Classe)
 		})
 	}
 }
@@ -236,7 +236,7 @@ func TestDivergenceBraceAsDirectiveName(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, "{}\n")
-	require.Equal(t, config.RecusaTokenNoLugarDeDiretiva, pe.Classe)
+	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Classe)
 	require.Equal(t, "{", pe.Token)
 }
 
@@ -249,7 +249,7 @@ func TestDivergenceSemicolonAsDirectiveName(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, ";0;\n")
-	require.Equal(t, config.RecusaTokenNoLugarDeDiretiva, pe.Classe)
+	require.Equal(t, config.RefusalTokenInsteadOfDirective, pe.Classe)
 	require.Equal(t, ";", pe.Token)
 }
 
@@ -262,7 +262,7 @@ func TestDivergenceDirectiveWithoutSemicolon(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, "server { listen 80 }\n")
-	require.Equal(t, config.RecusaTerminadorAusente, pe.Classe)
+	require.Equal(t, config.RefusalMissingTerminator, pe.Classe)
 	require.Equal(t, "}", pe.Token)
 }
 
@@ -286,7 +286,7 @@ func TestDivergenceIncludeOfDirectory(t *testing.T) {
 
 	var problems config.ParseErrors
 	require.True(t, errors.As(err, &problems), "the raw Go error must not leak: %v", err)
-	require.Equal(t, config.RecusaAlvoNaoERegular, problems[0].Classe)
+	require.Equal(t, config.RefusalTargetNotRegular, problems[0].Classe)
 	require.Equal(t, filepath.Join(dir, "sub"), problems[0].File)
 	// The guard is about the raw Go error LEAKING, not about the words. In
 	// Portuguese the two were easy to tell apart; translated, our message
@@ -326,6 +326,6 @@ func TestDivergenceIfWithoutTerminatorBeforeClosingBlock(t *testing.T) {
 	acceptedByCrossplane(t, p)
 
 	pe := refusal(t, src)
-	require.Equal(t, config.RecusaTerminadorAusente, pe.Classe)
+	require.Equal(t, config.RefusalMissingTerminator, pe.Classe)
 	require.Equal(t, "}", pe.Token)
 }

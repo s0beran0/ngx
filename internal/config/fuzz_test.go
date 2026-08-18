@@ -450,20 +450,20 @@ func parseWithOracle(path string) (payload *crossplane.Payload, err error) {
 // crossplane's source and has a unit test of its own in robustness_test.go. A
 // refusal that is not here -- including a new refusal of the same class with
 // a different token -- is a fuzz failure, as it has to be. Classes
-// deliberately OUT of the list: RecusaTokenInesperado, RecusaTokensSobrando,
-// RecusaFimInesperado and RecusaPanicoDoCrossplane, which only show up when
+// deliberately OUT of the list: RefusalUnexpectedToken, RefusalLeftoverTokens,
+// RefusalUnexpectedEnd and RefusalCrossplanePanic, which only show up when
 // the matching between tree and tokens has slipped -- that is, when there is
 // a bug.
 func knownDivergence(pe config.ParseError) bool {
 	switch pe.Classe {
-	case config.RecusaAspaNaoFechada:
+	case config.RefusalUnclosedQuote:
 		// lex.go:325-327 closes the quote implicitly at end of file and
 		// emits no token at all when the content is empty: a dangling quote
 		// is "ok" for crossplane. nginx refuses it. See
 		// TestDivergenceUnclosedQuote.
 		return pe.Token == `"` || pe.Token == "'"
 
-	case config.RecusaTokenNoLugarDeDiretiva:
+	case config.RefusalTokenInsteadOfDirective:
 		// parse.go:256-261 builds the statement out of t.Value without
 		// requiring the first token to be a word: only "}" (parse.go:237)
 		// and comments (parse.go:264) are handled apart, so "{", "}" and ";"
@@ -474,14 +474,14 @@ func knownDivergence(pe config.ParseError) bool {
 		// TestDivergenceSemicolonAsDirectiveName.
 		return pe.Token == "{" || pe.Token == "}" || pe.Token == ";"
 
-	case config.RecusaTerminadorAusente:
+	case config.RefusalMissingTerminator:
 		// The argument loop stops at "}" (parse.go:285) and the
 		// "is not terminated by \";\"" check (analyze.go:224-227) does not
 		// run under SkipDirectiveArgsCheck (analyze.go:202-204). Only the "}"
 		// diverges. See TestDivergenceDirectiveWithoutSemicolon.
 		return pe.Token == "}"
 
-	case config.RecusaExpressaoIfInvalida:
+	case config.RefusalInvalidIfExpression:
 		// The validExpr guard (analyze.go:212, util.go:57-67) that
 		// SkipDirectiveArgsCheck suppresses and without which prepareIfArgs
 		// (util.go:83) brings the process down. The token is always the name
@@ -489,7 +489,7 @@ func knownDivergence(pe config.ParseError) bool {
 		// IsQuoted). See TestIfWithEmptyExpressionIsTypedRefusalNotPanic.
 		return pe.Token == "if" || pe.Token == `"if"` || pe.Token == "'if'"
 
-	case config.RecusaAlvoNaoERegular:
+	case config.RefusalTargetNotRegular:
 		// "include .;" -- the only entry enumerated by CLASS alone, with no
 		// exact token, because the include target is an arbitrary path and
 		// there is no fixed lexeme to match against. It is only acceptable

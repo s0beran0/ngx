@@ -1,87 +1,87 @@
-# ngx — Plano de Distribuição: CI, releases, instalação e auto-update
+# ngx — Distribution Plan: CI, releases, installation and auto-update
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Publicar o `ngx` de forma que um operador instale com um comando, atualize com `ngx update`, e possa verificar que o binário que recebeu é o que foi publicado.
+**Goal:** Publish `ngx` so that an operator can install it with one command, update it with `ngx update`, and can verify that the binary they received is the one published.
 
-**Architecture:** GitHub Actions roda a suíte em todo PR e push; uma tag dispara o goreleaser, que compila para quatro plataformas, gera `checksums.txt` e o assina com minisign. A chave pública fica embutida no binário, então `ngx update` verifica assinatura e checksum antes de substituir a si mesmo. Canais saem de semver: tag limpa é stable, tag com sufixo de pré-lançamento é beta.
+**Architecture:** GitHub Actions runs the suite on all PR and push; a tag triggers goreleaser, which compiles for four platforms, generates `checksums.txt` and signs it with minisign. The public key is embedded in the binary, so `ngx update` checks signature and checksum before replacing itself. Channels leave semver: clean tag is stable, tag with pre-launch suffix is beta.
 
 **Tech Stack:** GitHub Actions, goreleaser v2, minisign, `aead.dev/minisign` v0.3.0.
 
-**Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md` (§10 Repositório e distribuição)
+**Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md` (§10 Repository and distribution)
 
-**Pré-requisito:** o Plano 1 precisa estar concluído — em particular a Task 14, que roda o `go mod tidy` definitivo. Este plano assume um `go.mod` estável.
+**Prerequisite:** Plan 1 needs to be completed — in particular Task 14, which runs the ultimate `go mod tidy`. This plan assumes a stable `go.mod`.
 
 ## Global Constraints
 
-- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25.
-- **Zero CGO.** Todo build usa `CGO_ENABLED=0`. Qualquer dependência nova precisa ser Go puro — verifique antes de adicionar.
-- Licença MIT em nome de Eduardo Benck. Nenhuma menção a SEA Tecnologia.
-- **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`, sem "Generated with".
-- Comentários de código em português, sem acentuação.
-- Plataformas: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`,
+- Go module: `github.com/s0beran0/ngx`. Go 1.25.
+- **Zero CGO.** Every build uses `CGO_ENABLED=0`. Any new dependencies must be pure Go — check before adding.
+- MIT License in the name of Eduardo Benck. No mention of SEA Tecnologia.
+- **Commit messages never mention Claude or IA.** No `Co-Authored-By` trailer, no "Generated with".
+- Code comments in Portuguese, without accents.
+- Platforms: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`,
   `windows/amd64`, `windows/arm64`.
-- Arquivo de distribuição: `.tar.gz` em Linux e macOS, `.zip` no Windows.
+- Distribution archive: `.tar.gz` on Linux and macOS, `.zip` on Windows.
 
-## Decisões
+## Decisions
 
-Tomadas antes de escrever este plano; são premissas do resto.
+Taken before writing this plan; they are premises for the rest.
 
-### DD1 — Canais por semver, não por branch
+### DD1 — Channels by semver, not by branch
 
-Tag `v0.2.0` é stable. Tag `v0.2.0-beta.1` ou `v0.2.0-rc.1` é pré-lançamento, marcada como tal no GitHub. O goreleaser faz isso sozinho com `prerelease: auto`, que inspeciona o sufixo da tag.
+Tag `v0.2.0` is stable. Tag `v0.2.0-beta.1` or `v0.2.0-rc.1` is pre-release, marked as such on GitHub. goreleaser does this itself with `prerelease: auto`, which inspects the tag suffix.
 
-*Por quê:* não exige manter duas branches em sincronia nem backportar correção entre elas. É o que a maior parte do ecossistema Go faz, então o comportamento não surpreende ninguém.
+*Why:* It does not require keeping two branches in sync or backporting patches between them. That's what most of the Go ecosystem does, so the behavior doesn't surprise anyone.
 
-### DD2 — Verificação por checksum mais assinatura minisign
+### DD2 — Checksum verification plus minisign signature
 
-O goreleaser gera `checksums.txt` com o SHA256 de cada artefato e o assina com minisign, produzindo `checksums.txt.minisig`. A chave pública é embutida no binário em tempo de compilação. O `ngx update` verifica a assinatura do `checksums.txt`, depois confere o SHA256 do arquivo baixado contra ele, e só então substitui o binário.
+goreleaser generates `checksums.txt` with the SHA256 of each artifact and signs it with minisign, producing `checksums.txt.minisig`. The public key is embedded into the binary at compile time. `ngx update` checks the signature of `checksums.txt`, then checks the SHA256 of the downloaded file against it, and only then replaces the binary.
 
-*Por quê:* o `ngx` roda como root em servidores que servem tráfego. Um auto-update sem verificação transforma qualquer comprometimento da cadeia de distribuição em execução de código como root em todo servidor que atualizar. Só checksum não basta: quem consiga publicar um release publicaria o checksum do próprio binário junto. A assinatura protege mesmo com a conta do GitHub comprometida, porque a chave privada vive fora dela.
+*Why:* `ngx` runs as root on servers serving traffic. A self-update without verification turns any distribution chain compromise into running code as root on every server you update. Just a checksum is not enough: whoever manages to publish a release would publish the checksum of the binary itself along with it. The signature protects even if the GitHub account is compromised, because the private key lives outside of it.
 
-*Custo aceito:* há uma chave privada para guardar. Perdê-la significa que updates existentes param de aceitar releases novas até um binário com a chave nova ser distribuído por outro caminho.
+*Cost accepted:* there is a private key to keep. Losing it means that existing updates stop accepting new releases until a binary with the new key is distributed via another route.
 
-### DD6 — A release prova que a chave foi embutida, antes de publicar
+### DD6 — The release proves that the key was embedded, before publishing
 
-Injetar valor com `-ldflags -X` **falha em silêncio** se a variável alvo não existir com o nome e o tipo exatos: o linker não avisa, o build passa, e o binário sai com a variável vazia. Numa release assinada isso significa publicar um `ngx` que não consegue verificar assinatura nenhuma — a proteção some sem nenhum sinal, que é o pior modo de falha possível para um mecanismo de segurança.
+Injecting value with `-ldflags -X` **fails silently** if the target variable does not exist with the exact name and type: the linker does not warn, the build passes, and the binary exits with the empty variable. In a signed release this means publishing an `ngx` that cannot verify any signature — the protection disappears without any signal, which is the worst possible failure mode for a security mechanism.
 
-Então o workflow de release **verifica o artefato construído** antes de publicar: executa o binário e confirma que a chave pública embutida não está vazia. Se estiver, a release aborta.
+Then the release workflow **checks the built artifact** before publishing: executes the binary and confirms that the embedded public key is not empty. If it is, the release aborts.
 
-*Por quê:* a alternativa é depender de alguém lembrar de conferir. Um controle de segurança que depende de memória humana já falhou; a única pergunta é quando.
+*Why:* the alternative is to depend on someone remembering to check. A security control that relies on human memory has already failed; the only question is when.
 
-### DD3 — A chave pública é embutida, não baixada
+### DD3 — Public key is embedded, not downloaded
 
-Uma chave pública que o próprio `update` baixa não protege contra nada: quem controla o servidor entrega a chave dele junto com o binário dele. Ela entra via `-ldflags -X` no build.
+A public key that `update` himself downloads doesn't protect against anything: whoever controls the server hands over his key along with his binary. It is entered via `-ldflags -X` in the build.
 
-### DD4 — Windows é suportado, com ressalva documentada
+### DD4 — Windows is supported, with documented caveats
 
-O `ngx` compila e roda em Windows, porque o nginx para Windows existe e é distribuído oficialmente. Mas o próprio nginx.org classifica aquela build como **beta**: usa apenas `select()`/`poll()`, "alta performance e escalabilidade não devem ser esperadas", apenas um worker efetivamente trabalha, e não há suporte a UDP nem QUIC.
+`ngx` compiles and runs on Windows, because nginx for Windows exists and is officially distributed. But nginx.org itself classifies that build as **beta**: it only uses `select()`/`poll()`, "high performance and scalability should not be expected", only one worker actually works, and there is no support for UDP or QUIC.
 
-*Consequência prática:* o binário do nginx no Windows não é instalado por gerenciador de pacotes — fica solto num diretório desempacotado, tipo `C:\nginx-1.31.3\nginx.exe`, e usa o diretório de execução como prefixo. Então a detecção automática de caminhos que funciona em Linux não se aplica, e a documentação precisa mostrar como apontar o `ngx` para o diretório certo com `-c`.
+*Practical consequence:* the nginx binary on Windows is not installed by the package manager — it is left in an unpacked directory, like `C:
+ginx-1.31.3
+ginx.exe`, and uses the execution directory as a prefix. So the automatic path detection that works on Linux does not apply, and the documentation needs to show how to point `ngx` to the right directory with `-c`.
 
-*O README diz isso ao usuário.* Suportar a plataforma e ser honesto sobre suas limitações não são coisas contraditórias — omitir levaria alguém a apostar produção numa build que o próprio fornecedor não recomenda.
+*The README tells the user this.* Supporting the platform and being honest about its limitations are not contradictory things — omitting would lead someone to bet production on a build that the vendor itself does not recommend.
 
-### DD5 — No Windows, o binário em execução é renomeado, não sobrescrito
+### DD5 — On Windows, running binary is renamed, not overwritten
 
-O Windows trava o executável em execução: renomear funciona, deletar não. O `Apply` do Windows renomeia o binário atual para `.old`, coloca o novo no lugar, e a remoção do `.old` fica para a execução seguinte do `ngx`, que a faz na inicialização.
+Windows crashes the running executable: renaming works, deleting does not. Windows `Apply` renames the current binary to `.old`, puts the new one in place, and removing `.old` is left to the next run of `ngx`, which does it at startup.
 
-*Por quê:* a lógica de `rename` atômico que funciona em Linux e macOS falharia no Windows, e o modo de falha seria um update que aborta no meio, deixando o usuário sem binário funcional. Não é detalhe de portabilidade — é a diferença entre atualizar e quebrar a instalação.
+*Why:* the atomic `rename` logic that works on Linux and macOS would fail on Windows, and the failure mode would be an update that aborts in the middle, leaving the user without a working binary. It's not a portability detail — it's the difference between updating and breaking the installation.
 
 ---
 
-### Task D1: Integração contínua
+### Task D1: Continuous integration
 
-**Files:**
+- Test: the workflow itself, verified in a push**Files:**
 - Create: `.github/workflows/ci.yml`
-- Test: o próprio workflow, verificado num push
 
-**Interfaces:**
-- Consumes: `go.mod`, a suíte de testes do Plano 1
-- Produces: um workflow `ci` que roda em todo push para `main` e em todo pull request
+- Produces: a `ci` workflow that runs on every push to `main` and on every pull request**Interfaces:**
+- Consumes: `go.mod`, the Plan 1 test suite
 
-- [ ] **Step 1: Escrever o workflow**
+- [ ] **Step 1: Write the workflow**
 
-Criar `.github/workflows/ci.yml`:
+Create `.github/workflows/ci.yml`:
 
 ```yaml
 name: ci
@@ -111,8 +111,8 @@ jobs:
       - name: testes com race detector
         run: go test ./... -race
 
-      # O binario e distribuido estatico: uma dependencia que exija cgo
-      # quebraria o cross-compile, e o erro so apareceria no release.
+      # The binary is distributed statically: a dependency that requires code
+      # it would break the cross-compile, and the error would only appear in the release.
       - name: build sem cgo
         env:
           CGO_ENABLED: 0
@@ -140,10 +140,10 @@ jobs:
         run: go build -o /dev/null ./cmd/ngx
 ```
 
-- [ ] **Step 2: Verificar que o workflow é válido**
+- [ ] **Step 2: Check that the workflow is valid**
 
-Run: `gh workflow view ci` depois do push, ou valide localmente com `act -n` se disponível.
-Expected: o workflow aparece e os dois jobs são reconhecidos.
+Run: `gh workflow view ci` after push, or validate locally with `act -n` if available.
+Expected: the workflow appears and both jobs are recognized.
 
 - [ ] **Step 3: Commit**
 
@@ -154,42 +154,41 @@ git commit -m "ci: roda vet, testes com race e cross-compile"
 
 ---
 
-### Task D2: Release por tag, com canais e assinatura
+### Task D2: Release by tag, with channels and subscription
 
-**Files:**
+- Modify: `internal/output/envelope.go` — expose public key variable to `-ldflags`**Files:**
 - Create: `.goreleaser.yaml`, `.github/workflows/release.yml`
-- Modify: `internal/output/envelope.go` — expor a variável de chave pública para o `-ldflags`
 
 **Interfaces:**
-- Consumes: `output.Version` (Plano 1, Task 1)
-- Produces: `output.PublicKey` (string, preenchida no build); artefatos de release `ngx_<versão>_<os>_<arch>.tar.gz`, `checksums.txt`, `checksums.txt.minisig`
+- Consumes: `output.Version` (Plan 1, Task 1)
+- Produces: `output.PublicKey` (string, filled in at build); release artifacts `ngx_<version>_<os>_<arch>.tar.gz`, `checksums.txt`, `checksums.txt.minisig`
 
-- [ ] **Step 1: Gerar o par de chaves minisign**
+- [ ] **Step 1: Generate the minisign key pair**
 
-Este passo é feito **uma vez, pelo dono do repositório**, fora do CI:
+This step is done **once, by the repository owner**, outside CI:
 
 ```bash
 minisign -G -p ngx-minisign.pub -s ngx-minisign.key
 ```
 
-Guarde a chave privada e a senha em local seguro, e adicione dois secrets no repositório do GitHub: `MINISIGN_KEY` com o conteúdo do arquivo `.key`, e `MINISIGN_PASSWORD` com a senha. A chave pública (`ngx-minisign.pub`) vai versionada no repositório e embutida no binário.
+Keep the private key and password in a safe place, and add two secrets to the GitHub repository: `MINISIGN_KEY` with the contents of the `.key` file, and `MINISIGN_PASSWORD` with the password. The public key (`ngx-minisign.pub`) is versioned in the repository and embedded in the binary.
 
-Se o implementador não tiver acesso aos secrets, ele para aqui e reporta — não invente chave.
+If the implementer does not have access to the secrets, he stops here and reports — do not invent a key.
 
-- [ ] **Step 2: Expor a variável da chave pública**
+- [ ] **Step 2: Expose the public key variable**
 
-Em `internal/output/envelope.go`, junto de `Version`:
+In `internal/output/envelope.go`, next to `Version`:
 
 ```go
-// PublicKey e a chave publica minisign usada para verificar releases.
-// Preenchida no build via -ldflags; vazia em build local, o que faz o
-// comando update recusar atualizar em vez de aceitar sem verificacao.
+// PublicKey is the minisign public key used to verify releases.
+// Filled in at build via -ldflags; empty in local build, which makes the
+// update command refuses to update instead of accepting without verification.
 var PublicKey = ""
 ```
 
-- [ ] **Step 3: Escrever a configuração do goreleaser**
+- [ ] **Step 3: Write the goreleaser configuration**
 
-Criar `.goreleaser.yaml`:
+Create `.goreleaser.yaml`:
 
 ```yaml
 version: 2
@@ -213,8 +212,8 @@ builds:
 
 archives:
   - formats: [tar.gz]
-    # Windows recebe .zip: e o que a plataforma abre sem ferramenta extra, e
-    # o que o install.ps1 espera.
+    # Windows receives .zip: and what the platform opens without extra tool, and
+    # what install.ps1 expects.
     format_overrides:
       - goos: windows
         formats: [zip]
@@ -228,7 +227,7 @@ checksum:
   algorithm: sha256
 
 # Assinar apenas o checksums.txt e suficiente: ele cobre todos os artefatos
-# por hash, entao uma assinatura protege o conjunto inteiro.
+# by hash, then a signature protects the entire set.
 signs:
   - id: minisign
     cmd: minisign
@@ -238,8 +237,8 @@ signs:
     stdin: "{{ .Env.MINISIGN_PASSWORD }}"
 
 release:
-  # Marca a release como pre-release quando a tag tem sufixo de pre-lancamento
-  # (-beta, -rc, -alpha). E o que separa o canal beta do stable.
+  # Marks the release as pre-release when the tag has a pre-release suffix
+  # (-beta, -rc, -alpha). And what separates the beta channel from the stable channel.
   prerelease: auto
 
 changelog:
@@ -251,11 +250,11 @@ changelog:
       - "^chore:"
 ```
 
-> A sintaxe exata de `signs.args` para minisign precisa ser confirmada contra a documentação do goreleaser v2 e o `minisign -h` da versão instalada no runner. Rode um release de teste com `--snapshot --clean` localmente antes de criar a primeira tag, e ajuste se o minisign reclamar dos argumentos. Não adivinhe: o erro só apareceria na primeira release de verdade.
+> The exact syntax of `signs.args` for minisign needs to be confirmed against the goreleaser v2 documentation and `minisign -h` of the version installed in the runner. Run a test release with `--snapshot --clean` locally before creating the first tag, and adjust if minisign complains about the arguments. Don't guess: the error would only appear in the first real release.
 
-- [ ] **Step 4: Escrever o workflow de release**
+- [ ] **Step 4: Write the release workflow**
 
-Criar `.github/workflows/release.yml`:
+Create `.github/workflows/release.yml`:
 
 ```yaml
 name: release
@@ -303,12 +302,12 @@ jobs:
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
 ```
 
-`NGX_PUBLIC_KEY` é uma **variable** do repositório (não secret — é pública por definição), contendo a linha de chave do arquivo `.pub`, sem o comentário do cabeçalho.
+`NGX_PUBLIC_KEY` is a **variable** from the repository (not secret — it is public by definition), containing the key line from the `.pub` file, without the header comment.
 
-- [ ] **Step 5: Testar em snapshot antes de qualquer tag**
+- [ ] **Step 5: Test on snapshot before any tag**
 
 Run: `goreleaser release --snapshot --clean --skip=sign`
-Expected: gera `dist/` com os quatro binários e o `checksums.txt`. Confirme com `file dist/ngx_linux_amd64_v1/ngx` que é estático e sem interpretador dinâmico.
+Expected: generates `dist/` with the four binaries and `checksums.txt`. Confirm with `file dist/ngx_linux_amd64_v1/ngx` that it is static and without a dynamic interpreter.
 
 - [ ] **Step 6: Commit**
 
@@ -319,25 +318,24 @@ git commit -m "release: goreleaser com canais por semver e assinatura minisign"
 
 ---
 
-### Task D3: Script de instalação
+### Task D3: Installation script
 
-**Files:**
+- Test: `install_test.sh` (runs the script against a temporary directory)**Files:**
 - Create: `install.sh`
-- Test: `install_test.sh` (roda o script contra um diretório temporário)
 
 **Interfaces:**
-- Consumes: os artefatos publicados pela Task D2
-- Produces: `install.sh`, executável via `curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh`
+- Consumes: the artifacts published by Task D2
+- Produces: `install.sh`, executable via `curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh`
 
-- [ ] **Step 1: Escrever o script**
+- [ ] **Step 1: Write the script**
 
-Criar `install.sh`. Requisitos que o script precisa satisfazer, e que os testes do Step 2 verificam:
+Create `install.sh`. Requirements that the script must satisfy, and that the Step 2 tests verify:
 
-- Detecta sistema e arquitetura via `uname -s` e `uname -m`, mapeando para os nomes que o goreleaser usa (`x86_64` → `amd64`, `aarch64`/`arm64` → `arm64`). Recusa combinação não suportada com mensagem clara.
-- Resolve a última release **stable** por padrão, consultando `https://api.github.com/repos/s0beran0/ngx/releases/latest` — esse endpoint já exclui pré-lançamentos. Aceita `NGX_CHANNEL=beta`, que passa a listar `/releases` e pega a primeira entrada, e `NGX_VERSION=v0.2.0` para versão fixa.
-- Baixa o tarball, o `checksums.txt` e confere o SHA256 antes de extrair. Usa `sha256sum` ou `shasum -a 256`, o que existir.
-- Instala em `/usr/local/bin` por padrão, respeitando `NGX_INSTALL_DIR`.
-- **Checa a permissão de escrita ANTES de baixar qualquer coisa**, e se faltar, aborta com a instrução exata — sem chamar `sudo` sozinho. Um script que escala privilégio por conta própria é exatamente o que ninguém deveria executar via `curl | sh`, e checar antes evita gastar o download para falhar no fim:
+- Detect system and architecture via `uname -s` and `uname -m`, mapping to the names that goreleaser uses (`x86_64` → `amd64`, `aarch64`/`arm64` → `arm64`). Refuse unsupported combination with clear message.
+- Resolves the latest **stable** release by default, querying `https://api.github.com/repos/s0beran0/ngx/releases/latest` — this endpoint already excludes pre-releases. Accepts `NGX_CHANNEL=beta`, which starts listing `/releases` and takes the first entry, and `NGX_VERSION=v0.2.0` for fixed version.
+- Download the tarball, `checksums.txt` and check SHA256 before extracting. Use `sha256sum` or `shasum -a 256`, whichever exists.
+- Installs to `/usr/local/bin` by default, respecting `NGX_INSTALL_DIR`.
+- **Checks write permission BEFORE downloading anything**, and if it is missing, aborts with the exact instruction — without calling `sudo` alone. A script that escalates privilege on its own is exactly what no one should run via `curl | sh`, and checking first avoids wasting the download and failing at the end:
 
 ```sh
 if [ ! -w "$NGX_INSTALL_DIR" ]; then
@@ -352,43 +350,43 @@ if [ ! -w "$NGX_INSTALL_DIR" ]; then
 fi
 ```
 
-  As duas saídas importam: quem está numa máquina onde não tem root precisa da segunda tanto quanto quem tem precisa da primeira.
-- Usa `set -eu`, limpa o diretório temporário com `trap`, e funciona em `sh` puro — não assume bash.
+Both outputs matter: anyone on a machine where they don't have root needs the second as much as anyone who does need the first.
+- Uses `set -eu`, clears the temporary directory with `trap`, and works in pure `sh` — does not assume bash.
 
-> A verificação de assinatura minisign **não** entra no script: exigiria o minisign instalado antes da instalação. O checksum protege contra download corrompido e a origem é HTTPS do GitHub. Quem quiser a garantia forte baixa manualmente e verifica, ou instala uma vez e usa `ngx update` daí em diante, que verifica assinatura. Documente essa diferença no README.
+> Minisign signature verification is **not** included in the script: it would require minisign installed before installation. The checksum protects against corrupted downloads and the origin is HTTPS from GitHub. Anyone who wants a strong guarantee downloads it manually and checks it, or installs it once and uses `ngx update` from then on, which checks the signature. Document this difference in the README.
 
-- [ ] **Step 2: Escrever o teste do script**
+- [ ] **Step 2: Write the script test**
 
-Criar `install_test.sh`, que exercita o script sem tocar o sistema:
+Create `install_test.sh`, which exercises the script without touching the system:
 
-- Instala em `NGX_INSTALL_DIR` apontando para um diretório temporário e confirma que o binário aparece lá e responde a `ngx version`.
-- Confirma que arquitetura não suportada falha com código diferente de zero e mensagem mencionando a plataforma.
-- Confirma que checksum divergente aborta a instalação: baixe, corrompa o tarball e verifique que o script recusa.
-- Confirma que `NGX_VERSION` fixa de fato instala aquela versão.
+- Installs to `NGX_INSTALL_DIR` pointing to a temporary directory and confirms that the binary appears there and responds to `ngx version`.
+- Confirms that unsupported architecture fails with non-zero code and message mentioning the platform.
+- Confirm that a divergent checksum aborts the installation: download, corrupt the tarball and check that the script refuses.
+- Confirms that `NGX_VERSION` fix actually installs that version.
 
-- [ ] **Step 3: Escrever o script de instalação do Windows**
+- [ ] **Step 3: Write the Windows installation script**
 
-Criar `install.ps1`, equivalente em PowerShell. Requisitos:
+Create `install.ps1`, equivalent in PowerShell. Requirements:
 
-- Detecta a arquitetura por `$env:PROCESSOR_ARCHITECTURE` (`AMD64` → `amd64`, `ARM64` → `arm64`).
-- Baixa o `.zip` — não o `.tar.gz` — e o `checksums.txt`, confere o SHA256 com `Get-FileHash -Algorithm SHA256`, e só então extrai com `Expand-Archive`.
-- Instala em `$env:LOCALAPPDATA\ngx\bin` por padrão, respeitando `$env:NGX_INSTALL_DIR`. Esse diretório é gravável sem elevação, que é o comportamento certo para a plataforma — diferente do Unix, no Windows não há um `/usr/local/bin` convencional.
-- **Acrescenta o diretório ao `PATH` do usuário** se ainda não estiver lá, via `[Environment]::SetEnvironmentVariable('Path', ..., 'User')`, e avisa que é preciso abrir um terminal novo para a mudança valer. Sem isso, a pessoa instala e o comando não é encontrado.
-- Se o usuário apontar `NGX_INSTALL_DIR` para um caminho que exija elevação, como `C:\Program Files`, detecta a falta de permissão **antes de baixar** e instrui a rodar o PowerShell como administrador — mesma regra do Unix, sem tentar elevar sozinho.
-- Aceita `$env:NGX_CHANNEL` e `$env:NGX_VERSION`, com o mesmo significado da versão Unix.
+gx in` by default, respecting `$env:NGX_INSTALL_DIR`. - Accepts `$env:NGX_CHANNEL` and `$env:NGX_VERSION`, with the same meaning as the Unix version.This directory is writable without elevation, which is the right behavior for the platform — unlike Unix, on Windows there is no conventional `/usr/local/bin`.
+- Detect architecture by `$env:PROCESSOR_ARCHITECTURE` (`AMD64` → `amd64`, `ARM64` → `arm64`).
+- **Adds the directory to the user's `PATH`** if it is not already there, via `[Environment]::SetEnvironmentVariable('Path', ..., 'User')`, and warns that it is necessary to open a new terminal for the change to take effect. - Download `.zip` — not `.tar.gz` — and `checksums.txt`, check SHA256 with `Get-FileHash -Algorithm SHA256`, and only then extract with `Expand-Archive`.
+Without this, the person installs and the command is not found.
+- Installs in `$env:LOCALAPPDATA
+- If the user points `NGX_INSTALL_DIR` to a path that requires elevation, such as `C:\Program Files`, it detects the lack of permission **before downloading** and instructs to run PowerShell as administrator — same rule as in Unix, without trying to elevate it alone.
 
-O one-liner documentado no README:
+The one-liner documented in the README:
 
 ```powershell
 irm https://raw.githubusercontent.com/s0beran0/ngx/main/install.ps1 | iex
 ```
 
-- [ ] **Step 4: Rodar**
+- [ ] **Step 4: Rotate**
 
 Run: `sh install_test.sh`
-Expected: todos os casos passam, e nada foi escrito fora do diretório temporário.
+Expected: all cases pass, and nothing was written outside the temporary directory.
 
-O `install.ps1` não tem teste automatizado neste plano — exigiria um runner Windows, e o CI da Task D1 não tem um. Verifique-o à mão numa máquina Windows, ou num runner `windows-latest` avulso, e registre no relatório o que foi testado e o que não foi. **Não** reporte como verificado o que você não conseguiu rodar.
+`install.ps1` has no automated testing in this plan — it would require a Windows runner, and the Task D1 CI doesn't have one. Check it by hand on a Windows machine, or on a separate `windows-latest` runner, and record in the report what was tested and what wasn't. **Do not** report as verified what you were unable to run.
 
 - [ ] **Step 5: Commit**
 
@@ -399,88 +397,88 @@ git commit -m "feat: scripts de instalacao para unix e windows"
 
 ---
 
-### Task D4: Comando `ngx update`
+### Task D4: `ngx update` command
 
 **Files:**
 - Create: `internal/update/update.go`, `internal/update/github.go`, `internal/update/verify.go`, `internal/cli/update.go`
 - Test: `internal/update/update_test.go`, `internal/update/verify_test.go`, `internal/cli/update_test.go`
-- Modify: `internal/cli/root.go` — registrar o comando
+- Modify: `internal/cli/root.go` — register the command
 
 **Interfaces:**
-- Consumes: `output.Version`, `output.PublicKey` (Task D2); `cli.Context`, `output.New`, os construtores de erro (Plano 1)
-- Produces: `update.Release` (`Version`, `Prerelease bool`, `Assets []Asset`); `update.Channel` com `ChannelStable`/`ChannelBeta`; `update.Latest(ctx, channel) (*Release, error)`; `update.Verify(dados, checksums, assinatura []byte, chavePublica, nomeArquivo string) error`; `update.Apply(caminhoBinario string, novo []byte) error`
+- Consumes: `output.Version`, `output.PublicKey` (Task D2); `cli.Context`, `output.New`, the error constructors (Plan 1)
+- Produces: `update.Release` (`Version`, `Prerelease bool`, `Assets []Asset`); `update.Channel` with `ChannelStable`/`ChannelBeta`; `update.Latest(ctx, channel) (*Release, error)`; `update.Verify(data, checksums, signature []byte, publickey, filename string) error`; `update.Apply(Binarypath string, new []byte) error`
 
-- [ ] **Step 1: Investigar antes de escrever**
+- [ ] **Step 1: Investigate before writing**
 
-Este passo é leitura, não código. Antes de implementar, determine e anote no relatório:
+This step is reading, not code. Before implementing, determine and note in the report:
 
-1. **`aead.dev/minisign` v0.3.0** — a assinatura exata de `Verify`, como obter uma `PublicKey` a partir da string embutida, e **se o módulo tem dependência não-stdlib que exija cgo**. Leia o `go.mod` dele no module cache depois de `go get`. Se exigir cgo, pare e reporte: a restrição de build estático é inegociável e a alternativa seria verificar Ed25519 direto com `crypto/ed25519`, decodificando o formato do minisign à mão.
-2. **Formato do `checksums.txt` do goreleaser** — a ordem das colunas e o separador, para o parser não depender de suposição. Gere um com `goreleaser release --snapshot --clean` e leia.
-3. **Substituição do binário em execução** — em Linux e macOS, `rename(2)` sobre um binário em execução funciona porque o inode antigo sobrevive enquanto houver descritor aberto, mas escrever *por cima* falha com `ETXTBSY`. Confirme o comportamento e escreva o teste que o cobre.
-4. **O mesmo, no Windows** — lá o executável em execução é travado: renomear funciona, **deletar não**. Confirme e determine se `os.Rename` do Go basta ou se é preciso `MoveFileEx` via `golang.org/x/sys/windows`. Referência útil: a estratégia de `github.com/minio/selfupdate`, que renomeia o binário atual para `.old`, põe o novo no lugar, e não consegue apagar o `.old` — deixando a limpeza para depois. Não precisamos adotar a biblioteca; precisamos entender a técnica.
+1. **`aead.dev/minisign` v0.3.0** — the exact signature of `Verify`, how to get a `PublicKey` from the built-in string, and **whether the module has a non-stdlib dependency that requires cgo**. Read his `go.mod` from the module cache after `go get`. If it requires cgo, stop and report: the static build restriction is non-negotiable and the alternative would be to check Ed25519 directly with `crypto/ed25519`, decoding the minisign format by hand.
+2. **Format of goreleaser's `checksums.txt`** — the order of the columns and the separator, so the parser does not depend on guesswork. Generate one with `goreleaser release --snapshot --clean` and read it.
+3. **Running binary replacement** — on Linux and macOS, `rename(2)` on a running binary works because the old inode survives as long as there is an open descriptor, but writing *over* fails with `ETXTBSY`. Confirm the behavior and write the test that covers it.
+4. **The same, on Windows** — there the running executable is frozen: renaming works, **deleting does not**. Confirm and determine whether Go's `os.Rename` is sufficient or whether you need `MoveFileEx` via `golang.org/x/sys/windows`. Useful reference: the strategy from `github.com/minio/selfupdate`, which renames the current binary to `.old`, puts the new one in place, and fails to delete the `.old` — leaving the cleanup for later. We don't need to adopt the library; we need to understand the technique.
 
-Registre as quatro respostas no relatório antes de seguir. Não escreva código a partir de suposição sobre nenhuma delas — em particular sobre a 4, porque o modo de falha é um update que aborta no meio e deixa o usuário sem binário funcional.
+Record the four responses in the report before moving on. Don't write code based on assumptions about any of them — in particular about 4, because the failure mode is an update that aborts in the middle and leaves the user without a working binary.
 
-- [ ] **Step 2: Escrever os testes de verificação**
+- [ ] **Step 2: Write the verification tests**
 
-`internal/update/verify_test.go` precisa cobrir, no mínimo:
+`internal/update/verify test.go` needs to cover, at a minimum:
 
-- Assinatura válida e checksum correto: aceita.
-- Assinatura válida mas checksum do arquivo diverge: recusa, com erro citando o nome do arquivo.
-- Assinatura inválida para o `checksums.txt`: recusa **sem sequer olhar o checksum** — a ordem importa, porque conferir hash contra um `checksums.txt` não autenticado não prova nada.
-- Chave pública vazia (build local, sem `-ldflags`): recusa com erro explicando que este binário não foi construído para se auto-atualizar. **Nunca** cair para "aceitar sem verificar".
-- Nome de arquivo ausente do `checksums.txt`: recusa.
+- Valid signature and correct checksum: accepted.
+- Valid signature but file checksum differs: refusal, with error citing the file name.
+- Invalid signature for `checksums.txt`: refuses **without even looking at the checksum** — the order matters, because checking hash against an unauthenticated `checksums.txt` doesn't prove anything.
+- Empty public key (local build, without `-ldflags`): refuses with an error explaining that this binary was not built to self-update. **Never** fall for "accept without checking".
+- Missing file name from `checksums.txt`: refuse.
 
-Gere um par de chaves de teste no próprio teste e assine o conteúdo de teste, em vez de embutir chave fixa.
+Generate a test key pair in the test itself and sign the test content instead of hard keying.
 
-- [ ] **Step 3: Implementar a verificação**
+- [ ] **Step 3: Implement verification**
 
-`internal/update/verify.go`, seguindo a ordem: parse da chave pública embutida → verificação da assinatura sobre os bytes do `checksums.txt` → parse do `checksums.txt` → comparação do SHA256 do artefato. Qualquer falha aborta, e nenhuma delas tem caminho de bypass.
+`internal/update/verify.go`, following the order: parse of the embedded public key → verification of the signature on the bytes of `checksums.txt` → parse of `checksums.txt` → comparison of the SHA256 of the artifact. Any failure aborts, and none of them have a bypass path.
 
-- [ ] **Step 4: Implementar a consulta ao GitHub**
+- [ ] **Step 4: Implement the GitHub query**
 
-`internal/update/github.go`. Sem dependência nova: `net/http` e `encoding/json` bastam.
+`internal/update/github.go`. No new dependency: `net/http` and `encoding/json` are enough.
 
-- Canal stable usa `/releases/latest`, que o GitHub já filtra para excluir pré-lançamentos.
-- Canal beta usa `/releases` e pega a primeira entrada, que a API devolve ordenada por data de criação decrescente.
-- Respeite o `--timeout` global do CLI no `http.Client`.
-- Trate 403 com `X-RateLimit-Remaining: 0` como erro específico, dizendo ao usuário que o limite da API foi atingido — é o erro mais provável em uso real e um "falhou" genérico manda a pessoa procurar no lugar errado.
+- Stable channel uses `/releases/latest`, which GitHub already filters to exclude pre-releases.
+- Beta channel uses `/releases` and takes the first entry, which the API returns sorted by descending creation date.
+- Respect the CLI global `--timeout` in `http.Client`.
+- Treat 403 with `X-RateLimit-Remaining: 0` as a specific error, telling the user that the API limit has been reached — it is the most likely error in real use and a generic "failed" sends the person looking in the wrong place.
 
-- [ ] **Step 5: Implementar a substituição, com caminhos separados por sistema**
+- [ ] **Step 5: Implement the replacement, with separate paths per system**
 
-O comportamento diverge entre Unix e Windows o bastante para justificar dois arquivos com build tags: `internal/update/apply_unix.go` (`//go:build !windows`) e `internal/update/apply_windows.go` (`//go:build windows`), com a mesma assinatura `aplicar(caminho string, novo []byte, perm os.FileMode) error`.
+The behavior differs between Unix and Windows enough to justify two files with build tags: `internal/update/apply_unix.go` (`//go:build !windows`) and `internal/update/apply_windows.go` (`//go:build windows`), with the same signature `apply(path string, new []byte, perm os.FileMode) error`.
 
-**Unix.** Escreve o binário novo num arquivo temporário **no mesmo diretório** do atual — para o rename não cruzar filesystem —, aplica a mesma permissão do original, `fsync`, e então `rename`. O inode antigo sobrevive enquanto o processo em execução o mantiver aberto.
+**Unix.** Write the new binary to a temporary file **in the same directory** as the current one — so the rename does not cross the filesystem —, apply the same permission as the original, `fsync`, and then `rename`. The old inode survives as long as the running process keeps it open.
 
-**Windows.** O executável em execução não pode ser deletado, mas pode ser renomeado. A sequência:
+**Windows.** The running executable cannot be deleted, but can be renamed. The sequence:
 
-1. Escreve o novo como `ngx.exe.new` no mesmo diretório.
-2. Renomeia `ngx.exe` para `ngx.exe.old`.
-3. Renomeia `ngx.exe.new` para `ngx.exe`.
-4. **Tenta** remover o `.old`, e ignora a falha — ela é esperada, porque o arquivo ainda está em uso pelo processo que está rodando.
+1. Write the new one as `ngx.exe.new` in the same directory.
+2. Rename `ngx.exe` to `ngx.exe.old`.
+3. Rename `ngx.exe.new` to `ngx.exe`.
+4. **Tries** to remove `.old`, and ignores the failure — it is expected, because the file is still in use by the running process.
 
-Se o passo 3 falhar depois de o 2 ter dado certo, restaure: renomeie o `.old` de volta. Deixar o usuário sem `ngx.exe` é o pior desfecho possível desta função, pior que não atualizar.
+If step 3 fails after step 2 succeeds, restore: rename `.old` back. Leaving the user without `ngx.exe` is the worst possible outcome of this function, worse than not updating.
 
-**Limpeza do `.old`.** Acrescente uma função `LimparResiduo(caminho string)` que remove um `.old` remanescente, e chame-a **na inicialização do `ngx`**, silenciosamente — se falhar, não é problema do usuário. Sem isso, cada atualização deixa um binário órfão no diretório para sempre.
+**Cleanup of `.old`.** Add a function `LimparResiduo(string path)` that removes a remaining `.old`, and call it **at `ngx`** initialization, silently — if it fails, it's not the user's problem. Without this, each update leaves an orphaned binary in the directory forever.
 
-Em ambos os casos, se faltar permissão de escrita no diretório, erro claro dizendo qual diretório e que privilégio é necessário, sem tentar escalar.
+In both cases, if the directory lacks write permission, a clear error saying which directory and which privilege is needed, without trying to escalate.
 
-Teste os dois caminhos. O de Windows pode ser exercitado num runner `windows-latest` avulso, ou verificado à mão — mas registre no relatório o que foi de fato executado e o que não foi.
+Test both paths. The Windows one can be run on a separate `windows-latest` runner, or checked by hand — but record in the report what was actually run and what wasn't.
 
-- [ ] **Step 6: Escrever o comando**
+- [ ] **Step 6: Write the command**
 
-`internal/cli/update.go`, com as flags:
+`internal/cli/update.go`, with the flags:
 
-- `--check`: só reporta se há versão nova, sem baixar nada. Exit 0 se atualizado, exit 7 se há atualização pendente — reaproveitando o código de "mudanças pendentes" que a spec já define.
+- `--check`: only reports if there is a new version, without downloading anything. Exit 0 if updated, exit 7 if there is a pending update — reusing the "pending changes" code that the spec already defines.
 - `--channel stable|beta`: default `stable`.
-- `--version vX.Y.Z`: instala versão específica, inclusive mais antiga.
+- `--version vX.Y.Z`: installs specific version, including older ones.
 
-A saída segue o envelope de sempre, com `data` trazendo `current_version`, `latest_version`, `channel` e `updated`.
+The output follows the usual envelope, with `data` bringing `current_version`, `latest_version`, `channel` and `updated`.
 
-- [ ] **Step 7: Rodar a suíte**
+- [ ] **Step 7: Run the suite**
 
 Run: `go test ./... -race`
-Expected: tudo verde.
+Expected: all green.
 
 - [ ] **Step 8: Commit**
 
@@ -491,52 +489,53 @@ git commit -m "feat(update): auto-atualizacao com verificacao de assinatura"
 
 ---
 
-### Task D5: README de instalação e atualização
+### Task D5: Installation and update README
 
 **Files:**
 - Modify: `README.md`
 
-**Interfaces:**
-- Consumes: tudo acima
-- Produces: documentação de instalação, atualização e verificação manual
+- Produces: installation, update and manual verification documentation**Interfaces:**
+- Consumption: all above
 
-- [ ] **Step 1: Escrever as seções**
+- [ ] **Step 1: Write the sections**
 
-Acrescente ao `README.md` seções cobrindo:
+Add to `README.md` sections covering:
 
-**Instalação em Linux e macOS** — o one-liner de `curl`, mostrando as **duas** formas desde o começo, porque a maioria das máquinas onde o `ngx` é útil exige privilégio para escrever em `/usr/local/bin`:
+**Installation on Linux and macOS** — the `curl` one-liner, showing **both** ways from the beginning, because most machines where `ngx` is useful require privilege to write to `/usr/local/bin`:
 
 ```sh
-# instalacao no sistema (precisa de privilegio)
+# installation on the system (needs privilege)
 curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sudo sh
 
-# instalacao no seu usuario, sem privilegio
+# installation of your user, without privileges
 curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | NGX_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
-Documente `NGX_CHANNEL`, `NGX_VERSION` e `NGX_INSTALL_DIR`. Mostre também o download manual, para quem não executa script vindo da internet — e diga que essa é uma preferência legítima, não paranoia.
+Document `NGX_CHANNEL`, `NGX_VERSION` and `NGX_INSTALL_DIR`. Also show the manual download, for those who don't run scripts from the internet — and say that this is a legitimate preference, not paranoia.
 
-**Instalação no Windows** — o one-liner de PowerShell, o diretório padrão (`%LOCALAPPDATA%\ngx\bin`), o aviso de abrir um terminal novo para o `PATH` valer, e como instalar em local que exija administrador.
+**Installation on Windows** — PowerShell one-liner, default directory (`%LOCALAPPDATA%
+gx in`), the warning about opening a new terminal for the `PATH` to be valid, and how to install it in a location that requires an administrator.
 
-**Nota honesta sobre nginx no Windows** — o `ngx` roda em Windows, mas o nginx de lá é oficialmente **beta** segundo o próprio nginx.org: usa apenas `select()`/`poll()`, apenas um worker efetivamente trabalha, não há suporte a UDP nem QUIC, e faltam os módulos XSLT, image filter, GeoIP e Perl embutido. Diga isso sem rodeios e aponte para `https://nginx.org/en/docs/windows.html`.
+**Honest note about nginx on Windows** — `ngx` runs on Windows, but nginx there is officially **beta** according to nginx.org itself: it only uses `select()`/`poll()`, only one worker actually works, there is no support for UDP or QUIC, and it lacks the XSLT, image filter, GeoIP and built-in Perl modules. Say it bluntly and point to `https://nginx.org/en/docs/windows.html`.
 
-Explique também que, no Windows, o nginx normalmente não é instalado por gerenciador de pacotes: fica num diretório desempacotado, tipo `C:\nginx-1.31.3\`, e usa o diretório de execução como prefixo. Então a autodetecção que funciona em Linux não se aplica, e é preciso apontar o caminho explicitamente:
+Also explain that, on Windows, nginx is not normally installed via a package manager: it is located in an unpacked directory, like `C:
+ginx-1.31.3\`, and uses the run directory as a prefix. So the auto-detection that works on Linux does not apply, and you need to point the path explicitly:
 
 ```powershell
 ngx inspect -c C:\nginx-1.31.3\conf\nginx.conf
 ```
 
-**Atualização** — `ngx update`, `ngx update --check`, `ngx update --channel beta`. Explique que o update verifica assinatura minisign e checksum antes de substituir o binário, e que um binário compilado localmente recusa se auto-atualizar por não ter chave pública embutida.
+**Update** — `ngx update`, `ngx update --check`, `ngx update --channel beta`. Explain that the update checks the minisign signature and checksum before replacing the binary, and that a locally compiled binary refuses to self-update because it does not have an embedded public key.
 
-No Windows, acrescente que o executável em uso não pode ser removido pelo sistema, então a versão antiga fica como `ngx.exe.old` até a próxima execução do `ngx`, que a apaga sozinha. Se a pessoa vir esse arquivo, é esperado — dizer isso evita o chamado de suporte.
+On Windows, add that the executable in use cannot be removed by the system, so the old version remains as `ngx.exe.old` until the next run of `ngx`, which deletes it alone. If the person sees this file, it's expected — saying so avoids the support call.
 
-Em Linux e macOS, se o `ngx` estiver instalado em diretório do sistema, o update precisa do mesmo privilégio da instalação: documente `sudo ngx update`.
+On Linux and macOS, if `ngx` is installed in the system directory, the update needs the same privilege as the installation: document `sudo ngx update`.
 
-**Canais** — que `v0.2.0` é stable e `v0.2.0-beta.1` é beta, que o canal beta recebe as duas, e que toda a série v0.x é instável por natureza independentemente do canal.
+**Channels** — that `v0.2.0` is stable and `v0.2.0-beta.1` is beta, that the beta channel receives both, and that the entire v0.x series is unstable in nature regardless of the channel.
 
-**Verificação manual** — os comandos exatos para conferir uma release à mão com `minisign -V` e `sha256sum -c`, com a chave pública do projeto no texto. Quem audita precisa disso sem ter que ler o código do updater.
+**Manual check** — the exact commands to check a release by hand with `minisign -V` and `sha256sum -c`, with the project's public key in the text. Whoever audits needs this without having to read the updater code.
 
-Seja explícito sobre a diferença de garantia: o script de instalação verifica **checksum**; o `ngx update` verifica **assinatura e checksum**.
+Be explicit about the warranty difference: the installation script checks **checksum**; `ngx update` checks **signature and checksum**.
 
 - [ ] **Step 2: Commit**
 
@@ -547,7 +546,7 @@ git commit -m "docs: instalacao, atualizacao e verificacao de releases"
 
 ---
 
-## Verificação de cobertura
+## Coverage check
 
 | Pedido | Task |
 |---|---|
@@ -560,10 +559,10 @@ git commit -m "docs: instalacao, atualizacao e verificacao de releases"
 | Documentação no README | D5 |
 | Aviso de `sudo` na instalação | D3 (antes do download) e D5 |
 
-## Ordem de execução
+## Execution order
 
-D1 é independente e pode ir primeiro. D2 precisa das chaves criadas fora do CI. D3 e D4 dependem de D2 ter publicado ao menos uma release para testar contra algo real — até lá, testam contra artefatos gerados por `goreleaser --snapshot`. D5 é o fechamento.
+D1 is independent and can go first. D2 needs the keys created outside the CI. D3 and D4 depend on D2 having published at least one release to test against something real — until then, they test against artifacts generated by `goreleaser --snapshot`. D5 is the closure.
 
-## O que este plano não cobre
+## What this plan does not cover
 
-Homebrew tap, pacotes `.deb`/`.rpm`, imagem Docker e publicação em registries. Todos são adições diretas ao `.goreleaser.yaml` depois que o fluxo básico estiver funcionando, e nenhum muda a arquitetura decidida aqui.
+Homebrew tap, `.deb`/`.rpm` packages, Docker image and publication in registries. All are direct additions to `.goreleaser.yaml` once the basic flow is working, and none change the architecture decided here.

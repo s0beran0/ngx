@@ -1,17 +1,16 @@
 # ngx v0.1 — Design
 
-Data: 2026-08-17
-Status: aprovado, pronto para plano de implementação
-Baseado em: spec técnica `ngx` v1.0
+Based on: `ngx` v1.0 technical specDate: 2026-08-17
+Status: approved, ready for implementation plan
 
 ---
 
-## 1. Escopo
+## 1. Scope
 
-Este documento projeta a **v0.1** do `ngx`: a fundação e os comandos de leitura.
-Nada nesta versão altera a configuração de um servidor em execução.
+This document projects `ngx` **v0.1**: the foundation and reading commands.
+Nothing in this release changes the configuration of a running server.
 
-Entram na v0.1:
+Enter v0.1:
 
 | Área | Entrega |
 |---|---|
@@ -21,105 +20,102 @@ Entram na v0.1:
 | Runtime | detecção do nginx, `nginx -t` estruturado, sinal de drift |
 | Comandos | `status`, `inspect`, `get`, `tree`, `fmt`, `test`, `diff` |
 
-Ficam fora da v0.1, por versão: mutação e transação (v0.2), `lint` (v0.3),
-`route` (v0.4), MCP (v0.5), `logs` e `upstreams` (v0.6).
+They are outside of v0.1, by version: mutation and transaction (v0.2), `lint` (v0.3),
+`route` (v0.4), MCP (v0.5), `logs` and `upstreams` (v0.6).
 
-A v0.1 é deliberadamente somente-leitura. As duas apostas mais arriscadas do
-projeto — a linguagem de seletores e a estabilidade dos IDs — são validadas
-antes que exista qualquer caminho de código capaz de escrever num `.conf` de
-produção.
-
----
-
-## 2. Decisões
-
-Decisões tomadas durante o brainstorming, com a razão de cada uma. Elas são
-premissas de tudo que vem depois.
-
-### D1 — Preservação cirúrgica de formatação
-
-Quando o `ngx` reescrever um `.conf`, comentários, espaçamento e estilo do autor
-original permanecem byte a byte, exceto no trecho efetivamente alterado.
-
-*Por quê:* a ferramenta edita arquivos que humanos mantêm. Um `apply` que
-reformata o arquivo inteiro produz um diff ilegível, esconde a mudança real
-dentro do ruído e destrói a confiança que a spec tenta construir com o resumo de
-impacto. Um agente que reformata o arquivo do colega é um agente que ninguém
-autoriza a rodar de novo.
-
-*Consequência:* a árvore precisa carregar offsets de byte. Ver D2.
-
-### D2 — Spans próprios sobre o crossplane
-
-`nginx-go-crossplane` fornece a árvore semântica e a validação de diretivas.
-Um tokenizador nosso, independente, fornece os offsets de byte. As duas
-estruturas são casadas por sequência de tokens.
-
-*Por quê:* o crossplane resolve casos de borda que levariam meses para
-reimplementar — quoting, escapes, `map`, blocos Lua, diretivas de módulo — e
-valida contexto e aridade de diretiva de graça. Mas seu `Directive` carrega
-apenas `Line`, e mesmo o `NgxToken` do lexer (`{Value, Line, IsQuoted, Error}`)
-não tem offset nem coluna. Nem D1 nem o campo `column` exigido em todo
-diagnóstico saem do crossplane puro.
-
-*Alternativas descartadas:* fork vendored do crossplane (menor esforço imediato,
-mas manutenção de fork indefinida num projeto de uma pessoa); parser 100%
-próprio (joga fora anos de casos de borda já resolvidos, contra o não-objetivo
-de reimplementar o que funciona).
-
-*Risco e mitigação:* o casamento token↔árvore é a parte frágil. É coberto por um
-property test que sustenta a arquitetura inteira (§9). Se o property test se
-mostrar impossível de satisfazer, o plano de contingência é propor os offsets
-upstream no crossplane.
-
-### D3 — IDs posicionais ancorados em hash
-
-IDs são derivados da posição estrutural, contados **entre irmãos do mesmo tipo
-de diretiva**. Todo envelope que devolve IDs carrega `config_hash` no `meta`. Um
-ID apresentado junto a um hash diferente é rejeitado com exit 9.
-
-*Por quê:* a spec v1.0 promete que o agente pode referenciar um nó entre
-chamadas sem reler tudo, mas IDs puramente posicionais mudam de significado
-quando um irmão anterior é inserido ou removido. A âncora de hash converte um
-erro silencioso — o agente edita o nó errado — num erro explícito. É o princípio
-"ambiguidade é erro, não palpite" aplicado ao tempo em vez do espaço, e reusa o
-mecanismo de optimistic locking que a spec já define para patches.
-
-### D4 — Drift por evidência, não por hash do master
-
-`drift` é derivado da comparação entre o mtime dos arquivos de configuração e o
-horário de início do processo master. `config_loaded_hash` só é reportado quando
-o próprio `ngx` executou o reload e registrou o hash aplicado. Um campo
-`drift_evidence` informa qual fonte respondeu.
-
-*Por quê:* a spec v1.0 assume que `config_loaded_hash` é obtenível, e não é.
-`nginx -T` lê do disco — despeja a configuração que o binário carregaria agora,
-não a que o master tem em memória. Implementado como a spec descreve, o campo
-sairia sempre idêntico ao hash do disco e `drift` seria constante `false`: o
-campo que a spec chama de "ouro para um agente" mentiria em todos os casos. O
-nginx OSS não expõe a configuração em memória por nenhuma flag ou sinal.
-
-*Trade-off aceito:* o sinal de mtime sabe que algo mudou, não o quê. Em
-compensação funciona no caso que mais importa — um humano editou o arquivo e não
-recarregou — que a fonte exata não cobre.
-
-### D5 — Redação no renderer
-
-A redação de valores sensíveis acontece na serialização da saída, nunca na
-árvore em memória.
-
-*Por quê:* se a árvore fosse redigida no parse, `fmt` gravaria `***` dentro do
-`.conf` do usuário. A redação existe para proteger o que sai para o contexto de
-um LLM, não para mutilar o dado interno.
-
-### D6 — Projeto pessoal, open source, MIT
-
-Repositório pessoal do autor, licença MIT, sem vínculo institucional. CI e
-empacotamento de release montados desde a v0.1.
+v0.1 is deliberately read-only. The two riskiest bets in
+project — the selector language and the stability of IDs — are validated
+before there is any code path capable of writing to a `.conf`
+production.
 
 ---
 
-## 3. Arquitetura
+## 2. Decisions
+
+premises for everything that comes after.Decisions made during brainstorming, with the reason for each one. They are
+
+### D1 — Surgical preservation of formatting
+
+When `ngx` rewrites a `.conf`, comments, spacing and author style
+original remains byte by byte, except in the part actually changed.
+
+*Why:* the tool edits files that humans maintain. An `apply` that
+reformats the entire file produces an unreadable diff, hides the real change
+within the noise and destroys the trust that the spec tries to build with the summary of
+impact. An agent who reformats a colleague's file is an agent that no one
+authorizes it to run again.
+
+*Consequence:* the tree needs to carry byte offsets. See D2.
+
+### D2 — Own spans on the crossplane
+
+`nginx-go-crossplane` provides the semantic tree and directive validation.
+An independent tokenizer of ours provides the byte offsets. The two
+Structures are matched by sequence of tokens.
+
+*Why:* Crossplane solves edge cases that would take months to
+reimplement — quoting, escapes, `map`, Lua blocks, module directives — and
+validates context and directive arity for free. But your `Directive` loads
+just `Line`, and even the lexer's `NgxToken` (`{Value, Line, IsQuoted, Error}`)
+It has no offset or column. Neither D1 nor the `column` field required throughout
+diagnostics come out of the pure crossplane.
+
+*Alternatives discarded:* vendored fork of crossplane (less immediate effort,
+but indefinite fork maintenance in a one-person project); parser 100%
+own (throws away years of already resolved edge cases, against the non-objective
+to reimplement what works).
+
+*Risk and mitigation:* the token↔tree marriage is the fragile part. It is covered by a
+property test that underpins the entire architecture (§9). If the property test
+prove impossible to satisfy, the contingency plan is to propose offsets
+upstream in the crossplane.
+
+### D3 — Hash-anchored positional IDs
+
+ID presented with a different hash is rejected with exit 9.IDs are derived from structural position, counted between siblings of the same type
+directive**. Every envelope that returns IDs carries `config_hash` in `meta`. One
+
+The hash anchor converts a
+silent error — the agent edits the wrong node — in an explicit error. *Why:* the v1.0 spec promises that the agent can reference a node between
+It's the principle
+calls without rereading everything, but purely positional IDs change meaning
+"ambiguity is error, don't guess" applied to time rather than space, and reuses the
+when a previous sibling is inserted or removed. optimistic locking mechanism that the spec already defines for patches.
+
+### D4 — Drift by evidence, not by master hash
+
+`drift` is derived from comparing the mtime of the configuration files and the
+start time of the master process. `config_loaded_hash` is only reported when
+`ngx` itself performed the reload and recorded the applied hash. A field
+`drift_evidence` tells you which source responded.
+
+*Why:* the v1.0 spec assumes that `config_loaded_hash` is obtainable, and it is not.
+`nginx -T` reads from disk — dumps the configuration that the binary would now load,
+not the one the master has in memory. Implemented as the spec describes, the field
+would always be identical to the disk hash and `drift` would be constant `false`:
+field that the spec calls "gold for an agent" would lie in all cases. O
+nginx OSS does not expose the configuration in memory by any flags or signals.
+
+*Trade-off accepted:* the mtime signal knows something has changed, not what. In
+Compensation works in the case that matters most — a human edited the file, not
+reloaded — which the exact source doesn't cover.
+
+### D5 — Writing in the renderer
+
+The writing of sensitive values happens in the serialization of the output, never in the
+tree in memory.
+
+*Why:* if the tree were written in parse, `fmt` would write `***` into the
+user `.conf`. The writing exists to protect what comes out into the context of
+an LLM, not to mutilate the internal data.
+
+### D6 — Personal project, open source, MIT
+
+release packaging assembled since v0.1.Author's personal repository, MIT license, no institutional affiliation. IC and
+
+---
+
+## 3. Architecture
 
 ```
 cmd/ngx/main.go          wiring e tradução de erro → exit code
@@ -133,26 +129,26 @@ internal/
   settings/  arquivo de configuração do ngx (koanf)
 ```
 
-Pacotes de versões futuras — `plan`, `patch`, `snapshot`, `lint`, `route`,
-`mcp`, `logs` — não são criados agora. Diretório vazio é dívida, não
-arquitetura.
+Future release packages — `plan`, `patch`, `snapshot`, `lint`, `route`,
+`mcp`, `logs` — are not created now. Empty directory is debt, no
+architecture.
 
-O que garante que eles caibam depois é a fronteira de `config`: ele devolve uma
-árvore imutável, completa, com spans e IDs. Todo consumidor futuro é leitor
-dessa árvore. Nenhum deles reabre arquivo, reparseia texto ou reimplementa
-resolução de `include`.
+What ensures that they fit later is the `config` boundary: it returns a
+immutable tree, complete, with spans and IDs. Every future consumer is a reader
+of this tree. None of them reopen files, reparse text or reimplement
+resolution of `include`.
 
-**Regra de camada:** `cli/` não formata nada e `output/` não decide nada. Um
-comando produz um valor tipado e, em caso de falha, um erro tipado que carrega
-seu exit code. `output/` transforma isso em JSON, em texto humano e em código de
-saída. É o que impede o envelope de virar `fmt.Println` espalhado por sete
-arquivos e a tabela de exit codes de divergir entre comandos.
+**Layer rule:** `cli/` doesn't format anything and `output/` doesn't decide anything. One
+command produces a typed value and, on failure, a typed error that carries
+your exit code. `output/` turns this into JSON, human text, and code
+exit. This is what prevents the envelope from becoming `fmt.Println` spread across seven
+files and the exit code table from differing between commands.
 
 ---
 
-## 4. Modelo de dados
+## 4. Data Model
 
-### 4.1 Nó
+### 4.1 Node
 
 ```go
 type Span struct {
@@ -180,21 +176,20 @@ type Node struct {
 }
 ```
 
-Dois spans e não um: `Span` é o intervalo que uma remoção apaga; `HeadSpan` é o
-intervalo que uma substituição de argumentos reescreve. Ter os dois desde a v0.1
-é o que torna a edição da v0.2 uma substituição de bytes em vez de uma
-re-renderização do arquivo.
+Two spans and not one: `Span` is the range that a removal erases; `HeadSpan` is the
+range that an argument substitution rewrites. Have both since v0.1
+is what makes the v0.2 edit a byte substitution rather than a
+re-rendering the file.
 
-`Comment` é preenchido pelo crossplane com `ParseComments: true`; comentários
-são nós de diretiva `#`.
+are `#` directive nodes.`Comment` is populated by the crossplane with `ParseComments: true`; comments
 
-### 4.2 Geração de IDs
+### 4.2 ID generation
 
-Um ID é uma sequência de segmentos separados por `.`. Cada segmento é
-`<abreviação><índice>`, onde o índice é a posição entre os irmãos **da mesma
-diretiva**, base 0.
+An ID is a sequence of segments separated by `.`. Each segment is
+`<abbreviation><index>`, where the index is the position between the siblings **of the same
+directive**, base 0.
 
-Tabela de abreviações:
+Abbreviation table:
 
 | Diretiva | Abrev |
 |---|---|
@@ -208,50 +203,49 @@ Tabela de abreviações:
 | `map` | `mp` |
 | qualquer outra | nome completo da diretiva |
 
-Diretivas simples (sem bloco) usam `d<N>` contado entre as diretivas simples
-irmãs. Os blocos de contexto do nível raiz — `http`, `events`, `mail`, `stream`
-— omitem o índice, por ocorrerem no máximo uma vez: o ID é `h`, não `h0`.
+Simple (non-block) directives use `d<N>` counted among the simple directives
+sisters. The root-level context blocks — `http`, `events`, `mail`, `stream`
+— omit the index, as they occur at most once: the ID is `h`, not `h0`.
 
-Exemplos: `h.s0`, `h.s0.d1`, `h.s1.l2`, `h.s1.l2.l0`, `h.u0`.
+Examples: `h.s0`, `h.s0.d1`, `h.s1.l2`, `h.s1.l2.l0`, `h.u0`.
 
-Contar entre irmãos do mesmo tipo, e não por posição absoluta, significa que
-adicionar um `location` não renumera os `server` ao lado — degrada a
-fragilidade sem eliminá-la. A eliminação vem da âncora de hash (D3).
+Counting among siblings of the same type, and not by absolute position, means that
+adding a `location` does not renumber the `server` next to it — it degrades the
+fragility without eliminating it. The elimination comes from the hash anchor (D3).
 
-### 4.3 Hash da configuração
+### 4.3 Configuration hash
 
-`config_hash` é `sha256` da árvore normalizada em modo combine: diretivas e
-argumentos serializados canonicamente, comentários e espaçamento excluídos. Duas
-configurações que só diferem em formatação produzem o mesmo hash — o que é
-correto, porque o que o hash protege é o significado, não o texto.
+`config_hash` is `sha256` of the normalized tree in combine mode: directives and
+canonically serialized arguments, comments and spacing excluded. Two
+configurations that only differ in formatting produce the same hash — which is
+correct, because what the hash protects is the meaning, not the text.
 
 ---
 
-## 5. Linguagem de seletores
+## 5. Selector language
 
-A gramática é a de §5 da spec v1.0. Este documento fixa as quatro regras de
-desambiguação que a gramática deixa em aberto e que só aparecem ao implementar o
+The grammar is that of §5 of the v1.0 spec. This document sets out the four rules of
+disambiguation that the grammar leaves open and that only appear when implementing the
 lexer.
 
-### R1 — O `.` é separador apenas fora de colchetes
+### R1 — The `.` is a separator only outside of square brackets
 
-`http.server[server_name=api.exemplo.com]` — os pontos dentro do valor não
-separam segmento. O lexer mantém profundidade de `[`. Valores podem ser aspeados
-com `'` ou `"`, o que resolve locations regex e valores contendo `,` ou `]`:
+with `'` or `"`, which resolves regex locations and values containing `,` or `]`:`http.server[server_name=api.exemplo.com]` — dots within the value do not
+separate segment. The lexer maintains depth of `[`. Values can be aspeated
 
 ```
 location["~ \.php$"]
 ```
 
-### R2 — `#` no início é ID; em qualquer outra posição é índice
+### R2 — `#` at the beginning is ID; in any other position it is index
 
-`#h.s1.l2` é um literal de ID. `upstream#2` é o terceiro `upstream` (base 0,
-conforme o exemplo da spec). A distinção é posicional: `#` como primeiro
-caractere do seletor inteiro seleciona por ID.
+`#h.s1.l2` is an ID literal. `upstream#2` is the third `upstream` (base 0,
+as per the example in the spec). The distinction is positional: `#` as first
+integer selector character selects by ID.
 
-### R3 — Predicado sobre o próprio nó vs. sobre um filho
+### R3 — Predicate about the node itself vs. about a son
 
-Os exemplos da spec misturam os dois casos. A regra:
+The spec examples mix the two cases. The rule:
 
 | Forma | Significado |
 |---|---|
@@ -259,17 +253,16 @@ Os exemplos da spec misturam os dois casos. A regra:
 | `[arg0=/api]`, `[arg1=ssl]` | argumento do próprio nó, explícito |
 | `[server_name=api.com]` | diretiva **filha** `server_name` com algum arg casando |
 
-Não há ambiguidade porque `argN` é reservado; qualquer outra chave só pode ser
-nome de diretiva.
+directive name.There is no ambiguity because `argN` is reserved; any other key can only be
 
-### R4 — Quantificação sobre múltiplos argumentos
+### R4 — Quantification over multiple arguments
 
-`server_name a.com b.com` tem vários argumentos. `=`, `~` e `^=` casam se
-**algum** argumento satisfizer o predicado. `!=` casa se **nenhum** argumento
-satisfizer. A inversão do quantificador na negação é explícita porque deixá-la
-implícita é uma fonte previsível de bug.
+`server_name a.com b.com` has multiple arguments. `=`, `~` and `^=` match each other
+**some** argument satisfies the predicate. `!=` matches if **no** arguments
+satisfy. The inversion of the quantifier in negation is explicit because leaving it
+implicit is a predictable source of bug.
 
-### Operadores
+### Operators
 
 | Op | Semântica |
 |---|---|
@@ -278,15 +271,15 @@ implícita é uma fonte previsível de bug.
 | `^=` | prefixo |
 | `!=` | nenhum argumento é igual |
 
-Predicados múltiplos dentro de um filtro são conjunção (E lógico).
+Multiple predicates within a filter are conjunction (logical AND).
 
 ---
 
-## 6. Envelope, exit codes e redação
+## 6. Envelope, exit codes and writing
 
-### 6.0 Código de diagnóstico: `NGX-NNNN`, sempre numérico
+### 6.0 Diagnostic code: `NGX-NNNN`, always numeric
 
-O `code` de um `Diagnostic` é **interface pública**: um agente consumindo a saída ramifica por ele. Por isso o formato é fixo, `NGX-` seguido de quatro dígitos, e a alocação é por faixa:
+The `code` of a `Diagnostic` is **public interface**: an agent consuming the output branches through it. Therefore, the format is fixed, `NGX-` followed by four digits, and the allocation is by range:
 
 | Faixa | Domínio |
 |---|---|
@@ -295,15 +288,15 @@ O `code` de um `Diagnostic` é **interface pública**: um agente consumindo a sa
 | `0200`–`0299` | transporte e SSH |
 | `0300`–`0399` | atualização e distribuição |
 
-**A severidade nunca entra no código.** O `Diagnostic` já tem o campo `severity`; repetir a informação como prefixo (`NGX-W001`, `NGX-E001`) cria duas fontes de verdade que podem discordar, e obriga quem consome a fazer *parse* de string para descobrir algo que já vem estruturado.
+**The severity is never included in the code.** `Diagnostic` already has the `severity` field; repeating the information as a prefix (`NGX-W001`, `NGX-E001`) creates two sources of truth that may disagree, and forces the consumer to *parse* the string to discover something that is already structured.
 
-Essa regra existe porque a ausência dela custou: dois subagentes trabalhando em paralelo em arquivos diferentes inventaram, cada um, uma família própria — `NGX-W00N` e `NGX-E00N` — porque nenhum era dono do namespace e nada dizia qual era o esquema. O código não é detalhe de implementação de um pacote; é contrato do produto, e contrato precisa de dono.
+This rule exists because its absence was costly: two subagents working in parallel on different files each invented their own family — `NGX-W00N` and `NGX-E00N` — because neither owned the namespace and nothing said what the scheme was. Code is not implementation detail of a package; It's a product contract, and a contract needs an owner.
 
-*Limitação conhecida, não resolvida:* os códigos `0001`–`0009` identificam o **exit code**, não a condição. Toda configuração inválida sai como `NGX-0003`, qualquer que seja a causa. Em `internal/config` a condição específica vive num campo separado, `Classe`. São dois mecanismos de identidade para o mesmo propósito, e unificá-los é uma decisão em aberto — o caminho provável é a `Classe` virar código na faixa `0100`, e o `0003` ficar só como genérico de quem não tem faixa própria.
+*Known limitation, unresolved:* codes `0001`–`0009` identify the **exit code**, not the condition. Any invalid configuration comes out as `NGX-0003`, whatever the cause. In `internal/config` the specific condition lives in a separate field, `Class`. There are two identity mechanisms for the same purpose, and unifying them is an open decision — the likely path is for the `Class` to become code in the `0100` range, and the `0003` to remain just a generic for those who do not have their own range.
 
 ### 6.1 Envelope
 
-Estrutura idêntica a §6 da spec v1.0:
+Structure identical to §6 of spec v1.0:
 
 ```go
 type Envelope struct {
@@ -316,17 +309,17 @@ type Envelope struct {
 }
 ```
 
-`Meta` da v0.1 carrega `duration_ms`, `nginx_version` e `config_hash` (D3).
+`Meta` from v0.1 loads `duration_ms`, `nginx_version` and `config_hash` (D3).
 
-`Diagnostic` carrega `severity`, `code`, `message`, `file`, `line`, `column`,
-`selector` e `docs`. O campo `fix` existe na struct mas permanece vazio na v0.1,
-já que nenhum comando desta versão produz patches.
+`Diagnostic` loads `severity`, `code`, `message`, `file`, `line`, `column`,
+`selector` and `docs`. The `fix` field exists in the struct but remains empty in v0.1,
+as no commands in this version produce patches.
 
-JSON é o padrão quando stdout não é TTY; `--human` e `--json` forçam.
+JSON is the default when stdout is not TTY; `--human` and `--json` force.
 
 ### 6.2 Exit codes
 
-A v0.1 emite apenas os códigos que seus comandos podem produzir:
+v0.1 only emits the codes that its commands can produce:
 
 | Código | Significado |
 |---|---|
@@ -337,19 +330,18 @@ A v0.1 emite apenas os códigos que seus comandos podem produzir:
 | 7 | drift detectado |
 | 9 | `config_hash` divergente do ID apresentado |
 
-Os códigos 4, 5, 6 e 8 pertencem a comandos que ainda não existem e não são
-documentados como suportados até que sejam emitíveis. Código de saída
-documentado mas nunca emitido é pior que ausente: um agente escreve tratamento
-para um caso que jamais ocorre e deixa de tratar o que ocorre.
+Codes 4, 5, 6 and 8 belong to commands that do not yet exist and are not
+documented as supported until they are issueable. Exit code
+documented but never issued is worse than absent: an agent writes treatment
+for a case that never occurs and fails to deal with what happens.
 
-Comandos não escolhem exit code. Cada erro é um tipo que carrega o seu, e um
-único ponto em `main.go` traduz.
+single dot in `main.go` translates.Commands do not choose exit code. Each error is a type that carries its own, and a
 
-### 6.3 Redação
+### 6.3 Writing
 
-Configurada em `output.redact`. Os três formatos que a spec usa como exemplo são
-unificados num único matcher — nome de diretiva com prefixo de argumentos
-opcional:
+Configured in `output.redact`. The three formats that the spec uses as an example are
+unified in a single matcher — directive name with argument prefix
+optional:
 
 ```yaml
 redact:
@@ -358,66 +350,65 @@ redact:
   - "**.auth_basic_user_file"           # prefixo de contexto, aceito e redundante
 ```
 
-O prefixo `**.` é aceito para compatibilidade com a spec, mas é redundante:
-matchers já valem em qualquer contexto. Aceitá-lo evita que uma configuração
-escrita a partir da spec falhe silenciosamente.
+The `**.` prefix is accepted for compatibility with the spec, but is redundant:
+matchers are valid in any context. Accepting it prevents a configuration
+writing from the spec fails silently.
 
-Comportamento:
+Behavior:
 
-- O **valor** é substituído por `***`; a diretiva, o `id` e a linha permanecem.
-  Remover o nó inteiro faria o agente concluir que a diretiva não existe, o que
-  é pior que esconder o valor.
-- `diff` passa pela redação como qualquer outra saída. É o ponto mais fácil de
-  vazar sem perceber.
-- `fmt` escrevendo em disco **não** redige (D5).
-- `--no-redact` é aceito somente quando stdout é TTY. Um humano depurando vê o
-  segredo; um agente lendo o pipe, estruturalmente, não consegue. Custa poucas
-  linhas e fecha o furo que a redação existe para fechar.
+- The **value** is replaced by `***`; the directive, `id` and line remain.
+  Removing the entire node would cause the agent to conclude that the policy does not exist, which
+  It's worse than hiding the value.
+- `diff` passes through the redaction like any other output. It's the easiest point to
+  leak without realizing it.
+- `fmt` writing to disk **doesn't** redact (D5).
+- `--no-redact` is accepted only when stdout is TTY. A human debugging sees the
+  secret; an agent reading the pipe, structurally, cannot. It costs few
+  lines and closes the hole that the writing exists to close.
 
 ---
 
 ## 7. Runtime
 
-Todas as invocações do nginx usam `exec.Command` com argv explícito. Nenhuma
-string é interpolada em shell.
+string is interpolated in shell.All nginx invocations use `exec.Command` with explicit argv. None
 
-### 7.1 Detecção
+### 7.1 Detection
 
-`nginx -V` escreve em **stderr**. Dele são extraídos `prefix` (`--prefix=`),
-`main_config` (`--conf-path=`), o caminho do pidfile (`--pid-path=`), a versão e
-os módulos estáticos (`--with-*_module`).
+`nginx -V` writes to **stderr**. `prefix` (`--prefix=`) are extracted from it,
+`main_config` (`--conf-path=`), the pidfile path (`--pid-path=`), the version and
+static modules (`--with-*_module`).
 
-Módulos **dinâmicos** carregados via `load_module` não aparecem em `-V`. A lista
-de módulos é complementada a partir da árvore, senão `modules` fica incompleta
-exatamente nos casos não triviais.
+**Dynamic** modules loaded via `load_module` do not appear in `-V`. The list
+of modules is completed from the tree, otherwise `modules` is incomplete
+exactly in non-trivial cases.
 
-### 7.2 Estado do processo
+### 7.2 Process status
 
-- `running` e `master_pid`: leitura do pidfile e sinal 0. Portável, sem
-  dependência nova.
-- `workers` e `config_loaded_at`: exigem inspeção de processo, que diverge entre
-  Linux e darwin. **Campo indisponível é omitido do JSON, nunca estimado.** Um
-  agente trata a ausência de um campo muito melhor que um número errado.
+- `running` and `master_pid`: reading the pidfile and signal 0. Portable, without
+  new dependency.
+- `workers` and `config_loaded_at`: require process inspection, which differs between
+  Linux and Darwin. **Unavailable field is omitted from JSON, never estimated.** A
+  agent treats the absence of a field much better than a wrong number.
 
-### 7.3 `nginx -t` estruturado
+### 7.3 structured `nginx -t`
 
-A saída de erro tem a forma:
+The error output has the form:
 
 ```
 nginx: [emerg] unknown directive "foo" in /etc/nginx/conf.d/a.conf:3
 nginx: configuration file /etc/nginx/nginx.conf test failed
 ```
 
-O parser converte cada linha em um `Diagnostic` e, usando a árvore já
-carregada, **traduz `file:line` de volta para um `selector` e um `id`**.
+The parser converts each line into a `Diagnostic` and, using the tree already
+loaded, **translates `file:line` back to a `selector` and an `id`**.
 
-Isso realiza o item 1 do Apêndice B da spec: o agente recebe o erro do próprio
-nginx já endereçado na linguagem com que ele opera a ferramenta, sem reparsear
-nada. Sai quase de graça porque os spans já existem.
+This accomplishes item 1 of Appendix B of the spec: the agent receives the error from itself
+nginx already addressed in the language with which it operates the tool, without reparsing
+nothing. It's almost free because the spans already exist.
 
 ### 7.4 Drift
 
-Conforme D4:
+According to D4:
 
 ```json
 {
@@ -428,21 +419,20 @@ Conforme D4:
 }
 ```
 
-`drift_evidence` assume `mtime` (arquivos modificados após o início do master)
-ou `hash` (o `ngx` registrou o reload e comparou conteúdo). Quando nenhuma fonte
-consegue responder — master não está rodando, por exemplo — `drift` é `null`, e
-não `false`.
+`drift_evidence` takes `mtime` (files modified after master starts)
+or `hash` (`ngx` recorded the reload and compared contents). When no source
+can respond — master is not running, for example — `drift` is `null`, and
+not `false`.
 
-Comparação de drift nunca é textual: `nginx -T` não bate byte a byte com o
-disco. Quando houver comparação de conteúdo, ela é entre árvores normalizadas.
+Drift comparison is never textual: `nginx -T` does not match byte for byte with
+disk. When there is content comparison, it is between normalized trees.
 
 ---
 
-## 8. Comandos da v0.1
+## 8. v0.1 commands
 
-Flags globais conforme §4.1 da spec: `--config/-c`, `--json`, `--human`,
+`--profile`.Global flags as per §4.1 of the spec: `--config/-c`, `--json`, `--human`,
 `--quiet/-q`, `--no-color`, `--nginx-bin`, `--nginx-version`, `--timeout`,
-`--profile`.
 
 | Comando | Contrato | Exit |
 |---|---|---|
@@ -454,93 +444,92 @@ Flags globais conforme §4.1 da spec: `--config/-c`, `--json`, `--human`,
 | `test` | wrapper estruturado de `nginx -t` | 0, 3 |
 | `diff` | drift textual e/ou o que `fmt` mudaria | 0, ou 7 se houver diferença |
 
-`get` sem seletor é erro de uso, não dump total — coerente com o princípio de
-economia de contexto, e antecipa a restrição que o MCP tornará obrigatória.
+`get` without selector is a usage error, not a total dump — consistent with the principle of
+context economy, and anticipates the restriction that the MCP will make mandatory.
 
-`fmt` é o único comando da v0.1 que escreve em disco, e apenas com `--write`
-explícito. A escrita é atômica: arquivo temporário no mesmo filesystem, `fsync`,
-`rename`, com preservação de permissões.
+`fmt` is the only v0.1 command that writes to disk, and only with `--write`
+explicit. Writing is atomic: temporary file on the same filesystem, `fsync`,
+`rename`, with permissions preservation.
 
-Sobre `diff` na v0.1: a spec lista `diff` no roadmap da v0.1 mas o descreve em
-§4 como comando de transação ("diff textual do que mudaria"). Sem mutação nesta
-versão não existe "o que mudaria". A leitura adotada é a que faz sentido sem
-escrita: diff de drift e diff de formatação.
+About `diff` in v0.1: the spec lists `diff` in the v0.1 roadmap but describes it in
+§4 as transaction command ("textual diff of what would change"). No mutation in this
+version there is no "what would change". The adopted reading is the one that makes sense without
+writing: drift diff and formatting diff.
 
-### 8.1 Arquivo de configuração
+### 8.1 Configuration file
 
-A v0.1 carrega, via koanf, o subconjunto de §13 que seus comandos usam:
-`nginx.binary`, `nginx.config`, `output.format` e `output.redact`. O local
-(`./.ngx/config.yaml`) sobrescreve o global (`/etc/ngx/ngx.yaml`). Chaves de
-versões futuras são ignoradas sem erro, para que um arquivo escrito a partir da
-spec completa funcione hoje.
-
----
-
-## 9. Testes
-
-Desenvolvimento guiado por testes, do primeiro commit.
-
-**Property test que sustenta a arquitetura.** Para qualquer `.conf` do corpus:
-os spans de todos os nós, mais os intervalos entre eles, reconstituem o arquivo
-**byte a byte**. Se essa propriedade vale, o casamento token↔árvore de D2 está
-correto e a edição cirúrgica da v0.2 é segura. Se quebra, quebra alto e cedo,
-antes de existir qualquer código capaz de escrever em produção. É o teste que
-justifica ter escolhido a abordagem D2 em vez do fork.
-
-**Fuzzing.** No lexer e no parser de seletores, e no alinhamento token↔árvore.
-
-**Golden files.** Corpus de `.conf` reais, incluindo os do repositório de testes
-do crossplane, serializados em JSON com árvore, spans e IDs. Flag `-update` para
-regeneração.
-
-**Fake nginx.** Um binário Go compilado pelo próprio teste, com cenários
-dirigidos por variável de ambiente. Exercita o parse de `-V`, `-t` e `-T`,
-incluindo os caminhos de erro, sem Docker e sem shell.
-
-**Integração.** Container com nginx real, sob `//go:build integration`, fora do
-`go test` padrão. Valida que a detecção e o parse de erro funcionam contra o
-binário de verdade, e não apenas contra o fake.
+v0.1 loads, via koanf, the subset of §13 that its commands use:
+`nginx.binary`, `nginx.config`, `output.format` and `output.redact`. The location
+(`./.ngx/config.yaml`) overrides the global (`/etc/ngx/ngx.yaml`). Keys
+future versions are ignored without error, so a file written from the
+full spec works today.
 
 ---
 
-## 10. Repositório e distribuição
+## 9. Tests
 
-- Módulo Go: `github.com/s0beran0/ngx` — **a confirmar** antes do primeiro
-  push; derivado do caminho local, não do handle real do GitHub.
-- Toolchain fixado em `.tool-versions`: `golang 1.25.9`.
-- Licença MIT, em nome pessoal do autor.
-- CI no GitHub Actions: build, `go vet`, testes com race detector, lint.
-- Release com goreleaser: cross-compile para linux/amd64, linux/arm64 e darwin.
-  Zero CGO, binário único estático.
+Test-driven development, from the first commit.
 
-Distribuição, canais de release e auto-atualização têm plano próprio em
-`docs/superpowers/plans/2026-08-17-ngx-distribuicao.md`, com três decisões que
-estendem esta seção: canais derivados de semver (tag limpa é stable, sufixo
-`-beta`/`-rc` é pré-lançamento), verificação de release por checksum SHA256 mais
-assinatura minisign, e chave pública embutida no binário em tempo de compilação.
-O comando `ngx update` não constava de §4 e passa a existir.
+If this property holds, the token↔tree marriage of D2 is
+justifies choosing the D2 approach instead of the fork.correct and the surgical edition of v0.2 is safe. **Property test that supports the architecture.** For any `.conf` in the corpus:
+If it breaks, it breaks loud and early,
+the spans of all nodes, plus the gaps between them, reconstitute the file
+before there was any writeable code in production. **byte by byte**. It is the test that
 
-O motivo da assinatura, e não apenas do checksum: o `ngx` roda como root em
-servidores que servem tráfego. Um auto-update verificado só por checksum aceita
-qualquer binário de quem consiga publicar um release, porque o atacante publica
-o checksum dele junto. A assinatura mantém a garantia mesmo com a conta do
-GitHub comprometida.
+**Fuzzing.** In the lexer and selector parser, and in the token↔tree alignment.
 
-Acesso remoto via SSH tem plano próprio em
-`docs/superpowers/plans/2026-08-17-ngx-remoto-ssh.md`, antecipando parte do
-"multi-host via SSH" que §16 coloca na v1.0. Ele opera sem instalar nada no
-servidor: lê a configuração por SFTP e executa o nginx que já existe lá. Três
-decisões: verificação estrita de host key com escape explícito, autenticação
-tentando o `ssh-agent` antes de qualquer arquivo de chave, e `~/.ssh/config`
-respeitado para que `ngx --host web1` funcione para quem já tem `ssh web1`.
+**Golden files.** Corpus of real `.conf`, including those from the test repository
+of the crossplane, serialized in JSON with tree, spans and IDs. `-update` flag for
+regeneration.
 
-Esse plano também corrige um defeito da v0.1 que só se torna visível no uso
-remoto: o `ngx` injeta `Open` no crossplane mas não `Glob`, então
-`include conf.d/*.conf` é resolvido com `filepath.Glob` sobre o disco local.
-Apontado para um host remoto, o `ngx` listaria arquivos da máquina do operador
-e os trataria como configuração do servidor.
+**Fake nginx.** A Go binary compiled by the test itself, with scenarios
+driven by environment variable. Practice parsing `-V`, `-t` and `-T`,
+including the error paths, without Docker and without shell.
 
-Dependências da v0.1:
+**Integration.** Container with real nginx, under `//go:build integration`, outside of
+`go test` pattern. Validates that error detection and parsing work against the
+real binary, and not just against the fake.
+
+---
+
+## 10. Repository and distribution
+
+- Go module: `github.com/s0beran0/ngx` — **to be confirmed** before the first
+  push; derived from the local path, not the actual GitHub handle.
+- Fixed toolchain in `.tool-versions`: `golang 1.25.9`.
+- MIT License, in the author's personal name.
+- CI on GitHub Actions: build, `go vet`, tests with race detector, lint.
+- Release with goreleaser: cross-compile for linux/amd64, linux/arm64 and darwin.
+  Zero CGO, static single binary.
+
+Distribution, release channels and self-update have their own plan in
+`docs/superpowers/plans/2026-08-17-ngx-distribuicao.md`, with three decisions that
+extend this section: semver-derived channels (clear tag is stable, suffix
+`-beta`/`-rc` is pre-release), release check by SHA256 checksum more
+minisign signature, and public key embedded in the binary at compile time.
+The `ngx update` command was not included in §4 and now exists.
+
+The reason for the signature, and not just the checksum: `ngx` runs as root in
+servers that serve traffic. An auto-update verified only by checksum accepts
+any binary that can publish a release, because the attacker publishes
+his checksum together. The subscription maintains the guarantee even with the
+GitHub compromised.
+
+Remote access via SSH has its own plan in
+`docs/superpowers/plans/2026-08-17-ngx-remoto-ssh.md`, anticipating part of the
+"multi-host via SSH" which §16 puts in v1.0. It operates without installing anything on the
+server: reads the configuration via SFTP and runs the nginx that already exists there. Three
+decisions: strict host key checking with explicit escaping, authentication
+trying `ssh-agent` before any key files, and `~/.ssh/config`
+respected so that `ngx --host web1` works for those who already have `ssh web1`.
+
+This plan also fixes a defect in v0.1 that only becomes visible in use
+remote: `ngx` injects `Open` into the crossplane but not `Glob`, so
+`include conf.d/*.conf` is resolved with `filepath.Glob` on the local disk.
+Pointed at a remote host, `ngx` would list files from the operator's machine
+and would treat them as server configuration.
+
+v0.1 dependencies:
 
 | Uso | Pacote |
 |---|---|
@@ -552,9 +541,9 @@ Dependências da v0.1:
 
 ---
 
-## 11. Divergências em relação à spec v1.0
+## 11. Divergences in relation to spec v1.0
 
-Registradas para que a spec possa ser atualizada.
+Registered so that the spec can be updated.
 
 | # | Ponto | Divergência |
 |---|---|---|
@@ -568,9 +557,9 @@ Registradas para que a spec possa ser atualizada.
 
 ---
 
-## 12. Fora de escopo
+## 12. Out of scope
 
-Não fazem parte deste design: qualquer caminho de código que altere um `.conf`
-de produção, reload, snapshot, rollback, lint, simulação de roteamento, servidor
-MCP, leitura de logs e orquestração multi-nó. Cada um entra pela versão do
-roadmap correspondente, com seu próprio ciclo de design e plano.
+Not part of this design: any code path that changes a `.conf`
+production, reload, snapshot, rollback, lint, routing simulation, server
+MCP, log reading and multi-node orchestration. Each one enters for the version of
+corresponding roadmap, with its own design cycle and plan.

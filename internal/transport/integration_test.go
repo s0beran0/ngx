@@ -146,7 +146,7 @@ func knownHostsLine(t *testing.T, err error) string {
 	t.Helper()
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
+	require.Equal(t, transport.CodeUnknownHost, e.Diag.Code)
 
 	_, line, found := strings.Cut(e.Diag.Message, knownHostsLinePrefix)
 	require.Truef(t, found,
@@ -165,7 +165,7 @@ func learnedKnownHosts(t *testing.T, key string, port int) string {
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	require.NoError(t, os.WriteFile(path, nil, 0o600))
 
-	tr, _, err := transport.SSHComDiagnosticos(benchOptions(key, port, path))
+	tr, _, err := transport.SSHWithDiagnostics(benchOptions(key, port, path))
 	if err == nil {
 		_ = tr.Close()
 		t.Fatal("the connection was accepted with an empty known_hosts: an unknown host has to be refused")
@@ -179,13 +179,13 @@ func connectToBench(t *testing.T) transport.Transport {
 	t.Helper()
 
 	key, port := requireBench(t)
-	tr, diags, err := transport.SSHComDiagnosticos(
+	tr, diags, err := transport.SSHWithDiagnostics(
 		benchOptions(key, port, learnedKnownHosts(t, key, port)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tr.Close() })
 
 	for _, d := range diags {
-		require.NotEqualf(t, transport.CodigoAvisoHostKeyInsegura, d.Code,
+		require.NotEqualf(t, transport.CodeInsecureHostKeyWarning, d.Code,
 			"the test has to connect with host key verification: %s", d.Message)
 	}
 	return tr
@@ -359,7 +359,7 @@ func TestRemoteDumpWithSudoReturnsContainerEffectiveConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	dump, err := runtime.New(tr, runtime.ComSudo(true)).DumpConfig(ctx)
+	dump, err := runtime.New(tr, runtime.WithSudo(true)).DumpConfig(ctx)
 	require.NoError(t, err)
 	require.True(t, dump.OK)
 	require.Contains(t, dump.ConfigFile, "/etc/nginx/nginx.conf")
@@ -403,7 +403,7 @@ func TestUnknownHostIsRefusedBeforeEnteringKnownHosts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "known_hosts")
 	require.NoError(t, os.WriteFile(path, nil, 0o600))
 
-	tr, _, firstAccessErr := transport.SSHComDiagnosticos(benchOptions(key, port, path))
+	tr, _, firstAccessErr := transport.SSHWithDiagnostics(benchOptions(key, port, path))
 	if firstAccessErr == nil {
 		_ = tr.Close()
 		t.Fatal("the connection was accepted with an empty known_hosts")
@@ -411,8 +411,8 @@ func TestUnknownHostIsRefusedBeforeEnteringKnownHosts(t *testing.T) {
 
 	var e *output.Error
 	require.ErrorAs(t, firstAccessErr, &e)
-	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
-	require.NotEqual(t, transport.CodigoHostKeyAlterada, e.Diag.Code)
+	require.Equal(t, transport.CodeUnknownHost, e.Diag.Code)
+	require.NotEqual(t, transport.CodeHostKeyChanged, e.Diag.Code)
 
 	msg := e.Diag.Message
 	require.Contains(t, msg, "unknown host")
@@ -431,13 +431,13 @@ func TestUnknownHostIsRefusedBeforeEnteringKnownHosts(t *testing.T) {
 	line := knownHostsLine(t, firstAccessErr)
 	require.NoError(t, os.WriteFile(path, []byte(line+"\n"), 0o600))
 
-	tr, diags, err := transport.SSHComDiagnosticos(benchOptions(key, port, path))
+	tr, diags, err := transport.SSHWithDiagnostics(benchOptions(key, port, path))
 	require.NoError(t, err)
 	defer func() { _ = tr.Close() }()
 
 	require.Equal(t, fmt.Sprintf("ssh://%s@%s:%d", benchUser, benchHost, port), tr.Describe())
 	for _, d := range diags {
-		require.NotEqual(t, transport.CodigoAvisoHostKeyInsegura, d.Code)
+		require.NotEqual(t, transport.CodeInsecureHostKeyWarning, d.Code)
 	}
 }
 
@@ -460,7 +460,7 @@ func TestWithoutSudoNgxReportsPrivilegeRequirementAndDoesNotEscalate(t *testing.
 
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	require.Equal(t, runtime.CodigoPrivilegioNecessario, e.Diag.Code)
+	require.Equal(t, runtime.CodePrivilegeRequired, e.Diag.Code)
 
 	msg := e.Diag.Message
 	require.Contains(t, msg, "`nginx -T`", "the command that ran carried no sudo")
@@ -471,7 +471,7 @@ func TestWithoutSudoNgxReportsPrivilegeRequirementAndDoesNotEscalate(t *testing.
 	// The same call, with --sudo, works: the bench allows passwordless sudo
 	// for nginx. That is, the refusal above was a decision by ngx, not a
 	// missing path.
-	dump, err = runtime.New(tr, runtime.ComSudo(true)).DumpConfig(ctx)
+	dump, err = runtime.New(tr, runtime.WithSudo(true)).DumpConfig(ctx)
 	require.NoError(t, err)
 	require.True(t, dump.OK)
 	require.NotEmpty(t, dump.Files)

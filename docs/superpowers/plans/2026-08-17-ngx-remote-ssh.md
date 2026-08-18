@@ -1,160 +1,158 @@
-# ngx — Plano de Acesso Remoto via SSH
+# ngx — Remote Access Plan via SSH
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Administrar o nginx de um servidor remoto sem instalar nada nele — o `ngx` roda na sua máquina, lê a configuração e executa o nginx por SSH.
+**Goal:** Administer nginx from a remote server without installing anything on it — `ngx` runs on your machine, reads the configuration and runs nginx over SSH.
 
-**Architecture:** Uma camada de transporte com duas implementações, local e SSH, atrás da mesma interface. O parse remoto reaproveita o `ParseOptions.Open` que a v0.1 já desenhou como injetável, mais um `Glob` que passa a ser injetado também. Nenhuma lógica de árvore, seletor, ID, hash ou redação muda: o remoto é apenas outra fonte de bytes e outro lugar onde comandos rodam.
+**Architecture:** A transport layer with two implementations, local and SSH, behind the same interface. Remote parse reuses `ParseOptions.Open` that v0.1 already designed as injectable, plus a `Glob` that is now injected as well. No tree, selector, ID, hash, or wording logic changes: the remote is just another source of bytes and another place where commands run.
 
-**Tech Stack:** `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`, e — a confirmar na Task R2 — uma forma portável de falar com o `ssh-agent`.
+**Tech Stack:** `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`, and — to be confirmed in Task R2 — a portable way to talk to `ssh-agent`.
 
-## Nota de terminologia
+## Terminology note
 
-Este projeto usa a palavra "agente" em dois sentidos, e confundi-los leva a
-implementar a coisa errada:
+This project uses the word "agent" in two senses, and confusing them leads to
+implement the wrong thing:
 
-- **agente de IA** — quem *consome* a saída do `ngx`. É o que a spec quer dizer
-  em "o agente age sem reparsear" e é a razão de a saída ser JSON por padrão
-  quando não há terminal. O `ngx` também é usado por humanos diretamente, e é
-  por isso que existe `--human`.
-- **`ssh-agent`** — um programa do sistema operacional, anterior a tudo isso,
-  que mantém chaves SSH destravadas em memória e assina desafios em nome de
-  quem autentica. Nada a ver com IA.
+when there is no terminal. who authenticates. `ngx` is also used by humans directly, and is
+  Nothing to do with AI.- **AI agent** — who *consumes* the output of `ngx`. That's why there is `--human`.
+That's what the spec means
+  - **`ssh-agent`** — an operating system program, prior to all this,
+  in "the agent acts without reparsing" and is the reason the output is JSON by default
+  which keeps unlocked SSH keys in memory and signs challenges on behalf of
+  
 
-Neste documento, `ssh-agent` aparece sempre escrito assim, com o prefixo. Onde
-estiver só "agente", trata-se do consumidor da saída.
+is just an "agent", it is the consumer of the output.In this document, `ssh-agent` is always written like this, with the prefix. Where
 
-**Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md`. Este plano realiza parte do item "multi-host via SSH" que a spec coloca na v1.0 (§16), antecipado a pedido.
+**Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md`. This plan fulfills part of the "multi-host via SSH" item that the spec puts in v1.0 (§16), anticipated by request.
 
-**Pré-requisito:** Plano 1 concluído. Este plano depende de `config.Parse`, `config.Combine`, `internal/runtime` e do envelope de saída.
+**Prerequisite:** Plan 1 completed. This plan depends on `config.Parse`, `config.Combine`, `internal/runtime` and the output envelope.
 
 ## Global Constraints
 
-- Módulo Go: `github.com/s0beran0/ngx`. Go 1.25.
-- **Zero CGO.** Toda dependência nova precisa ser Go puro — verifique o `go.mod` dela antes de adicionar, e confirme com `CGO_ENABLED=0 go build` para as seis plataformas.
-- **Funciona em Linux, macOS e Windows.** Nada específico de um sistema sem o caminho equivalente nos outros dois. Isso vale em particular para o `ssh-agent`, que no Windows não é um socket Unix.
-- Nenhum `exec` de shell: comandos remotos são montados com argumentos explícitos e escapados, nunca concatenados numa string de shell.
-- **Segredo nunca vai em flag.** Senha e passphrase vêm de prompt ou de variável de ambiente. Flag aparece em `ps`, no histórico do shell e nos logs de CI.
-- Comentários de código em português, sem acentuação.
-- **Mensagens de commit nunca mencionam Claude ou IA.** Sem trailer `Co-Authored-By`.
+- Go module: `github.com/s0beran0/ngx`. Go 1.25.
+- **Zero CGO.** Every new dependency must be pure Go — check its `go.mod` before adding, and confirm with `CGO_ENABLED=0 go build` for all six platforms.
+- **Works on Linux, macOS and Windows.** Nothing specific to a system without the equivalent path on the other two. This is particularly true for `ssh-agent`, which on Windows is not a Unix socket.
+- No shell `exec`: remote commands are assembled with explicit and escaped arguments, never concatenated into a shell string.
+- **Secret never goes in flag.** Password and passphrase come from prompt or environment variable. Flag appears in `ps`, shell history and CI logs.
+- Code comments in Portuguese, without accents.
+- **Commit messages never mention Claude or IA.** No `Co-Authored-By` trailer.
 
-## Decisões
+## Decisions
 
-### DR1 — Verificação estrita de host key, com escape explícito
+### DR1 — Strict host key checking, with explicit escaping
 
-O `ngx` usa o `known_hosts` do usuário e **recusa** host desconhecido ou cuja chave mudou, como o `ssh` faz. Quem precisar contornar passa `--insecure-host-key`, que é verboso de propósito e fica visível no comando.
+`ngx` uses the user's `known_hosts` and **refuses** an unknown host or host whose key has changed, like `ssh` does. Anyone who needs to bypass passes `--insecure-host-key`, which is verbose on purpose and is visible in the command.
 
-*Por quê:* o `ngx` remoto transmite a configuração do servidor e executa comandos privilegiados nele. Um cliente que aceite qualquer host key permite que qualquer máquina na rota se passe pelo servidor, capturando credencial e recebendo os comandos. Aceitar chave desconhecida em silêncio é o comportamento que faz a criptografia do SSH não servir para nada.
+*Why:* remote `ngx` transmits the server configuration and executes privileged commands on it. A client that accepts any host key allows any machine on the route to impersonate the server, capturing credentials and receiving commands. Accepting unknown keys silently is the behavior that makes SSH encryption useless.
 
-*Custo aceito:* o primeiro acesso a um host novo exige que ele esteja no `known_hosts` — o que se resolve com um `ssh` manual antes, e é o mesmo atrito que o `ssh` já impõe.
+*Accepted cost:* the first access to a new host requires that it be in `known_hosts` — which is resolved with a manual `ssh` first, and is the same friction that `ssh` already imposes.
 
-### DR2 — `ssh-agent` primeiro, `~/.ssh/config` depois, flags por cima
+### DR2 — `ssh-agent` first, `~/.ssh/config` second, flags on top
 
-A ordem de resolução é: flags explícitas vencem; o que faltar vem do `~/.ssh/config` para aquele host; a autenticação tenta o `ssh-agent` antes de qualquer arquivo de chave.
+The order of resolution is: explicit flags win; whatever is missing comes from `~/.ssh/config` for that host; authentication tries `ssh-agent` before any key files.
 
-*Correções medidas contra um nginx de produção real* (Oracle Linux 9, VPN), todas de casos em que o `ngx` recusava conexão que o `ssh` fazia:
+*Fixes measured against a real production nginx* (Oracle Linux 9, VPN), all cases where `ngx` refused connection that `ssh` made:
 
-1. **Um único método de chave pública.** Oferecer `ssh-agent` e arquivo como métodos separados falha: assim que o primeiro se esgota sem autenticar, o seguinte não salva. O OpenSSH oferece tudo num método só. Sem isso, qualquer pessoa com chaves no agente que não servissem para aquele host ficava sem conectar.
-2. **Busca pelas chaves padrão do `~/.ssh`.** O `ssh` tenta `id_rsa`, `id_ecdsa` e `id_ed25519` por conta própria — é o que faz `ssh web1` funcionar sem configuração. Sem isso, a promessa desta decisão (`ngx --host web1` funciona para quem já tem `ssh web1`) era falsa: no host medido a chave que autenticava era `~/.ssh/id_rsa`, fora do `~/.ssh/config` e fora do agente.
-3. **Chave nomeada em `--key` vem primeiro** (abaixo).
+1. **A single public key method.** Offering `ssh-agent` and file as separate methods fails: as soon as the first one runs out without authenticating, the next one doesn't save. OpenSSH offers everything in one method. Without this, anyone with keys on the agent that did not fit that host would not be able to connect.
+2. **Search for default keys from `~/.ssh`.** `ssh` tries `id_rsa`, `id_ecdsa` and `id_ed25519` on its own — this is what makes `ssh web1` work without configuration. Without this, the promise of this decision (`ngx --host web1` works for those who already have `ssh web1`) was false: on the measured host the key that authenticated was `~/.ssh/id_rsa`, outside of `~/.ssh/config` and outside of the agent.
+3. **Key named in `--key` comes first** (below).
 
-*Exceção medida contra servidor real:* quando o usuário nomeia a chave em `--key`, ela é oferecida **antes** do `ssh-agent`. O `MaxAuthTries` padrão do sshd é 6; cada chave carregada no `ssh-agent` gasta uma tentativa, e um desenvolvedor costuma ter várias. Com o agente na frente, a chave explicitamente pedida nunca chegava a ser oferecida e a conexão morria com `no supported methods remain` — mensagem que não aponta para a causa. É o mesmo problema que `IdentitiesOnly=yes` resolve no `ssh`. Sem `--key`, a ordem original vale.
+*Exception measured against real server:* when the user names the key in `--key`, it is offered **before** `ssh-agent`. sshd's default `MaxAuthTries` is 6; each key loaded into `ssh-agent` takes one attempt, and a developer often has several. With the agent in front, the explicitly requested key was never offered and the connection died with `no supported methods remain` — a message that does not point to the cause. It's the same problem that `IdentitiesOnly=yes` solves in `ssh`. Without `--key`, the original order holds.
 
-*Por quê:* com o `ssh-agent`, a chave privada nunca é lida pelo `ngx` — ele envia o desafio e recebe a assinatura. Menos código nosso tocando material de chave é menos superfície para errar. E ler o `~/.ssh/config` significa que `ngx --host web1 inspect` funciona para quem já tem `ssh web1` funcionando, sem reconfigurar nada.
+*Why:* With `ssh-agent`, the private key is never read by `ngx` — it sends the challenge and receives the signature. Less code of ours touching key material is less surface to make mistakes on. And reading `~/.ssh/config` means that `ngx --host web1 inspect` works for those who already have `ssh web1` working, without reconfiguring anything.
 
-### DR3 — Nada é instalado no servidor remoto
+### DR3 — Nothing is installed on the remote server
 
-O `ngx` não copia binário para o destino, nem temporariamente. Ele lê arquivos por SFTP e executa o `nginx` que já existe lá.
+`ngx` does not copy binary to the destination, not even temporarily. It reads files over SFTP and runs the `nginx` that already exists there.
 
-*Por quê:* é o requisito. Escrever executável em `/tmp` de um servidor de produção é o tipo de coisa que dispara alerta de EDR e que um operador tem razão em não querer.
+*Why:* is the requirement. Writing executables in `/tmp` on a production server is the kind of thing that triggers EDR alerts and that an operator is right not to want.
 
-*Custo aceito:* mais viagens de rede. Uma leitura SFTP por arquivo da configuração efetiva.
+*Accepted cost:* plus network trips. One SFTP read per file of the effective configuration.
 
-*Medido num nginx de produção real* (Oracle Linux 9, nginx 1.20.1, acesso por VPN): a configuração efetiva tem **132 arquivos** e 9.822 linhas. A estimativa original deste plano — "trinta `include`" — errou por mais de quatro vezes. Com 132 viagens sequenciais, a latência da VPN domina o tempo de resposta e uma leitura interativa deixa de ser interativa.
+*Measured on real production nginx* (Oracle Linux 9, nginx 1.20.1, VPN access): effective configuration has **132 files** and 9,822 lines. The original estimate for this plan — "thirty 'includes'" — was wrong more than four times. With 132 sequential trips, VPN latency dominates response time and an interactive read stops being interactive.
 
-*Consequência:* paralelizar as leituras sai de "conserto se virar problema" e passa a ser requisito de projeto da R4. Serialize apenas o que a dependência exige: o `include` só é conhecido depois de ler quem o declara, então o paralelismo é por nível da árvore, não sobre a lista inteira.
+*Consequence:* parallelizing the readings goes from being a "fix if it becomes a problem" to becoming a design requirement for R4. Serialize only what the dependency requires: `include` is only known after reading who declares it, so the parallelism is per tree level, not over the entire list.
 
-### DR7 — `~/.ssh/config` ilegível degrada com aviso, nunca aborta
+### DR7 — unreadable `~/.ssh/config` degrades with warning, never aborts
 
-A biblioteca de parse honra `Host` (com wildcard e negação), `Include`, `Match all` e `Match Host`. Qualquer outro critério — `user`, `final`, `canonical`, `exec` — faz o parse do **arquivo inteiro** falhar, não apenas daquela entrada. Detalhes e fontes em `docs/superpowers/specs/2026-08-17-ngx-remoto-dependencias.md`.
+The parse library honors `Host` (with wildcard and negation), `Include`, `Match all` and `Match Host`. Any other criteria — `user`, `final`, `canonical`, `exec` — makes the parse of the **whole file** fail, not just that entry. Details and sources in `docs/superpowers/specs/2026-08-17-ngx-remoto-dependencias.md`.
 
-Um `~/.ssh/config` com `Match user deploy` é perfeitamente válido para o `ssh` e nada raro. Se o `ngx` abortasse, ele quebraria para quem tem um arquivo legítimo, por limitação nossa.
+A `~/.ssh/config` with `Match user deploy` is perfectly valid for `ssh` and not at all rare. If `ngx` aborted, it would break for anyone who has a legitimate file, due to our limitation.
 
-Então: falha de parse vira **diagnóstico de severidade `warning`** no envelope, dizendo qual arquivo e qual linha o `ngx` não entendeu, e a resolução segue com o que veio de flags e dos defaults. O que **não** pode acontecer é o `ngx` ignorar o arquivo em silêncio e conectar em outro host que não o pretendido — o aviso é o que impede isso de virar surpresa.
+So: parse failure becomes a **`warning`** severity diagnosis in the envelope, saying which file and which line `ngx` did not understand, and the resolution follows what came from flags and defaults. What **cannot** happen is that `ngx` ignores the file silently and connects to a host other than the intended one — the warning is what prevents this from becoming a surprise.
 
-### DR8 — Leitura privilegiada é mínima, em três degraus
+### DR8 — Privileged reading is minimal, in three steps
 
-Num servidor real a configuração raramente é toda legível pelo usuário da conexão: a maioria dos arquivos é pública e um punhado guarda credencial e fica restrito ao root. Medido num nginx de produção: **um** arquivo entre 132.
+On a real server, the configuration is rarely completely readable by the connection user: most files are public and a handful hold credentials and are restricted to root. Measured on production nginx: **one** file out of 132.
 
-A resposta **não** é orientar quem usa a afrouxar permissão no servidor. Aquele arquivo está restrito de propósito, e uma ferramenta que exige `chmod` em `/etc/nginx` para funcionar troca a segurança do host por conveniência de leitura — replicada por toda a frota por quem só quer o `ngx` rodando.
+The **no** answer is to advise those who use it to loosen permissions on the server. That file is restricted on purpose, and a tool that requires `chmod` in `/etc/nginx` to work trades host security for reading convenience — replicated across the entire fleet by those who just want `ngx` running.
 
-Com `--sudo`, a leitura desce três degraus, parando no primeiro que responder:
+With `--sudo`, reading goes down three steps, stopping at the first one that responds:
 
-1. **SFTP como o usuário da conexão.** Sem privilégio nenhum. Cobre a maioria.
-2. **`sudo -n cat <arquivo>`**, apenas para o arquivo recusado. Os outros 131 continuam sendo lidos sem privilégio.
-3. **`sudo -n nginx -T`**, quando nem o `cat` passa. É o caso do servidor endurecido, cujo `sudoers` libera comandos específicos — tipicamente o próprio nginx — e recusa um `cat` genérico. Sem este degrau a leitura privilegiada seria inútil justamente onde o `sudo` está bem configurado.
+1. **SFTP as the connection user.** No privileges whatsoever. Covers most.
+2. **`sudo -n cat <file>`**, only for the rejected file. The other 131 continue to be read without privilege.
+3. **`sudo -n nginx -T`**, when not even `cat` passes. This is the case of the hardened server, whose `sudoers` releases specific commands — typically nginx itself — and refuses a generic `cat`. Without this step, privileged reading would be useless precisely where `sudo` is well configured.
 
-O dump é o último degrau, e não o primeiro, porque `nginx -T` exige configuração **válida**: a hora em que mais se precisa ler a configuração é quando ela quebrou, e ali só a leitura arquivo a arquivo responde.
+The dump is the last step, and not the first, because `nginx -T` requires **valid** configuration: the time when you most need to read the configuration is when it broke, and there only reading file by file responds.
 
-Sem `--sudo` nada disso acontece — a DR5 continua valendo —, mas o diagnóstico passa a dizer que `--sudo` resolve, para que o beco sem saída não empurre o operador para a solução errada.
+Without `--sudo` none of this happens — DR5 is still valid —, but the diagnosis starts to say that `--sudo` solves it, so that the dead end doesn't push the operator towards the wrong solution.
 
-*Transparência:* todo caminho que exigiu privilégio aparece no envelope, com a origem. Ler a configuração de um servidor com `sudo` não pode acontecer calado.
+*Transparency:* every path that required privilege appears on the envelope, with the origin. Reading a server's configuration with `sudo` cannot happen silently.
 
-*O que o `--sudo` NÃO faz:* restringir por lista de caminhos. Foi considerado e descartado. Instalação fora do padrão quebraria — o próprio servidor medido inclui de `/etc/letsencrypt`, fora de `/etc/nginx` — e protegeria pouco, porque o vetor real está dentro da árvore de configuração legítima: verificado que um arquivo que não é sintaxe nginx (um `/etc/shadow`, por exemplo) falha no parse e **não** tem conteúdo emitido; o que aparece na saída é arquivo que já é configuração válida.
+*What `--sudo` DOES NOT do:* restrict by path list. It was considered and discarded. Non-standard installation would break — the measured server itself includes from `/etc/letsencrypt`, outside of `/etc/nginx` — and would protect little, because the real vector is within the legitimate configuration tree: verified that a file that is not nginx syntax (a `/etc/shadow`, for example) fails to parse and has **no** emitted content; what appears in the output is a file that is already a valid configuration.
 
-Em vez de restringir, o `ngx` marca o que é anômalo: leitura privilegiada de um caminho **fora de qualquer diretório que a configuração já alcançava sem privilégio** sai como `warning`, não `info`. A árvore de confiança é derivada da própria configuração — os diretórios que ela de fato referencia — e não de uma lista fixa, então instalação em `/opt` funciona igual. O arquivo de topo nunca é anomalia: foi o operador que o nomeou.
+Instead of restricting, `ngx` marks what is anomalous: privileged reading of a path **outside any directory that the configuration already reached without privilege** comes out as `warning`, not `info`. The trust tree is derived from the configuration itself — the directories it actually references — and not from a fixed list, so installation in `/opt` works the same. The top file is never an anomaly: it was the operator who named it.
 
-*Proporção, dita com honestidade:* quem consegue escrever no `nginx.conf` do alvo já pode exfiltrar com `proxy_pass` e já roda o master como root. O `ngx` muda o **destino** do dado, não o acesso a ele. Isto é observabilidade, não contenção.
+*Proportion, said honestly:* whoever can write to the target's `nginx.conf` can now exfiltrate with `proxy_pass` and already run master as root. `ngx` changes the **destination** of the data, not the access to it. This is observability, not containment.
 
-### DR6 — O `ngx` não usa `sftp.Client.Glob`
+### DR6 — `ngx` does not use `sftp.Client.Glob`
 
-O `Glob` do `github.com/pkg/sftp` **descarta erros de I/O por contrato**. O comentário da própria função diz: *"Glob ignores file system errors such as I/O errors reading directories. The only possible returned error is ErrBadPattern"* (`match.go:40-42`). E no caminho sem metacaractere ele é literal: `file, err := c.Lstat(pattern); if err != nil { return nil, nil }` — conexão caindo devolve nenhum resultado e nenhum erro.
+`Glob` from `github.com/pkg/sftp` **discards I/O errors by contract**. The function's own comment says: *"Glob ignores file system errors such as I/O errors reading directories. The only possible returned error is ErrBadPattern"* (`match.go:40-42`). And in the path without metacharacter it is literal: `file, err := c.Lstat(pattern); if err != nil { return nil, nil }` — dropped connection returns no results and no errors.
 
-O `ngx` implementa o próprio glob remoto sobre `ReadDir` + `path.Match`, propagando erro de I/O como erro.
+`ngx` implements its own remote glob over `ReadDir` + `path.Match`, propagating I/O error as an error.
 
-*Por quê:* `include /etc/nginx/conf.d/*.conf` num link instável devolveria zero arquivos em silêncio, e o `ngx` apresentaria a configuração do servidor sem os 112 arquivos que ela tem — como se o servidor genuinamente não os tivesse. Uma ferramenta lida por agente de IA não pode ser confiantemente incompleta: o consumidor não tem como desconfiar.
+*Why:* `include /etc/nginx/conf.d/*.conf` on an unstable link would return zero files silently, and `ngx` would present the server configuration without the 112 files it has — as if the server genuinely didn't have them. A tool read by an AI agent cannot be reliably incomplete: the consumer cannot be suspicious.
 
-*Nota:* o `filepath.Glob` da stdlib tem a mesma semântica, e localmente isso quase nunca importa. É a mesma premissa que o SSH inverte — falha de leitura deixa de ser rara e vira rotina. Vale também para o item parkeado da Task 7 no ledger, pela mesma razão.
+*Note:* stdlib's `filepath.Glob` has the same semantics, and locally this almost never matters. It's the same premise that SSH reverses — read failure stops being rare and becomes routine. It also applies to the parked item from Task 7 in the ledger, for the same reason.
 
-### DR5 — Privilégio é explícito, nunca inferido
+### DR5 — Privilege is explicit, never inferred
 
-Medido no servidor de produção real: `nginx -T` **falha** para o usuário comum (`opc`) e só funciona via `sudo`. Não é exceção — a configuração do nginx costuma ser legível só por root, e num host de produção o `sudo` frequentemente está liberado sem senha. Ou seja: o caminho que "simplesmente funciona" é o de escalar privilégio em silêncio.
+Measured on real production server: `nginx -T` **fails** for regular user (`opc`) and only works via `sudo`. This is no exception — nginx configuration is usually readable only by root, and on a production host `sudo` is often enabled without a password. In other words: the path that “just works” is to silently escalate privilege.
 
-O `ngx` **não** faz isso. Se um comando remoto precisa de privilégio, ele só roda com `--sudo` explícito no comando; sem a flag, o `ngx` reporta que o comando exige privilégio e qual é — não tenta de novo com `sudo`, não adivinha.
+`ngx` **doesn't** do this. If a remote command needs privilege, it only runs with explicit `--sudo` in the command; without the flag, `ngx` reports that the command requires privilege and what it is — doesn't try again with `sudo`, doesn't guess.
 
-*Por quê:* uma ferramenta feita para ser dirigida por agente de IA que escala privilégio sozinha, num servidor de produção, transforma um erro de leitura em um comando `root`. O atrito de digitar `--sudo` é o registro de que alguém decidiu. E como o `ngx` já tem envelope estruturado, "precisa de privilégio" é um diagnóstico acionável, não um beco sem saída.
+*Why:* a tool made to be driven by an AI agent that escalates privileges alone, on a production server, turns a read error into a `root` command. The friction of typing `--sudo` is the record that someone decided. And since `ngx` already has a structured envelope, "needs privilege" is an actionable diagnosis, not a dead end.
 
-*Consequência para a R4:* a detecção de estado precisa distinguir "não consegui ler" de "não existe", e nunca degradar em silêncio. Campo indisponível é omitido — a regra da spec já cobre isso.
+*Consequence for R4:* state detection needs to distinguish "couldn't read" from "doesn't exist", and never degrade into silence. Unavailable field is omitted — the spec rule already covers this.
 
-### DR4 — O `Glob` do crossplane passa a ser injetado
+### DR4 — The crossplane `Glob` is now injected
 
-Hoje o `ngx` injeta `Open` mas não `Glob`, então o crossplane resolve `include conf.d/*.conf` com `filepath.Glob` sobre o disco **local**. Isso está registrado como limitação conhecida da v0.1 e aqui vira defeito: apontado para um host remoto, o `ngx` listaria arquivos da máquina do operador e os trataria como configuração do servidor.
+Today `ngx` injects `Open` but not `Glob`, so crossplane resolves `include conf.d/*.conf` with `filepath.Glob` on the **local** disk. This is registered as a known limitation of v0.1 and here it becomes a defect: pointed to a remote host, `ngx` would list files from the operator's machine and treat them as server configuration.
 
-*Consequência:* a Task R3 é obrigatória e bloqueia as demais. Sem ela, o remoto mente.
+*Consequence:* Task R3 is mandatory and blocks the others. Without it, the remote lies.
 
 ---
 
-### Task R1: Camada de transporte
+### Task R1: Transport layer
 
-**Files:**
+- Test: `internal/transport/local_test.go`**Files:**
 - Create: `internal/transport/transport.go`, `internal/transport/local.go`
-- Test: `internal/transport/local_test.go`
 
 **Interfaces:**
-- Consumes: nada de tarefas anteriores
-- Produces: a interface `transport.Transport` com `Open(path string) (io.ReadCloser, error)`, `Glob(pattern string) ([]string, error)`, `Run(ctx context.Context, argv []string) (stdout, stderr []byte, exitCode int, err error)`, `Close() error`, e `Describe() string`; a implementação `transport.Local()`
+- Consumptions: no previous tasks
+- Produces: the `transport.Transport` interface with `Open(path string) (io.ReadCloser, error)`, `Glob(pattern string) ([]string, error)`, `Run(ctx context.Context, argv []string) (stdout, stderr []byte, exitCode int, err error)`, `Close() error`, and `Describe() string`; the `transport.Local()` implementation
 
-- [ ] **Step 1: Escrever o teste**
+- [ ] **Step 1: Write the test**
 
-`internal/transport/local_test.go` cobre: `Open` de arquivo existente e de inexistente; `Glob` casando e não casando; `Run` de um comando que sai com zero e de outro que sai com código diferente, verificando que `exitCode` é reportado **e** que `err` é nil nesse caso — código de saída diferente de zero é resultado, não erro de transporte. Um erro de transporte é o binário não existir ou a conexão cair.
+`internal/transport/local_test.go` covers: `Open` of existing and non-existent file; `Glob` marrying and not marrying; `Run` from a command that exits with zero and another that exits with a different code, verifying that `exitCode` is reported **and** that `err` is nil in this case — non-zero exit code is a result, not a transport error. A transport error is the binary does not exist or the connection drops.
 
-Essa distinção é o ponto central do teste: confundir as duas coisas faz um `nginx -t` que reprova a configuração parecer falha de infraestrutura.
+This distinction is the central point of the test: confusing the two makes an `nginx -t` that fails the configuration look like an infrastructure failure.
 
-- [ ] **Step 2: Definir a interface e implementar o local**
+- [ ] **Step 2: Define the interface and implement the location**
 
-`Local()` é um envelope fino sobre `os.Open`, `filepath.Glob` e `exec.CommandContext`. `Describe()` devolve algo como `"local"`, para aparecer no `meta` do envelope e quem consome a saída saber contra o que operou.
+`Local()` is a thin wrapper over `os.Open`, `filepath.Glob` and `exec.CommandContext`. `Describe()` returns something like `"local"`, to appear in the `meta` of the envelope and whoever consumes the output will know what they operated against.
 
-- [ ] **Step 3: Rodar e commitar**
+- [ ] **Step 3: Run and commit**
 
 Run: `go test ./internal/transport/ -race`
 
@@ -165,44 +163,43 @@ git commit -m "feat(transport): interface de transporte e implementacao local"
 
 ---
 
-### Task R2: Cliente SSH portável
+### Task R2: Portable SSH Client
 
-**Files:**
+- Test: `internal/transport/ssh_test.go`, `internal/transport/sshconfig_test.go`**Files:**
 - Create: `internal/transport/ssh.go`, `internal/transport/agent_unix.go`, `internal/transport/agent_windows.go`, `internal/transport/sshconfig.go`
-- Test: `internal/transport/ssh_test.go`, `internal/transport/sshconfig_test.go`
 
 **Interfaces:**
-- Consumes: `transport.Transport` (R1)
+- Consumptions: `transport.Transport` (R1)
 - Produces: `transport.SSHOptions` (`Host`, `Port`, `User`, `KeyPath`, `Password`, `KnownHostsPath`, `InsecureHostKey`, `Timeout`); `transport.SSH(opts SSHOptions) (Transport, error)`; `transport.ResolverSSHConfig(host string) (SSHOptions, error)`
 
-- [ ] **Step 1: Investigar antes de escrever uma linha**
+- [ ] **Step 1: Investigate before writing a line**
 
-Este passo é leitura e experimento, não código. Determine e **registre no relatório** cada resposta, com a fonte:
+This step is reading and experimenting, not code. Determine and **record in the report** each answer, with the source:
 
-1. **`ssh-agent` no Windows.** Qual é o caminho exato do named pipe usado pelo OpenSSH do Windows? Como conectar a ele em Go? Avalie `github.com/Microsoft/go-winio` — leia o `go.mod` dele e confirme que é Go puro sobre `x/sys/windows`, sem cgo. Se houver alternativa sem dependência nova, prefira. **Não presuma o caminho do pipe**: confirme na documentação do OpenSSH-Portable ou no fonte.
-2. **`golang.org/x/crypto/ssh/agent`** — a função que cria o cliente a partir de uma conexão, e como transformar o cliente em `ssh.AuthMethod`.
-3. **`golang.org/x/crypto/ssh/knownhosts`** — como construir o `HostKeyCallback`, e **qual erro exatamente** ele devolve quando o host é desconhecido versus quando a chave mudou. Os dois casos precisam de mensagens diferentes: chave desconhecida é atrito normal, chave alterada é possível ataque e a mensagem tem que dizer isso.
-4. **`github.com/pkg/sftp`** — é Go puro? Como abrir um arquivo para leitura e como fazer glob (ele tem `Glob`?).
-5. **Parser de `~/.ssh/config`** — existe biblioteca Go pura madura, tipo `github.com/kevinburke/ssh_config`? Ela resolve `Include`, `Match` e wildcards em `Host`? Se o suporte for parcial, decida e documente qual subconjunto o `ngx` honra — melhor honrar pouco e dizer, que honrar mal em silêncio.
-6. **Caminho do `~/.ssh`** nas três plataformas: confirme que `os.UserHomeDir()` resolve corretamente no Windows.
+1. **`ssh-agent` on Windows.** What is the exact named pipe path used by OpenSSH on Windows? How to connect to it in Go? Evaluate `github.com/Microsoft/go-winio` — read its `go.mod` and confirm that it is pure Go on `x/sys/windows`, without cgo. If there is an alternative without new dependencies, choose it. **Don't assume the pipe path**: confirm it in the OpenSSH-Portable documentation or in the source.
+2. **`golang.org/x/crypto/ssh/agent`** — the function that creates the client from a connection, and how to transform the client into `ssh.AuthMethod`.
+3. **`golang.org/x/crypto/ssh/knownhosts`** — how to construct `HostKeyCallback`, and **what error exactly** does it return when the host is unknown versus when the key has changed. The two cases need different messages: unknown key is normal friction, changed key is possible attack and the message has to say that.
+4. **`github.com/pkg/sftp`** — is it pure Go? How to open a file for reading and how to glob (does it have `Glob`?).
+5. **Parser from `~/.ssh/config`** — is there a mature pure Go library, like `github.com/kevinburke/ssh_config`? Does it resolve `Include`, `Match` and wildcards in `Host`? If support is partial, decide and document which subset `ngx` honors — better to honor little and say, than to honor badly in silence.
+6. **`~/.ssh`** path on all three platforms: confirm that `os.UserHomeDir()` resolves correctly on Windows.
 
-Se qualquer item exigir cgo, pare e reporte antes de prosseguir.
+If any item requires code, stop and report before proceeding.
 
-- [ ] **Step 2: Escrever os testes de resolução de configuração e de host key**
+- [ ] **Step 2: Write the configuration and host key resolution tests**
 
-`sshconfig_test.go` usa arquivos de `~/.ssh/config` em `t.TempDir()` e verifica: `HostName`, `User`, `Port` e `IdentityFile` sendo lidos; wildcard em `Host` casando; flag explícita sobrescrevendo o arquivo; host ausente do arquivo devolvendo os defaults sem erro.
+`sshconfig_test.go` uses files from `~/.ssh/config` in `t.TempDir()` and checks: `HostName`, `User`, `Port` and `IdentityFile` being read; wildcard in `Host` matching; explicit flag overwriting the file; host missing from the file returning the defaults without error.
 
-`ssh_test.go` verifica a política de host key **sem rede**, chamando o callback diretamente: host presente no `known_hosts` com a chave certa passa; host ausente falha com erro que menciona o host e como adicioná-lo; host presente com chave **diferente** falha com erro que diz explicitamente que a chave do servidor mudou e que isso pode ser um ataque; e `InsecureHostKey` passando qualquer chave, mas registrando um diagnóstico de severidade `warning` no envelope — usar o escape não pode ser silencioso.
+`ssh_test.go` checks the **no network** host key policy, calling the callback directly: host present in `known_hosts` with the right key passes; missing host fails with error mentioning the host and how to add it; host present with **different** key fails with error that explicitly says that the server key has changed and that this could be an attack; and `InsecureHostKey` passing any key but recording a `warning` severity diagnostic on the envelope — escaping cannot be silent.
 
-- [ ] **Step 3: Implementar**
+- [ ] **Step 3: Implement**
 
-Ordem de autenticação: `ssh-agent`, depois chave em arquivo (com prompt de passphrase se necessário), depois senha. Senha vem de `NGX_SSH_PASSWORD` ou de prompt em terminal — **nunca** de flag; se alguém adicionar uma flag de senha, o review deve reprovar.
+Authentication order: `ssh-agent`, then key in file (with passphrase prompt if necessary), then password. Password comes from `NGX_SSH_PASSWORD` or from a terminal prompt — **never** from flag; if someone adds a password flag, the review should fail.
 
-Os arquivos `agent_unix.go` e `agent_windows.go` levam build tags e expõem a mesma função de conexão ao `ssh-agent`. Quando não houver `ssh-agent` disponível, isso não é erro: apenas aquele método de autenticação não entra na lista.
+The `agent_unix.go` and `agent_windows.go` files carry build tags and expose the same connection function to `ssh-agent`. When there is no `ssh-agent` available, this is not an error: just that authentication method is not included in the list.
 
-- [ ] **Step 4: Rodar e commitar**
+- [ ] **Step 4: Run and commit**
 
-Run: `go test ./internal/transport/ -race`, e `CGO_ENABLED=0 go build` para as seis plataformas.
+Run: `go test ./internal/transport/ -race`, and `CGO_ENABLED=0 go build` for all six platforms.
 
 ```bash
 git add internal/transport/
@@ -211,29 +208,27 @@ git commit -m "feat(transport): cliente ssh com known_hosts estrito e ssh-agent 
 
 ---
 
-### Task R3: Parse com `Glob` injetado
+### Task R3: Parse with `Glob` injected
 
-**Files:**
-- Modify: `internal/config/parse.go` — passar `Glob` ao crossplane
-- Test: `internal/config/parse_test.go`
+- Test: `internal/config/parse_test.go`**Files:**
+- Modify: `internal/config/parse.go` — pass `Glob` to crossplane
 
-**Interfaces:**
-- Consumes: `config.ParseOptions` (Plano 1, Task 7)
-- Produces: `ParseOptions.Glob func(pattern string) ([]string, error)`, injetado no `crossplane.ParseOptions`
+- Produces: `ParseOptions.Glob func(pattern string) ([]string, error)`, injected into `crossplane.ParseOptions`**Interfaces:**
+- Consumes: `config.ParseOptions` (Plan 1, Task 7)
 
-- [ ] **Step 1: Confirmar a assinatura no crossplane**
+- [ ] **Step 1: Confirm subscription on the crossplane**
 
-Leia `crossplane.ParseOptions` no module cache e confirme o nome e a assinatura exata do campo `Glob`. Não escreva a partir de memória.
+Read `crossplane.ParseOptions` in the module cache and confirm the name and exact signature of the `Glob` field. Don't write from memory.
 
-- [ ] **Step 2: Escrever o teste que falha**
+- [ ] **Step 2: Write the test that fails**
 
-Um teste com filesystem em memória contendo `nginx.conf` com `include conf.d/*.conf` e dois arquivos casando o padrão, **e** um arquivo com o mesmo nome no disco real que não deveria ser lido. Sem a correção, o crossplane lista o disco real; com ela, lista só o filesystem injetado.
+A test with an in-memory filesystem containing `nginx.conf` with `include conf.d/*.conf` and two files matching the pattern, **and** a file with the same name on the real disk that should not be read. Without the correction, the crossplane lists the real disk; with it, it only lists the injected filesystem.
 
-Esse teste é a razão de esta tarefa existir: hoje, apontado para um host remoto, o `ngx` leria `conf.d/*.conf` da máquina do operador.
+This test is the reason this task exists: today, pointed to a remote host, `ngx` would read `conf.d/*.conf` from the operator's machine.
 
-- [ ] **Step 3: Implementar e rodar**
+- [ ] **Step 3: Implement and run**
 
-Atenção: `parse.go` passou por três rodadas de correção e tem lógica delicada de concorrência e cache de fonte. A alteração aqui é acrescentar um campo e repassá-lo. **Não** toque em `leituraEspelhada`, `cacheFonte`, `coletarErros` nem no tratamento de erro.
+Please note: `parse.go` has undergone three rounds of patching and has delicate concurrency logic and font caching. The change here is to add a field and pass it through. **Don't** touch `MirroredReading`, `Sourcecache`, `CollectErrors` or error handling.
 
 Run: `go test ./internal/config/ -race`
 
@@ -246,29 +241,27 @@ git commit -m "fix(config): injeta Glob no crossplane para nao listar disco loca
 
 ---
 
-### Task R4: Runtime remoto
+### Task R4: Remote Runtime
 
-**Files:**
-- Modify: `internal/runtime/` — receber um `Transport` em vez de chamar `exec` direto
-- Test: os testes existentes de runtime, mais casos com transporte falso
+- Test: existing runtime tests, plus cases with false transport**Files:**
+- Modify: `internal/runtime/` — receive a `Transport` instead of calling `exec` directly
 
-**Interfaces:**
-- Consumes: `transport.Transport` (R1)
-- Produces: as funções de runtime passando a aceitar um `Transport`
+- Produces: runtime functions now accept a `Transport`**Interfaces:**
+- Consumptions: `transport.Transport` (R1)
 
-- [ ] **Step 1: Escrever os testes**
+- [ ] **Step 1: Write the tests**
 
-Use um `Transport` falso que devolve saídas gravadas, e verifique que a detecção do nginx, o `nginx -t` estruturado e o `nginx -T` funcionam idênticos com transporte local e remoto. O ponto é que o parser de saída não sabe de onde os bytes vieram.
+Use um `Transport` falso que devolve saídas gravadas, e verifique que a detecção do nginx, o `nginx -t` estruturado e o `nginx -T` funcionam idênticos com transporte local e remoto. The point is that the output parser doesn't know where the bytes came from.
 
-Cubra também: `nginx` não encontrado no host remoto, e comando que sai diferente de zero.
+Also cover: `nginx` not found on remote host, and command coming out non-zero.
 
-- [ ] **Step 2: Refatorar o runtime**
+- [ ] **Step 2: Refactor the runtime**
 
-Substitua as chamadas diretas a `exec.Command` por `Transport.Run`. Preserve a distinção da Task R1: código de saída diferente de zero é resultado, não erro.
+Replace direct calls to `exec.Command` with `Transport.Run`. Preserve the distinction of Task R1: non-zero exit code is a result, not an error.
 
-Sobre o estado do processo: a leitura de pidfile funciona por SFTP, mas a contagem de workers e o horário de início do master dependem de inspeção de processo, que difere entre sistemas e é mais frágil por SSH. Mantenha a regra da spec — **campo indisponível é omitido, nunca estimado**.
+About process state: pidfile reading works over SFTP, but worker count and master start time depend on process inspection, which differs between systems and is more fragile over SSH. Keep the spec rule — **unavailable field is omitted, never estimated**.
 
-- [ ] **Step 3: Rodar e commitar**
+- [ ] **Step 3: Run and commit**
 
 Run: `go test ./... -race`
 
@@ -279,31 +272,29 @@ git commit -m "refactor(runtime): executa via transporte, local ou remoto"
 
 ---
 
-### Task R5: Flags globais e integração no CLI
+### Task R5: Global flags and CLI integration
 
-**Files:**
-- Modify: `internal/cli/root.go` — flags de conexão e construção do transporte
-- Test: `internal/cli/root_test.go`
+- Test: `internal/cli/root_test.go`**Files:**
+- Modify: `internal/cli/root.go` — connection and transport construction flags
 
-**Interfaces:**
-- Consumes: `transport.SSH`, `transport.Local`, `transport.ResolverSSHConfig` (R1, R2)
-- Produces: `cli.Context.Transport`
+- Produces: `cli.Context.Transport`**Interfaces:**
+- Consumptions: `transport.SSH`, `transport.Local`, `transport.ResolverSSHConfig` (R1, R2)
 
-- [ ] **Step 1: Escrever os testes**
+- [ ] **Step 1: Write the tests**
 
-- Sem `--host`, o transporte é local e nada de SSH é construído.
-- Com `--host`, os valores do `~/.ssh/config` são aplicados e as flags sobrescrevem.
-- Uma flag de senha **não existe**; se alguém tentar `--password`, o cobra devolve erro de flag desconhecida.
-- `--insecure-host-key` produz um diagnóstico de `warning` no envelope.
-- O `meta` do envelope carrega contra qual host a operação rodou.
+- Without `--host`, transport is local and no SSH is built.
+- With `--host`, the values from `~/.ssh/config` are applied and the flags are overwritten.
+- A password flag **does not exist**; if someone tries `--password`, cobra returns an unknown flag error.
+- `--insecure-host-key` produces a `warning` diagnostic on the envelope.
+- The `meta` of the envelope carries which host the operation ran against.
 
-- [ ] **Step 2: Adicionar as flags**
+- [ ] **Step 2: Add the flags**
 
-`--host`, `--port`, `--user`, `--key`, `--insecure-host-key`, `--known-hosts`. O `--timeout` global já existe e passa a valer para a conexão.
+`--host`, `--port`, `--user`, `--key`, `--insecure-host-key`, `--known-hosts`. The global `--timeout` already exists and takes effect for the connection.
 
-Todo comando de leitura da v0.1 (`status`, `inspect`, `get`, `tree`, `test`, `diff`) funciona remoto sem alteração própria, porque recebe o transporte pelo contexto. `fmt --write` escreve por SFTP.
+Every v0.1 reading command (`status`, `inspect`, `get`, `tree`, `test`, `diff`) works remotely without changing itself, because it receives transport via the context. `fmt --write` writes via SFTP.
 
-- [ ] **Step 3: Rodar e commitar**
+- [ ] **Step 3: Run and commit**
 
 Run: `go test ./... -race`
 
@@ -314,41 +305,39 @@ git commit -m "feat(cli): flags de conexao remota e transporte no contexto"
 
 ---
 
-### Task R6: Integração real e documentação
+### Task R6: Actual integration and documentation
 
-**Files:**
+- Modify: `README.md`**Files:**
 - Create: `internal/transport/integration_test.go` (`//go:build integration`), `docs/remoto.md`
-- Modify: `README.md`
 
-**Interfaces:**
-- Consumes: tudo acima
-- Produces: suíte de integração contra SSH real, e documentação
+- Produces: integration suite against real SSH, and documentation**Interfaces:**
+- Consumption: all above
 
-- [ ] **Step 1: Escrever o teste de integração**
+- [ ] **Step 1: Write the integration test**
 
-Sob build tag `integration`, suba um container com `sshd` e `nginx`, com uma chave de teste gerada no próprio teste, e verifique ponta a ponta: `inspect` remoto devolvendo a árvore do container; `include` com glob resolvendo os arquivos **do container**; `test` remoto reportando erro de sintaxe com arquivo e linha; e a recusa por host key desconhecida antes de o host ser adicionado ao `known_hosts`.
+Under build tag `integration`, upload a container with `sshd` and `nginx`, with a test key generated in the test itself, and check end-to-end: remote `inspect` returning the container tree; `include` with glob resolving the **container** files; remote `test` reporting syntax error with file and line; and rejection by unknown host key before the host is added to `known_hosts`.
 
-O caso do glob é o mais importante: é o defeito que a Task R3 corrigiu, e este é o teste que prova que ele não volta.
+The glob case is the most important: it is the defect that Task R3 fixed, and this is the test that proves that it does not return.
 
-**A bancada tem que reproduzir a forma medida em produção, não um caso fácil.** Um container com um `nginx.conf` de dez linhas passa em tudo e não prova nada. Medido num nginx de produção real (Oracle Linux 9, nginx 1.20.1), a bancada precisa de:
+**The bench has to reproduce the measured form in production, not an easy case.** A container with a ten-line `nginx.conf` passes everything and proves nothing. Measured on a real production nginx (Oracle Linux 9, nginx 1.20.1), the bench needs:
 
-- **Três padrões com curinga**, não um: `conf.d/*.conf`, `default.d/*.conf` e `modules/*.conf`. E, para o teste do glob valer, um arquivo homônimo no disco **local** que só apareceria se o `Glob` não estivesse injetado.
-- **Ordem de 130 arquivos** na configuração efetiva, não três. É o número que torna a latência sequencial visível e que justifica o paralelismo por nível exigido na R4. Um teste que meça o tempo com 130 arquivos é o que impede a regressão de performance.
-- **`nginx -T` legível só por root**, com `sudo` liberado sem senha para o usuário de teste — exatamente a armadilha da DR5. O teste tem que provar que sem `--sudo` o `ngx` reporta a exigência de privilégio, e que **não** escala sozinho.
-- **Um segredo dentro da configuração** (chave privada, `auth_basic_user_file`) para exercitar a redação de ponta a ponta pelo caminho remoto.
+It is the number that makes the sequential latency visible and that justifies the parallelism per level required in R4. A test that measures time with 130 files is what prevents performance regression.
+- **Three wildcard patterns**, not one: `conf.d/*.conf`, `default.d/*.conf` and `modules/*.conf`. - **`nginx -T` readable only by root**, with `sudo` released without password for the test user — exactly the DR5 trap. And, for the glob test to be valid, a homonymous file on the **local** disk that would only appear if `Glob` was not injected.
+The test has to prove that without `--sudo` `ngx` reports the privilege requirement, and that it **doesn't** scale on its own.
+- **Order of 130 files** in effective configuration, not three. - **A secret within the configuration** (private key, `auth_basic_user_file`) to exercise end-to-end redaction over the remote path.
 
-A bancada é artefato do repositório, versionada, com alvo no `Makefile`. Quem clonar o projeto tem que conseguir rodar a integração com um comando. E os testes de integração ficam atrás da build tag: `go test ./...` sem a tag continua verde numa máquina sem Docker.
+The bench is an artifact of the repository, versioned, targeting the `Makefile`. Whoever clones the project must be able to run the integration with a command. And integration tests are behind the build tag: `go test ./...` without the tag remains green on a machine without Docker.
 
-- [ ] **Step 2: Documentar**
+- [ ] **Step 2: Document**
 
-Em `docs/remoto.md` e numa seção do `README.md`:
+In `docs/remoto.md` and in a section of `README.md`:
 
-- O uso mínimo, `ngx --host web1.exemplo.com inspect`, explicando que funciona sem flags para quem já tem `ssh web1.exemplo.com` funcionando.
-- Que **nada é instalado no servidor** — o `ngx` lê por SFTP e executa o nginx que já está lá.
-- A ordem de autenticação, e que senha vem de `NGX_SSH_PASSWORD` ou de prompt, nunca de flag, explicando o porquê: flag vaza em `ps`, no histórico e em log de CI.
-- Que host desconhecido é recusado, como adicionar ao `known_hosts`, e o que significa `--insecure-host-key` — inclusive que ele não deve virar hábito.
-- No Windows, que o serviço `ssh-agent` vem desabilitado e precisa ser habilitado, com os comandos.
-- A ressalva de latência: cada `include` é uma leitura de rede.
+- The minimum use, `ngx --host web1.exemplo.com inspect`, explaining that it works without flags for those who already have `ssh web1.exemplo.com` working.
+- That **nothing is installed on the server** — `ngx` reads via SFTP and runs nginx that is already there.
+- The authentication order, and which password comes from `NGX_SSH_PASSWORD` or from the prompt, never from the flag, explaining why: flag leaks in `ps`, in the history and in the CI log.
+- What unknown host is refused, how to add it to `known_hosts`, and what `--insecure-host-key` means — including that it should not become a habit.
+- On Windows, the `ssh-agent` service is disabled and needs to be enabled, using the commands.
+- The latency caveat: each `include` is a network read.
 
 - [ ] **Step 3: Commit**
 
@@ -359,7 +348,7 @@ git commit -m "test(transport): integracao ssh real; docs de operacao remota"
 
 ---
 
-## Verificação de cobertura
+## Coverage check
 
 | Pedido | Task |
 |---|---|
@@ -370,14 +359,14 @@ git commit -m "test(transport): integracao ssh real; docs de operacao remota"
 | Não instalar o CLI na VM | DR3, R1 (SFTP mais exec remoto) |
 | Funcionar em Linux, macOS e Windows | Global Constraints; R2 Step 1 item 1 |
 
-## Limitação conhecida, a resolver depois
+## Known limitation, to be resolved later
 
-A conexão remota é aberta em `PersistentPreRunE`, antes de o comando rodar. Isso significa que `ngx --host web1 version` abre uma sessão SSH para imprimir uma string que é puramente local: lento, capaz de falhar por motivo alheio ao comando, e surpreendente para quem lê a saída. O mesmo valerá para `ngx update`.
+The remote connection is opened in `PersistentPreRunE`, before the command runs. This means that `ngx --host web1 version` opens an SSH session to print a string that is purely local: slow, capable of failing for reasons unrelated to the command, and surprising to anyone reading the output. The same will be true for `ngx update`.
 
-*Por que não foi corrigido junto:* a correção é uma anotação de comando marcando quem não toca no alvo. Tentei, e ela quebra seis testes de `internal/cli` que usam justamente `version` como veículo para exercitar o caminho SSH — eles contam conexões e passariam a contar zero. Consertá-los exige montar fixture de configuração em cada um, porque `inspect` precisa de um `.conf`. Trocar um defeito menor e somente-leitura por uma reescrita de suíte recém-escrita, no fim de uma sessão longa, é a troca errada.
+*Why it wasn't corrected together:* the correction is a command note marking who doesn't touch the target. I tried, and it breaks six `internal/cli` tests that precisely use `version` as a vehicle to exercise the SSH path — they count connections and would start counting zero. Fixing them requires mounting configuration fixtures on each one, because `inspect` needs a `.conf`. Trading a minor, read-only defect for a newly written suite rewrite at the end of a long session is the wrong trade.
 
-*Como resolver, quando for a hora:* dar ao contexto de teste um comando de mentira que declare precisar do transporte, e mover os seis testes para ele. Aí a anotação entra sem tocar em fixture nenhuma, e `version` e `update` param de conectar.
+*How to solve it, when the time comes:* give the test context a fake command that declares it needs the transport, and move the six tests to it. Then the annotation enters without touching any fixture, and `version` and `update` stop connecting.
 
-## O que este plano não cobre
+## What this plan does not cover
 
-Multi-host numa chamada (`--hosts a,b,c` com execução paralela), bastion e salto (`ProxyJump`), túnel, e escrita transacional remota — esta última depende do plano de mutação da v0.2. São extensões naturais da mesma camada de transporte, e nenhuma muda as decisões tomadas aqui.
+Multi-host in one call (`--hosts a,b,c` with parallel execution), bastion and jump (`ProxyJump`), tunnel, and remote transactional writing — the latter depends on the v0.2 mutation plan. They are natural extensions of the same transport layer, and none of them change the decisions made here.

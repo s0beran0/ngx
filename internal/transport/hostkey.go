@@ -28,30 +28,30 @@ import (
 // message. Collapsing two of them erases exactly the information that
 // justifies the policy existing.
 const (
-	// CodigoHostDesconhecido: the host is not in known_hosts. Normal
+	// CodeUnknownHost: the host is not in known_hosts. Normal
 	// first-access friction.
-	CodigoHostDesconhecido = "NGX-0201"
+	CodeUnknownHost = "NGX-0201"
 
-	// CodigoHostKeyAlterada: the host is in known_hosts with another key.
+	// CodeHostKeyChanged: the host is in known_hosts with another key.
 	// Possible interception.
-	CodigoHostKeyAlterada = "NGX-0202"
+	CodeHostKeyChanged = "NGX-0202"
 
-	// CodigoHostKeyRevogada: the presented key is marked @revoked.
-	CodigoHostKeyRevogada = "NGX-0203"
+	// CodeHostKeyRevoked: the presented key is marked @revoked.
+	CodeHostKeyRevoked = "NGX-0203"
 
-	// CodigoKnownHostsAusente: the known_hosts file does not exist.
-	CodigoKnownHostsAusente = "NGX-0204"
+	// CodeKnownHostsMissing: the known_hosts file does not exist.
+	CodeKnownHostsMissing = "NGX-0204"
 
-	// CodigoAlgoritmoNaoRegistrado: the host is in known_hosts, but only
+	// CodeAlgorithmNotRegistered: the host is in known_hosts, but only
 	// with keys of another type. This is neither an attack nor a first
 	// access -- it is algorithm negotiation. It gets its own code precisely
 	// so it is not confused with NGX-0202, whose message talks about
 	// interception.
-	CodigoAlgoritmoNaoRegistrado = "NGX-0207"
+	CodeAlgorithmNotRegistered = "NGX-0207"
 
-	// CodigoAvisoHostKeyInsegura: --insecure-host-key was used and the
+	// CodeInsecureHostKeyWarning: --insecure-host-key was used and the
 	// verification was skipped.
-	CodigoAvisoHostKeyInsegura = "NGX-0211"
+	CodeInsecureHostKeyWarning = "NGX-0211"
 )
 
 // VerificadorHostKey builds the ngx ssh.HostKeyCallback according to DR1: the
@@ -81,13 +81,13 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 
 	path := opts.KnownHostsPath
 	if path == "" {
-		defaultPath, err := CaminhoKnownHostsPadrao()
+		defaultPath, err := DefaultKnownHostsPath()
 		if err != nil {
 			return nil, diags, &output.Error{
 				Code: output.ExitInternal,
 				Diag: output.Diagnostic{
 					Severity: output.SeverityError,
-					Code:     CodigoKnownHostsAusente,
+					Code:     CodeKnownHostsMissing,
 					Message: "could not locate the user's home directory to find " +
 						"known_hosts; pass --known-hosts with the path to the file",
 				},
@@ -110,10 +110,10 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 	}, diags, nil
 }
 
-// CaminhoKnownHostsPadrao returns ~/.ssh/known_hosts. filepath.Join uses the
+// DefaultKnownHostsPath returns ~/.ssh/known_hosts. filepath.Join uses the
 // native separator, so the same code produces /home/x/.ssh/known_hosts and
 // C:\Users\x\.ssh\known_hosts.
-func CaminhoKnownHostsPadrao() (string, error) {
+func DefaultKnownHostsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("could not locate the user's home directory: %w", err)
@@ -136,7 +136,7 @@ func classifyHostKeyError(path, address string, key ssh.PublicKey, err error) er
 			Code: output.ExitInternal,
 			Diag: output.Diagnostic{
 				Severity: output.SeverityError,
-				Code:     CodigoHostKeyRevogada,
+				Code:     CodeHostKeyRevoked,
 				Message: fmt.Sprintf(
 					"the host key of %s is REVOKED in %s:%d — the @revoked mark says "+
 						"this key is known to be compromised. ngx refuses the connection. "+
@@ -203,7 +203,7 @@ func unknownHostError(path, address string, key ssh.PublicKey, cause error) erro
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoHostDesconhecido,
+			Code:     CodeUnknownHost,
 			Message: fmt.Sprintf(
 				"unknown host: %s does not appear in %s, so ngx has nothing to compare "+
 					"the presented key against and refuses the connection. This is the "+
@@ -235,7 +235,7 @@ func changedKeyError(
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoHostKeyAlterada,
+			Code:     CodeHostKeyChanged,
 			Message: fmt.Sprintf(
 				"WARNING: the host key of %s has CHANGED. This may be an interception "+
 					"attack (man-in-the-middle): someone on the path may be impersonating "+
@@ -266,7 +266,7 @@ func openKnownHostsError(path, host string, err error) error {
 			Code: output.ExitInternal,
 			Diag: output.Diagnostic{
 				Severity: output.SeverityError,
-				Code:     CodigoKnownHostsAusente,
+				Code:     CodeKnownHostsMissing,
 				Message: fmt.Sprintf(
 					"%s does not exist: ngx has no recorded key to compare with the one "+
 						"from %s. Run `ssh %s` once to record the host, point at another "+
@@ -304,7 +304,7 @@ func warnInsecureHostKey(host string) output.Diagnostic {
 	}
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
-		Code:     CodigoAvisoHostKeyInsegura,
+		Code:     CodeInsecureHostKeyWarning,
 		Message: fmt.Sprintf(
 			"--insecure-host-key: the host key of %s will be accepted with no verification "+
 				"at all. The connection is not protected against interception "+
@@ -372,7 +372,7 @@ func unregisteredAlgorithmError(
 		Code: output.ExitInvalidConfig,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     CodigoAlgoritmoNaoRegistrado,
+			Code:     CodeAlgorithmNotRegistered,
 			Message: fmt.Sprintf(
 				"the host %s is known, but only with a key of type %s, and it presented "+
 					"one of type %s. This does NOT indicate an attack: the server offers "+
