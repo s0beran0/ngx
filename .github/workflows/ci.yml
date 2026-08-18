@@ -45,6 +45,18 @@ jobs:
       - name: vet
         run: go vet ./...
 
+      # Os testes de integracao ficam atras da build tag `integration` e nao
+      # rodam aqui, entao NADA os compila -- e codigo que nao compila nao
+      # acusa nada. Ja aconteceu: uma traducao mudou mensagens em hostkey.go e
+      # as assercoes de integracao continuaram comparando o texto antigo, sem
+      # que nenhum job ficasse vermelho. Elas so quebrariam na proxima vez que
+      # alguem subisse a bancada, longe da mudanca que as quebrou.
+      #
+      # `vet` com a tag compila e analisa esses arquivos sem precisar de
+      # Docker: custa segundos e fecha o buraco.
+      - name: vet dos testes de integracao
+        run: go vet -tags integration ./...
+
       # O race detector exige cgo; e a unica excecao ao CGO_ENABLED=0, e vale
       # so para rodar os testes, nunca para o binario distribuido.
       - name: testes com race detector
