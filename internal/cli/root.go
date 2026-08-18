@@ -1,5 +1,5 @@
-// Package cli monta a arvore de comandos. Comandos produzem valores e erros
-// tipados; a formatacao e o exit code sao responsabilidade de output.
+// Package cli builds the command tree. Commands produce typed values and
+// errors; formatting and the exit code are output's responsibility.
 package cli
 
 import (
@@ -17,17 +17,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Caminhos padrao do arquivo de configuracao do proprio ngx. Execute usa
-// estes valores para preencher Context.GlobalSettingsPath e
-// Context.LocalSettingsPath; testes de caixa-branca que precisam de
-// isolamento do filesystem real sobrescrevem os campos do Context em vez de
-// depender destas constantes.
+// Default paths of ngx's own configuration file. Execute uses these values to
+// fill Context.GlobalSettingsPath and Context.LocalSettingsPath; white-box
+// tests that need isolation from the real filesystem override the Context
+// fields instead of depending on these constants.
 const (
 	GlobalSettingsPath = "/etc/ngx/ngx.yaml"
 	LocalSettingsPath  = ".ngx/config.yaml"
 )
 
-// GlobalFlags espelha as flags globais da spec.
+// GlobalFlags mirrors the global flags from the spec.
 type GlobalFlags struct {
 	ConfigPath   string
 	JSON         bool
@@ -40,8 +39,8 @@ type GlobalFlags struct {
 	Profile      string
 	NoRedact     bool
 
-	// Flags de acesso remoto. Sem Host, nada delas e usado e o alvo e a
-	// maquina local — o comportamento de sempre.
+	// Remote access flags. Without Host none of them is used and the target
+	// is the local machine — the usual behavior.
 	Host            string
 	User            string
 	Port            int
@@ -51,48 +50,50 @@ type GlobalFlags struct {
 	Sudo            bool
 }
 
-// Context carrega o que todo comando precisa.
+// Context carries what every command needs.
 type Context struct {
 	Flags    *GlobalFlags
 	Settings *settings.Settings
 	Renderer *output.Renderer
 	Command  string
 
-	// GlobalSettingsPath e LocalSettingsPath sao os caminhos que preparar
-	// passa para settings.Load. Execute os preenche com as constantes
-	// GlobalSettingsPath/LocalSettingsPath do pacote; ficarem no Context em
-	// vez de fixos no corpo de preparar e o que permite a um teste isolar o
-	// carregamento das settings do filesystem real sem trocar o cwd do
-	// processo inteiro.
+	// GlobalSettingsPath and LocalSettingsPath are the paths preparar passes
+	// to settings.Load. Execute fills them with the package's
+	// GlobalSettingsPath/LocalSettingsPath constants; keeping them in the
+	// Context instead of hardcoded in preparar's body is what lets a test
+	// isolate the loading of the settings from the real filesystem without
+	// changing the cwd of the whole process.
 	GlobalSettingsPath string
 	LocalSettingsPath  string
 
-	// Transport e o alvo das operacoes: a maquina local ou um host remoto.
-	// preparar o preenche; executar o fecha, inclusive no caminho de erro.
+	// Transport is the target of the operations: the local machine or a
+	// remote host. preparar fills it; executar closes it, including on the
+	// error path.
 	Transport transport.Transport
 
-	// TransportDiags guarda o que a montagem do transporte observou (aviso
-	// de --insecure-host-key, ssh-agent ausente, ~/.ssh/config ilegivel).
-	// Vive no Context porque precisa alcancar o envelope tanto no sucesso
-	// quanto no erro.
+	// TransportDiags holds what building the transport observed (an
+	// --insecure-host-key warning, a missing ssh-agent, an unreadable
+	// ~/.ssh/config). It lives in the Context because it has to reach the
+	// envelope both on success and on error.
 	TransportDiags []output.Diagnostic
 
-	// SSHConfigPath e o ~/.ssh/config a consultar. Vazio significa o
-	// caminho padrao do usuario; um teste o aponta para um arquivo de
-	// fixture para nao depender do HOME de quem roda a suite.
+	// SSHConfigPath is the ~/.ssh/config to consult. Empty means the user's
+	// default path; a test points it at a fixture file so as not to depend on
+	// the HOME of whoever runs the suite.
 	SSHConfigPath string
 
-	// ConectarSSH abre a conexao remota. Vazio significa
+	// ConectarSSH opens the remote connection. Empty means
 	// transport.SSHComDiagnosticos.
 	ConectarSSH ConectarSSH
 
-	// Getenv le variavel de ambiente. Injetavel para que um teste nao
-	// dependa do ambiente de quem roda a suite -- nem o contamine.
+	// Getenv reads an environment variable. Injectable so that a test does
+	// not depend on the environment of whoever runs the suite -- nor
+	// contaminate it.
 	Getenv func(string) string
 }
 
-// Execute roda o CLI e devolve o exit code. Nunca chama os.Exit: isso e
-// responsabilidade de main, o que mantem o CLI inteiro testavel.
+// Execute runs the CLI and returns the exit code. It never calls os.Exit:
+// that is main's responsibility, which keeps the whole CLI testable.
 func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCode {
 	ctx := &Context{
 		Flags:              &GlobalFlags{},
@@ -106,19 +107,19 @@ func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCod
 	return executar(root, ctx, args, stderr)
 }
 
-// executar despacha o comando ja montado e traduz o erro em exit code. E
-// separado de Execute para que um teste de caixa-branca possa injetar um
-// root com um comando extra (por exemplo, um que devolva um erro tipado
-// embrulhado com %w) sem duplicar a logica de normalizacao de erro e
-// renderizacao do envelope.
+// executar dispatches the already-built command and translates the error into
+// an exit code. It is separate from Execute so that a white-box test can
+// inject a root with an extra command (for example, one that returns a typed
+// error wrapped with %w) without duplicating the error normalization and
+// envelope rendering logic.
 func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer) output.ExitCode {
 	root.SetArgs(args)
 	root.SetOut(stderr)
 	root.SetErr(stderr)
 
-	// O transporte fecha sempre, inclusive quando o comando falha: uma
-	// conexao SSH deixada aberta sobrevive ao processo so o tempo do
-	// timeout do servidor, e no teste vira goroutine vazando.
+	// The transport always closes, including when the command fails: an SSH
+	// connection left open survives the process only for as long as the
+	// server's timeout, and in a test it becomes a leaking goroutine.
 	defer func() {
 		avisarFalhaAoFechar(stderr, ctx.fecharTransporte())
 	}()
@@ -128,23 +129,24 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 		return output.ExitOK
 	}
 
-	// O comando que ja escreveu o proprio envelope so quer o exit code. E o
-	// caso de `test` com a configuracao reprovada: o resultado saiu inteiro,
-	// e renderizar um envelope de erro por cima colocaria dois documentos
-	// JSON no stdout.
+	// A command that already wrote its own envelope only wants the exit code.
+	// That is the case of `test` with a rejected configuration: the result
+	// went out whole, and rendering an error envelope on top would put two
+	// JSON documents on stdout.
 	var jaRenderizado *erroJaRenderizado
 	if errors.As(err, &jaRenderizado) {
 		return output.CodeOf(err)
 	}
 
-	// errors.As, nao uma type assertion direta: um comando pode devolver um
-	// *output.Error embrulhado com %w para anexar contexto (padrao
-	// idiomatico, ex.: fmt.Errorf("ao ler %s: %w", caminho,
-	// output.InvalidConfig(...))). Uma assertion direta nao atravessa o
-	// wrapping — trataria esse erro como cru e o substituiria por um Usage
-	// generico, perdendo o exit code e o diagnostico originais. O cobra
-	// tambem devolve erro cru (sem tipo nenhum) para flag e comando
-	// invalidos; e so nesse caso que a substituicao abaixo deve acontecer.
+	// errors.As, not a direct type assertion: a command may return an
+	// *output.Error wrapped with %w to attach context (the idiomatic pattern,
+	// e.g. fmt.Errorf("while reading %s: %w", caminho,
+	// output.InvalidConfig(...))). A direct assertion does not traverse the
+	// wrapping — it would treat that error as raw and replace it with a
+	// generic Usage, losing the original exit code and diagnostic. Cobra also
+	// returns a raw error (with no type at all) for invalid flags and
+	// commands; that is the only case where the substitution below should
+	// happen.
 	var e *output.Error
 	if !errors.As(err, &e) {
 		err = output.Usage("%s", err.Error())
@@ -154,18 +156,18 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 	return output.CodeOf(err)
 }
 
-// renderErro desenha o envelope de erro. ctx.Renderer e sempre construido por
-// Execute (ou pelo teste de caixa-branca que monta o Context), entao nunca e
-// nil aqui.
+// renderErro draws the error envelope. ctx.Renderer is always built by Execute
+// (or by the white-box test that assembles the Context), so it is never nil
+// here.
 func renderErro(ctx *Context, stderr io.Writer, err error) {
 	env := ctx.NovoEnvelope(comandoDe(ctx))
 	var e *output.Error
 	if errors.As(err, &e) {
 		env.AddDiagnostic(e.Diag)
-		// Os extras contam o que aconteceu ANTES da falha -- quais arquivos
-		// exigiram privilegio, por exemplo. Perde-los aqui deixaria o
-		// envelope de erro menos informativo que o de sucesso, justamente
-		// quando quem le mais precisa de contexto.
+		// The extras tell what happened BEFORE the failure -- which files
+		// required privilege, for example. Losing them here would leave the
+		// error envelope less informative than the success one, exactly when
+		// the reader needs context the most.
 		for _, d := range e.Extras {
 			env.AddDiagnostic(d)
 		}
@@ -178,23 +180,24 @@ func renderErro(ctx *Context, stderr io.Writer, err error) {
 	}
 
 	r := ctx.Renderer
-	// Um erro nunca e suprimido por --quiet nem bloqueado pelo portao de
-	// --no-redact: o agente precisa saber o que deu errado.
+	// An error is never suppressed by --quiet nor blocked by the --no-redact
+	// gate: the agent needs to know what went wrong.
 	r.Quiet = false
 	r.NoRedact = false
 	if renderErr := r.Render(env); renderErr != nil {
-		// O cobra esta com SilenceErrors; se o proprio render do envelope de
-		// erro falhar, o usuario nao pode ficar com um exit code e zero
-		// bytes em qualquer stream. Isso cai no stderr como ultimo recurso.
+		// Cobra is running with SilenceErrors; if rendering the error
+		// envelope itself fails, the user cannot be left with an exit code
+		// and zero bytes on every stream. This falls to stderr as a last
+		// resort.
 		fmt.Fprintln(stderr, renderErr)
 	}
 }
 
-// NewRoot monta o comando raiz com as flags globais.
+// NewRoot builds the root command with the global flags.
 func NewRoot(ctx *Context) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ngx",
-		Short:         "Opera o nginx com saida estruturada e mudancas transacionais",
+		Short:         "Operate nginx with structured output and transactional changes",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -204,16 +207,16 @@ func NewRoot(ctx *Context) *cobra.Command {
 
 	f := ctx.Flags
 	p := root.PersistentFlags()
-	p.StringVarP(&f.ConfigPath, "config", "c", "", "configuracao principal do nginx")
-	p.BoolVar(&f.JSON, "json", false, "forca saida JSON")
-	p.BoolVar(&f.Human, "human", false, "forca saida legivel")
-	p.BoolVarP(&f.Quiet, "quiet", "q", false, "so erros")
-	p.BoolVar(&f.NoColor, "no-color", false, "desliga cores")
-	p.StringVar(&f.NginxBin, "nginx-bin", "", "caminho do binario do nginx")
-	p.StringVar(&f.NginxVersion, "nginx-version", "", "assume esta versao do nginx")
-	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout das operacoes")
-	p.StringVar(&f.Profile, "profile", "", "perfil do arquivo de configuracao do ngx")
-	p.BoolVar(&f.NoRedact, "no-redact", false, "mostra valores sensiveis (so em terminal)")
+	p.StringVarP(&f.ConfigPath, "config", "c", "", "nginx main configuration file")
+	p.BoolVar(&f.JSON, "json", false, "force JSON output")
+	p.BoolVar(&f.Human, "human", false, "force human-readable output")
+	p.BoolVarP(&f.Quiet, "quiet", "q", false, "errors only")
+	p.BoolVar(&f.NoColor, "no-color", false, "turn colors off")
+	p.StringVar(&f.NginxBin, "nginx-bin", "", "path to the nginx binary")
+	p.StringVar(&f.NginxVersion, "nginx-version", "", "assume this nginx version")
+	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout for the operations")
+	p.StringVar(&f.Profile, "profile", "", "profile from ngx's configuration file")
+	p.BoolVar(&f.NoRedact, "no-redact", false, "show sensitive values (terminal only)")
 	registrarFlagsDeConexao(p, f)
 
 	root.AddCommand(newVersionCmd(ctx))
@@ -224,11 +227,11 @@ func NewRoot(ctx *Context) *cobra.Command {
 	return root
 }
 
-// contextoDeExecucao aplica o --timeout global a uma operacao que executa
-// algo no alvo. O cancelamento e sempre devolvido e o chamador sempre o
-// difere: um timeout de zero (ou negativo, digitado por engano) nao pode
-// virar uma operacao sem limite nenhum pendurada numa conexao SSH, entao
-// nesse caso vale o default da flag.
+// contextoDeExecucao applies the global --timeout to an operation that runs
+// something on the target. The cancel function is always returned and the
+// caller always defers it: a timeout of zero (or negative, typed by mistake)
+// cannot become an operation with no limit at all hanging on an SSH
+// connection, so in that case the flag default applies.
 func (c *Context) contextoDeExecucao(pai context.Context) (context.Context, context.CancelFunc) {
 	if pai == nil {
 		pai = context.Background()
@@ -244,24 +247,24 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	ctx.Command = cmd.Name()
 
 	if f.JSON && f.Human {
-		return output.Usage("--json e --human sao mutuamente exclusivos")
+		return output.Usage("--json and --human are mutually exclusive")
 	}
 
 	s, err := settings.Load(ctx.GlobalSettingsPath, ctx.LocalSettingsPath)
 	if err != nil {
-		// A causa (caminho de arquivo, erro cru do parser YAML) fica so no
-		// campo Err de output.Internal, acessivel via errors.Unwrap; a
-		// mensagem do diagnostico nao deve vazar detalhe interno ao agente.
-		return output.Internal(err, "nao foi possivel carregar a configuracao do ngx")
+		// The cause (file path, raw error from the YAML parser) stays only in
+		// the Err field of output.Internal, reachable via errors.Unwrap; the
+		// diagnostic message must not leak internal detail to the agent.
+		return output.Internal(err, "could not load the ngx configuration")
 	}
 	ctx.Settings = s
 
-	// O formato e validado aqui, logo depois de carregar as settings, e nao
-	// so dentro de Renderer.Render: output.format vem de um YAML de
-	// configuracao livre, e Render so e alcancado depois do portao de
-	// --quiet. Se o valor invalido so fosse pego ali, "ngx --quiet" com um
-	// format ruim suprimiria o proprio erro de uso e o usuario nao teria
-	// nenhum sinal do problema.
+	// The format is validated here, right after loading the settings, and not
+	// only inside Renderer.Render: output.format comes from a free-form YAML
+	// configuration, and Render is only reached after the --quiet gate. If the
+	// invalid value were caught only there, "ngx --quiet" with a bad format
+	// would suppress the usage error itself and the user would have no sign of
+	// the problem.
 	formato := resolverFormato(f, s)
 	if err := validarFormato(formato); err != nil {
 		return err
@@ -272,19 +275,19 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 		return output.Usage("%s", err.Error())
 	}
 
-	// Lista de redacao vazia desliga a redacao pelo arquivo de settings, sem
-	// passar pelo portao de terminal do --no-redact. E um caminho legitimo,
-	// mas nao pode ser mudo: um `.ngx/config.yaml` relativo ao cwd basta
-	// para um agente de IA passar a despejar segredo no pipe sem que nada na
-	// saida indique que a protecao foi desligada. O aviso e o que impede
-	// isso de ser invisivel para quem consome.
+	// An empty redact list turns redaction off through the settings file,
+	// without going through --no-redact's terminal gate. It is a legitimate
+	// path, but it cannot be silent: a `.ngx/config.yaml` relative to the cwd
+	// is enough for an AI agent to start dumping secrets into the pipe with
+	// nothing in the output indicating that the protection was turned off. The
+	// warning is what keeps that from being invisible to consumers.
 	if set.Empty() {
 		ctx.TransportDiags = append(ctx.TransportDiags, output.Diagnostic{
 			Severity: output.SeverityWarning,
 			Code:     "NGX-0004",
-			Message: "a redacao esta DESLIGADA: a lista output.redact do arquivo de " +
-				"settings esta vazia, entao valores sensiveis saem como estao. " +
-				"Isso nao passa pelo portao de terminal do --no-redact",
+			Message: "redaction is OFF: the output.redact list in the settings " +
+				"file is empty, so sensitive values go out as they are. " +
+				"This does not go through --no-redact's terminal gate",
 		})
 	}
 
@@ -293,8 +296,8 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	ctx.Renderer.NoRedact = f.NoRedact
 	ctx.Renderer.Quiet = f.Quiet
 
-	// O transporte e o ultimo passo de preparar: conectar antes de validar
-	// as flags cobraria um handshake SSH de quem digitou --json --human.
+	// The transport is the last step of preparar: connecting before validating
+	// the flags would charge an SSH handshake to whoever typed --json --human.
 	return abrirTransporte(ctx, cmd)
 }
 
@@ -309,17 +312,17 @@ func resolverFormato(f *GlobalFlags, s *settings.Settings) output.Format {
 	}
 }
 
-// validarFormato recusa qualquer formato fora de auto/json/human. As flags
-// --json/--human so produzem um desses valores por construcao; a unica
-// origem possivel de um formato invalido em preparar e o output.format do
-// arquivo de configuracao.
+// validarFormato rejects any format outside auto/json/human. The
+// --json/--human flags only produce one of those values by construction; the
+// only possible source of an invalid format in preparar is output.format from
+// the configuration file.
 func validarFormato(formato output.Format) error {
 	switch formato {
 	case output.FormatAuto, output.FormatJSON, output.FormatHuman, "":
 		return nil
 	default:
 		return output.Usage(
-			"output.format invalido na configuracao: %q (esperado auto, json ou human)",
+			"invalid output.format in the configuration: %q (expected auto, json or human)",
 			string(formato),
 		)
 	}
@@ -328,23 +331,23 @@ func validarFormato(formato output.Format) error {
 func newVersionCmd(ctx *Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Mostra a versao do ngx",
+		Short: "Show the ngx version",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			env := ctx.NovoEnvelope("version")
 			dados := map[string]string{"version": output.Version}
 
-			// A chave publica embutida sai aqui por dois motivos. Quem usa
-			// consegue conferir contra a chave publicada do projeto antes de
-			// confiar num `ngx update`. E o build consegue PROVAR que o
-			// `-ldflags -X` funcionou: contra simbolo inexistente o linker
-			// ignora em silencio e o binario sai sem chave, mas o valor
-			// continua aparecendo no `strings` porque o Go grava os ldflags
-			// no build info -- entao so perguntar ao binario em execucao
-			// distingue os dois casos.
+			// The embedded public key goes out here for two reasons. Users
+			// can check it against the project's published key before
+			// trusting an `ngx update`. And the build can PROVE that
+			// `-ldflags -X` worked: against a nonexistent symbol the linker
+			// ignores it silently and the binary comes out with no key, but
+			// the value still shows up in `strings` because Go records the
+			// ldflags in the build info -- so only asking the running binary
+			// tells the two cases apart.
 			//
-			// Campo indisponivel e omitido: binario sem chave nao mostra o
-			// campo, em vez de mostrar vazio.
+			// An unavailable field is omitted: a binary with no key does not
+			// show the field, instead of showing it empty.
 			if update.ChavePublica != "" && update.ChavePublica != update.PlaceholderChavePublica {
 				dados["update_public_key"] = update.ChavePublica
 			}

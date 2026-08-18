@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Summary e a visao de uma linha da configuracao. Existe para o agente saber
-// o tamanho do que esta olhando sem ter que contar nos.
+// Summary is the one-line view of the configuration. It exists so the agent
+// knows the size of what it is looking at without having to count nodes.
 type Summary struct {
 	Files     int `json:"files"`
 	Servers   int `json:"servers"`
@@ -19,21 +19,21 @@ type Summary struct {
 	Upstreams int `json:"upstreams"`
 }
 
-// InspectData e o dump completo: arvore mais resumo.
+// InspectData is the complete dump: tree plus summary.
 type InspectData struct {
 	Config  []*config.File `json:"config"`
 	Summary Summary        `json:"summary"`
 }
 
-// Redacted devolve uma copia com os valores sensiveis substituidos. A copia e
-// profunda nos nos afetados: a arvore original nunca e alterada, senao um fmt
-// posterior gravaria *** no arquivo do usuario.
+// Redacted returns a copy with the sensitive values replaced. The copy is deep
+// on the affected nodes: the original tree is never changed, otherwise a later
+// fmt would write *** into the user's file.
 //
-// O receiver e por valor, nao por ponteiro: Render faz "data.(Redactable)"
-// sobre o que esta guardado em env.Data, e RunE guarda um InspectData por
-// valor (nao *InspectData). Um receiver de ponteiro aqui faria essa asserção
-// falhar em silencio -- Data sairia integro, sem erro e sem aviso, mesmo com
-// regras de redacao ativas (ver o comentario do campo Redact em
+// The receiver is by value, not by pointer: Render does "data.(Redactable)"
+// over what is stored in env.Data, and RunE stores an InspectData by value
+// (not *InspectData). A pointer receiver here would make that assertion fail
+// silently -- Data would go out intact, with no error and no warning, even
+// with redaction rules active (see the comment on the Redact field in
 // output.Renderer).
 func (d InspectData) Redacted(rs output.RedactSet) any {
 	if rs.Empty() {
@@ -71,24 +71,25 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "inspect",
-		Short: "Dump completo: arvore de configuracao e resumo",
+		Short: "Complete dump: configuration tree and summary",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			caminho := caminhoDaConfig(ctx)
 			if caminho == "" {
-				return output.Usage("informe a configuracao com -c ou em nginx.config")
+				return output.Usage("provide the configuration with -c or in nginx.config")
 			}
 
-			// Open e Glob vem do transporte, nunca do os/filepath direto:
-			// apontado para um host remoto, um Glob local listaria os
-			// arquivos da maquina do operador e os apresentaria como
-			// configuracao do servidor (DR4). No alvo local o transporte e
-			// justamente os.Open e filepath.Glob, entao nada muda.
+			// Open and Glob come from the transport, never from os/filepath
+			// directly: pointed at a remote host, a local Glob would list the
+			// files of the operator's machine and present them as the
+			// server's configuration (DR4). On the local target the transport
+			// is exactly os.Open and filepath.Glob, so nothing changes.
 			//
-			// Com --sudo o transporte repete com privilegio SO o arquivo que
-			// a leitura comum recusou por permissao. E o caso real de um
-			// nginx de producao: a maioria dos arquivos e legivel por todos,
-			// e um punhado guarda credencial e fica restrito ao root.
+			// With --sudo the transport retries with privilege ONLY the file
+			// that the ordinary read refused for permission. That is the real
+			// case of a production nginx: most files are readable by
+			// everyone, and a handful hold credentials and stay restricted
+			// to root.
 			ctxExec, cancelar := ctx.contextoDeExecucao(cmd.Context())
 			defer cancelar()
 
@@ -118,31 +119,30 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&combine, "combine", false, "resolve os includes numa arvore unica")
+	cmd.Flags().BoolVar(&combine, "combine", false, "resolve the includes into a single tree")
 	return cmd
 }
 
-// erroDeParse traduz a falha de config.Parse para o exit code correto.
+// erroDeParse translates the config.Parse failure into the correct exit code.
 //
-// config.ParseErrors representa configuracao invalida do usuario -- erro de
-// sintaxe, include para arquivo inexistente -- e e exit 3
-// (output.InvalidConfig), nao exit 1 (output.Internal): quem errou foi o
-// .conf, nao o proprio ngx. Qualquer outra falha (arquivo ausente, erro de
-// IO) continua exit 1, porque ali a flag -c estava correta e foi o disco que
-// nao correspondeu.
+// config.ParseErrors represents invalid user configuration -- a syntax error,
+// an include pointing at a nonexistent file -- and is exit 3
+// (output.InvalidConfig), not exit 1 (output.Internal): the one that got it
+// wrong was the .conf, not ngx itself. Any other failure (missing file, IO
+// error) stays exit 1, because there the -c flag was correct and it was the
+// disk that did not match.
 //
-// Cada item de ParseErrors carrega File e Line proprios. Eles sao
-// preservados no Diagnostic (em vez de virarem so texto dentro de Message)
-// para que a saida aponte o lugar exato do problema; quando ha mais de um
-// item, cada um aparece localizado na mensagem, em vez de uma unica linha
-// generica.
-// comDicaDeSudo acrescenta, quando a recusa foi por permissao e --sudo nao
-// foi pedido, a frase que transforma um beco sem saida em proximo passo.
+// Each item of ParseErrors carries its own File and Line. They are preserved
+// in the Diagnostic (instead of becoming just text inside Message) so that the
+// output points at the exact place of the problem; when there is more than one
+// item, each appears located in the message, instead of a single generic line.
+// comDicaDeSudo adds, when the refusal was for permission and --sudo was not
+// asked for, the sentence that turns a dead end into a next step.
 //
-// Sem isso o operador recebe "nao tem permissao" e fica sem saber que a
-// ferramenta resolve aquilo -- e a saida errada, afrouxar permissao no
-// servidor, e a mais obvia para quem esta com pressa. A DR5 impede escalar
-// sozinho; nada impede dizer como.
+// Without it the operator gets "no permission" and is left not knowing that
+// the tool solves that -- and the wrong way out, loosening permissions on the
+// server, is the most obvious one for whoever is in a hurry. DR5 prevents
+// escalating on its own; nothing prevents saying how.
 func comDicaDeSudo(err error, ctx *Context) error {
 	if ctx.Flags != nil && ctx.Flags.Sudo {
 		return err
@@ -156,8 +156,8 @@ func comDicaDeSudo(err error, ctx *Context) error {
 			!strings.Contains(problemas[i].Message, "permissao") {
 			continue
 		}
-		problemas[i].Message += ". Rode com --sudo para que o ngx leia com privilegio " +
-			"apenas os arquivos recusados; nao e preciso alterar permissao no alvo"
+		problemas[i].Message += ". Run with --sudo so that ngx reads with privilege " +
+			"only the refused files; there is no need to change permissions on the target"
 	}
 	return problemas
 }
@@ -170,8 +170,8 @@ func erroDeParse(err error, extras ...output.Diagnostic) error {
 
 	itens := make([]string, len(problemas))
 	for i, p := range problemas {
-		// Sem linha conhecida (arquivo que nem abriu), o `:0` seria uma
-		// referencia inventada. Campo indisponivel se omite.
+		// With no known line (a file that did not even open), the `:0` would
+		// be an invented reference. An unavailable field is omitted.
 		if p.Line > 0 {
 			itens[i] = fmt.Sprintf("%s:%d: %s", p.File, p.Line, p.Message)
 		} else {
@@ -197,10 +197,10 @@ func caminhoDaConfig(ctx *Context) string {
 	return ""
 }
 
-// resumir conta os blocos da arvore. So diretivas que abrem bloco (via
-// HasBlock) entram na contagem: a fixture tem "server 10.0.0.1:8080;" dentro
-// de um upstream, que tambem se chama "server" mas e uma diretiva simples,
-// nao um bloco -- contar por nome sozinho inflaria Servers.
+// resumir counts the blocks of the tree. Only directives that open a block
+// (via HasBlock) enter the count: the fixture has "server 10.0.0.1:8080;"
+// inside an upstream, which is also called "server" but is a simple directive,
+// not a block -- counting by name alone would inflate Servers.
 func resumir(t *config.Tree) Summary {
 	s := Summary{Files: len(t.Files)}
 	t.Walk(func(n *config.Node) bool {

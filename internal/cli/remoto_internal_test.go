@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// transporteFalso registra o que o CLI pediu ao transporte sem tocar em
-// socket nenhum.
+// transporteFalso records what the CLI asked of the transport without
+// touching any socket at all.
 type transporteFalso struct {
 	descricao string
 	fechado   int
@@ -26,7 +26,7 @@ type transporteFalso struct {
 	stdout    string
 }
 
-func (t *transporteFalso) Open(string) (io.ReadCloser, error) { return nil, errors.New("sem uso") }
+func (t *transporteFalso) Open(string) (io.ReadCloser, error) { return nil, errors.New("unused") }
 func (t *transporteFalso) Glob(string) ([]string, error)      { return []string{}, nil }
 
 func (t *transporteFalso) Run(_ context.Context, argv []string) ([]byte, []byte, int, error) {
@@ -43,8 +43,8 @@ func (t *transporteFalso) Describe() string {
 	return t.descricao
 }
 
-// conectorFalso substitui transport.SSHComDiagnosticos e guarda as opcoes
-// que a resolucao produziu, que e o que os testes de precedencia observam.
+// conectorFalso replaces transport.SSHComDiagnosticos and keeps the options
+// the resolution produced, which is what the precedence tests observe.
 type conectorFalso struct {
 	chamadas int
 	opts     transport.SSHOptions
@@ -65,8 +65,8 @@ func (c *conectorFalso) conectar(opts transport.SSHOptions) (transport.Transport
 	return c.tr, c.diags, nil
 }
 
-// contextoDeTeste monta um Context isolado do filesystem real e do HOME de
-// quem roda a suite.
+// contextoDeTeste assembles a Context isolated from the real filesystem and
+// from the HOME of whoever runs the suite.
 func contextoDeTeste(t *testing.T, con *conectorFalso) (*Context, *bytes.Buffer) {
 	t.Helper()
 	global, local := caminhosIsolados(t)
@@ -90,7 +90,7 @@ func envelopeDe(t *testing.T, out *bytes.Buffer) output.Envelope {
 	return env
 }
 
-// sshConfigDeTeste escreve um ~/.ssh/config de fixture e devolve o caminho.
+// sshConfigDeTeste writes a fixture ~/.ssh/config and returns the path.
 func sshConfigDeTeste(t *testing.T, conteudo string) string {
 	t.Helper()
 	caminho := filepath.Join(t.TempDir(), "config")
@@ -98,23 +98,23 @@ func sshConfigDeTeste(t *testing.T, conteudo string) string {
 	return caminho
 }
 
-// Sem --host o comportamento e exatamente o de hoje: transporte local,
-// nenhuma conexao construida, e nem o ~/.ssh/config chega a ser lido. Toda a
-// v0.1 e uso local; uma regressao aqui quebra o que ja funciona.
+// Without --host the behavior is exactly today's: local transport, no
+// connection built, and not even ~/.ssh/config gets read. All of v0.1 is local
+// use; a regression here breaks what already works.
 //
-// O SSHConfigPath aponta para um arquivo deliberadamente invalido: se a
-// resolucao remota rodasse, ele produziria um aviso da DR7 no envelope. A
-// ausencia de qualquer diagnostico e a prova de que ninguem o leu.
+// SSHConfigPath points at a deliberately invalid file: if the remote
+// resolution ran, it would produce a DR7 warning in the envelope. The absence
+// of any diagnostic is the proof that nobody read it.
 func TestSemHostOTransporteEhLocalENadaDeSSHEhConstruido(t *testing.T) {
 	con := &conectorFalso{}
 	ctx, out := contextoDeTeste(t, con)
-	ctx.SSHConfigPath = sshConfigDeTeste(t, "Match user deploy\n  Port nao-e-numero\n")
+	ctx.SSHConfigPath = sshConfigDeTeste(t, "Match user deploy\n  Port not-a-number\n")
 
 	var errBuf bytes.Buffer
 	code := executar(NewRoot(ctx), ctx, []string{"version"}, &errBuf)
 
 	require.Equal(t, output.ExitOK, code)
-	require.Zero(t, con.chamadas, "nenhuma conexao SSH pode ser construida sem --host")
+	require.Zero(t, con.chamadas, "no SSH connection may be built without --host")
 
 	env := envelopeDe(t, out)
 	require.True(t, env.OK)
@@ -122,9 +122,9 @@ func TestSemHostOTransporteEhLocalENadaDeSSHEhConstruido(t *testing.T) {
 	require.Empty(t, env.Diagnostics)
 }
 
-// A prova de nao-regressao no proprio ponto de entrada de producao: sem
-// --host, Execute monta o transporte local e o inspect le a fixture do disco
-// pelo mesmo os.Open/filepath.Glob de sempre.
+// The non-regression proof on the production entry point itself: without
+// --host, Execute assembles the local transport and inspect reads the fixture
+// from disk through the same os.Open/filepath.Glob as always.
 func TestSemHostInspectContinuaLendoODiscoLocal(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -142,9 +142,10 @@ func TestSemHostInspectContinuaLendoODiscoLocal(t *testing.T) {
 	require.NotEmpty(t, env.Meta.ConfigHash)
 }
 
-// Precedencia da DR2: a flag explicita vence o ~/.ssh/config, que vence o
-// default. Quem faz isso e transport.ResolverSSHConfig; o teste prova que o
-// CLI o alimenta com as flags certas e nao reimplementa a ordem por fora.
+// DR2's precedence: an explicit flag beats ~/.ssh/config, which beats the
+// default. The one doing that is transport.ResolverSSHConfig; the test proves
+// the CLI feeds it the right flags and does not reimplement the order on the
+// side.
 func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 	const arquivo = "Host web1\n" +
 		"  HostName 10.0.0.9\n" +
@@ -152,7 +153,7 @@ func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 		"  Port 2222\n" +
 		"  IdentityFile /keys/id_web1\n"
 
-	t.Run("flag vence o arquivo", func(t *testing.T) {
+	t.Run("the flag beats the file", func(t *testing.T) {
 		con := &conectorFalso{}
 		ctx, _ := contextoDeTeste(t, con)
 		ctx.SSHConfigPath = sshConfigDeTeste(t, arquivo)
@@ -169,7 +170,7 @@ func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 		require.Equal(t, "/keys/id_web1", con.opts.KeyPath)
 	})
 
-	t.Run("arquivo vence o default", func(t *testing.T) {
+	t.Run("the file beats the default", func(t *testing.T) {
 		con := &conectorFalso{}
 		ctx, _ := contextoDeTeste(t, con)
 		ctx.SSHConfigPath = sshConfigDeTeste(t, arquivo)
@@ -182,7 +183,7 @@ func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 		require.Equal(t, "deploy", con.opts.User)
 	})
 
-	t.Run("default quando ninguem diz", func(t *testing.T) {
+	t.Run("the default when nobody says", func(t *testing.T) {
 		con := &conectorFalso{}
 		ctx, _ := contextoDeTeste(t, con)
 		ctx.SSHConfigPath = sshConfigDeTeste(t, "")
@@ -196,9 +197,9 @@ func TestPrecedenciaDeFlagsSobreSSHConfig(t *testing.T) {
 	})
 }
 
-// O --timeout global vale para a conexao: sem isso, um host inalcancavel
-// ficaria pendurado no timeout interno do transporte, e nao no que o operador
-// pediu.
+// The global --timeout applies to the connection: without it, an unreachable
+// host would hang on the transport's internal timeout, and not on the one the
+// operator asked for.
 func TestTimeoutGlobalChegaNasOpcoesDeConexao(t *testing.T) {
 	con := &conectorFalso{}
 	ctx, _ := contextoDeTeste(t, con)
@@ -211,8 +212,8 @@ func TestTimeoutGlobalChegaNasOpcoesDeConexao(t *testing.T) {
 	require.Equal(t, "5s", con.opts.Timeout.String())
 }
 
-// Nenhum segredo atravessa a linha de comando: --password nao existe, e o
-// cobra recusa a flag desconhecida com exit de uso.
+// No secret crosses the command line: --password does not exist, and cobra
+// refuses the unknown flag with a usage exit.
 func TestFlagDeSenhaNaoExiste(t *testing.T) {
 	con := &conectorFalso{}
 	ctx, out := contextoDeTeste(t, con)
@@ -228,9 +229,9 @@ func TestFlagDeSenhaNaoExiste(t *testing.T) {
 	require.Equal(t, "NGX-0002", env.Diagnostics[0].Code)
 }
 
-// A senha tambem nunca e montada pelo CLI: o campo Password sai vazio das
-// opcoes, para que transport.MontarAutenticacao a busque em
-// NGX_SSH_PASSWORD ou no prompt sem eco.
+// The password is never assembled by the CLI either: the Password field
+// leaves the options empty, so that transport.MontarAutenticacao fetches it
+// from NGX_SSH_PASSWORD or from the prompt with no echo.
 func TestOCLINuncaPreencheASenhaNasOpcoes(t *testing.T) {
 	con := &conectorFalso{}
 	ctx, _ := contextoDeTeste(t, con)
@@ -243,14 +244,15 @@ func TestOCLINuncaPreencheASenhaNasOpcoes(t *testing.T) {
 	require.Empty(t, con.opts.Password)
 }
 
-// O escape da DR1 nunca e silencioso: --insecure-host-key chega ao transporte
-// e o aviso que ele devolve aparece no envelope, sem derrubar o ok.
+// DR1's escape hatch is never silent: --insecure-host-key reaches the
+// transport and the warning it returns shows up in the envelope, without
+// bringing ok down.
 func TestAvisoDeHostKeyInseguraChegaNoEnvelope(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
 			Code:     transport.CodigoAvisoHostKeyInsegura,
-			Message:  "host key aceita sem verificacao",
+			Message:  "host key accepted without verification",
 		}},
 		tr: &transporteFalso{descricao: "ssh://deploy@10.0.0.9:22"},
 	}
@@ -265,21 +267,21 @@ func TestAvisoDeHostKeyInseguraChegaNoEnvelope(t *testing.T) {
 	require.True(t, con.opts.InsecureHostKey)
 
 	env := envelopeDe(t, out)
-	require.True(t, env.OK, "um aviso nao derruba o comando")
+	require.True(t, env.OK, "a warning does not bring the command down")
 	require.Len(t, env.Diagnostics, 1)
 	require.Equal(t, output.SeverityWarning, env.Diagnostics[0].Severity)
 	require.Equal(t, transport.CodigoAvisoHostKeyInsegura, env.Diagnostics[0].Code)
 	require.Equal(t, "ssh://deploy@10.0.0.9:22", env.Meta.Target)
 }
 
-// Um diagnostico da conexao tambem tem que sobreviver ao caminho de erro:
-// quem le a falha precisa saber que a host key nao foi verificada.
+// A connection diagnostic also has to survive the error path: whoever reads
+// the failure needs to know the host key was not verified.
 func TestDiagnosticoDaConexaoSobreviveAoErroDoComando(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
 			Code:     transport.CodigoAvisoHostKeyInsegura,
-			Message:  "host key aceita sem verificacao",
+			Message:  "host key accepted without verification",
 		}},
 	}
 	ctx, out := contextoDeTeste(t, con)
@@ -290,7 +292,7 @@ func TestDiagnosticoDaConexaoSobreviveAoErroDoComando(t *testing.T) {
 		Use:  "falha",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			return output.InvalidConfig("configuracao invalida")
+			return output.InvalidConfig("invalid configuration")
 		},
 	})
 
@@ -309,15 +311,15 @@ func TestDiagnosticoDaConexaoSobreviveAoErroDoComando(t *testing.T) {
 	require.Contains(t, codigos, "NGX-0003")
 }
 
-// O erro de conexao mantem o codigo do transporte no envelope, e o meta nao
-// inventa um alvo: sem transporte construido, o campo e omitido.
+// A connection error keeps the transport's code in the envelope, and meta does
+// not invent a target: with no transport built, the field is omitted.
 func TestFalhaDeConexaoPreservaODiagnosticoDoTransporte(t *testing.T) {
 	con := &conectorFalso{err: &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
 			Code:     transport.CodigoHostDesconhecido,
-			Message:  "host desconhecido",
+			Message:  "unknown host",
 		},
 	}}
 	ctx, out := contextoDeTeste(t, con)
@@ -331,12 +333,12 @@ func TestFalhaDeConexaoPreservaODiagnosticoDoTransporte(t *testing.T) {
 	env := envelopeDe(t, out)
 	require.False(t, env.OK)
 	require.Equal(t, transport.CodigoHostDesconhecido, env.Diagnostics[0].Code)
-	require.Empty(t, env.Meta.Target, "alvo nao confirmado nao pode ser estimado")
+	require.Empty(t, env.Meta.Target, "an unconfirmed target cannot be estimated")
 }
 
-// Close roda sempre — no sucesso e no erro do comando.
+// Close always runs — on success and on the command's error.
 func TestTransporteFechaNosDoisCaminhos(t *testing.T) {
-	t.Run("sucesso", func(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
 		tr := &transporteFalso{}
 		con := &conectorFalso{tr: tr}
 		ctx, _ := contextoDeTeste(t, con)
@@ -348,7 +350,7 @@ func TestTransporteFechaNosDoisCaminhos(t *testing.T) {
 		require.Equal(t, 1, tr.fechado)
 	})
 
-	t.Run("erro do comando", func(t *testing.T) {
+	t.Run("command error", func(t *testing.T) {
 		tr := &transporteFalso{}
 		con := &conectorFalso{tr: tr}
 		ctx, _ := contextoDeTeste(t, con)
@@ -359,7 +361,7 @@ func TestTransporteFechaNosDoisCaminhos(t *testing.T) {
 			Use:  "falha",
 			Args: cobra.NoArgs,
 			RunE: func(*cobra.Command, []string) error {
-				return output.InvalidConfig("configuracao invalida")
+				return output.InvalidConfig("invalid configuration")
 			},
 		})
 
@@ -370,8 +372,8 @@ func TestTransporteFechaNosDoisCaminhos(t *testing.T) {
 	})
 }
 
-// Flag de conexao sem --host e erro de uso, nao um valor ignorado em
-// silencio.
+// A connection flag without --host is a usage error, not a value silently
+// ignored.
 func TestFlagDeConexaoSemHostEhErroDeUso(t *testing.T) {
 	for _, args := range [][]string{
 		{"--user", "deploy", "version"},
@@ -398,8 +400,8 @@ func TestFlagDeConexaoSemHostEhErroDeUso(t *testing.T) {
 	}
 }
 
-// --sudo e local: privilegio explicito vale para os dois alvos, entao a flag
-// nao exige --host.
+// --sudo is local too: explicit privilege applies to both targets, so the flag
+// does not require --host.
 func TestSudoNaoExigeHost(t *testing.T) {
 	con := &conectorFalso{}
 	ctx, _ := contextoDeTeste(t, con)
@@ -411,16 +413,16 @@ func TestSudoNaoExigeHost(t *testing.T) {
 	require.True(t, ctx.Flags.Sudo)
 }
 
-// A DR5 na fiacao: com --sudo, o runtime montado pelo contexto escala; sem
-// ela, nunca. O que o transporte recebe e a prova.
+// DR5 in the wiring: with --sudo, the runtime assembled by the context
+// escalates; without it, never. What the transport receives is the proof.
 func TestSudoChegaAoRuntime(t *testing.T) {
 	casos := []struct {
 		nome     string
 		sudo     bool
 		primeiro string
 	}{
-		{"com --sudo", true, "sudo"},
-		{"sem --sudo", false, "nginx"},
+		{"with --sudo", true, "sudo"},
+		{"without --sudo", false, "nginx"},
 	}
 
 	for _, c := range casos {
@@ -437,7 +439,7 @@ func TestSudoChegaAoRuntime(t *testing.T) {
 	}
 }
 
-// O binario configurado por --nginx-bin tambem faz parte da fiacao.
+// The binary configured by --nginx-bin is part of the wiring too.
 func TestNginxBinChegaAoRuntime(t *testing.T) {
 	tr := &transporteFalso{stdout: "test is successful\n"}
 	ctx := &Context{Flags: &GlobalFlags{NginxBin: "/opt/nginx/sbin/nginx"}, Transport: tr}
@@ -447,14 +449,14 @@ func TestNginxBinChegaAoRuntime(t *testing.T) {
 	require.Equal(t, "/opt/nginx/sbin/nginx", tr.argv[0][0])
 }
 
-// Todo codigo de diagnostico produzido por este caminho segue a secao 6.0 do
-// spec: NGX- mais quatro digitos, sem letra e sem severidade embutida.
+// Every diagnostic code produced by this path follows section 6.0 of the
+// spec: NGX- plus four digits, with no letter and no embedded severity.
 func TestCodigosDeDiagnosticoSeguemOFormato(t *testing.T) {
 	con := &conectorFalso{
 		diags: []output.Diagnostic{{
 			Severity: output.SeverityWarning,
 			Code:     transport.CodigoAvisoSSHConfig,
-			Message:  "aviso",
+			Message:  "warning",
 		}},
 	}
 	ctx, out := contextoDeTeste(t, con)
@@ -471,8 +473,8 @@ func TestCodigosDeDiagnosticoSeguemOFormato(t *testing.T) {
 	}
 }
 
-// O aviso de ~/.ssh/config inacessivel usa o codigo da DR7 e nao aborta a
-// conexao: a resolucao segue com flags e defaults.
+// The warning about an unreachable ~/.ssh/config uses DR7's code and does not
+// abort the connection: the resolution goes on with flags and defaults.
 func TestCaminhoSSHConfigIndisponivelViraAvisoENaoErro(t *testing.T) {
 	ctx, _ := contextoDeTeste(t, nil)
 	t.Setenv("HOME", "")
@@ -480,8 +482,9 @@ func TestCaminhoSSHConfigIndisponivelViraAvisoENaoErro(t *testing.T) {
 
 	caminho, diag := caminhoSSHConfig(ctx)
 	if diag == nil {
-		// Em plataformas onde o diretorio do usuario e descoberto por outro
-		// meio, nao ha o que avisar — mas ai o caminho tem que existir.
+		// On platforms where the user's directory is discovered by other
+		// means there is nothing to warn about — but then the path has to
+		// exist.
 		require.NotEmpty(t, caminho)
 		return
 	}

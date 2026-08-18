@@ -1,14 +1,16 @@
 //go:build integration
 
-// Integracao do CLI pelo caminho remoto, contra a bancada (test/bancada).
+// CLI integration through the remote path, against the bancada test bench
+// (test/bancada).
 //
-// O que se prova aqui e o que so aparece no fim da linha: o `inspect --host`
-// devolvendo a arvore lida do container, o alvo no meta do envelope, e a
-// redacao dos tres segredos antes de a saida chegar a quem consome. A camada
-// de transporte tem os seus proprios testes em internal/transport.
+// What is proven here is what only shows up at the end of the line: `inspect
+// --host` returning the tree read from the container, the target in the
+// envelope's meta, and the redaction of the three secrets before the output
+// reaches whoever consumes it. The transport layer has its own tests in
+// internal/transport.
 //
-// Atras da tag `integration`, e PULA quando a bancada nao esta no ar.
-// Rode: make bancada-up && go test -tags integration ./... -race
+// Behind the `integration` tag, and it SKIPS when the bancada is down.
+// Run: make bancada-up && go test -tags integration ./... -race
 package cli
 
 import (
@@ -39,8 +41,8 @@ const (
 	marcadorArmadilha = "ARMADILHA-LOCAL-NAO-DEVE-APARECER"
 	arquivoArmadilha  = "zz-armadilha-local.conf"
 
-	// Os tres segredos da bancada, nas tres formas que ela reproduz. Sao os
-	// mesmos de test/bancada/gerar-config.sh.
+	// The three secrets of the bancada, in the three shapes it reproduces.
+	// They are the same as in test/bancada/gerar-config.sh.
 	tokenDaBancada    = "Bearer ngx-bancada-token-4f3c9a1b2e"
 	htpasswdDaBancada = "/etc/nginx/secrets/htpasswd"
 	chaveTLSDaBancada = "/etc/nginx/secrets/tls.key"
@@ -50,10 +52,10 @@ const (
 	arquivoDoContainer = "10-do-container.conf"
 )
 
-// A fixture vive no HOME do usuario da bancada porque /etc/nginx e
-// 0700 root:root de proposito (a armadilha da DR5): como ngxtest, nem
-// `nginx -T` nem a leitura por SFTP alcancam a configuracao real. O curinga
-// relativo e o que disputa com o arquivo homonimo do disco local.
+// The fixture lives in the HOME of the bancada user because /etc/nginx is
+// 0700 root:root on purpose (the DR5 trap): as ngxtest, neither `nginx -T` nor
+// the SFTP read reaches the real configuration. The relative wildcard is what
+// competes with the file of the same name on the local disk.
 const topoRemotoCLI = `include /usr/share/nginx/modules/*.conf;
 
 events {
@@ -98,8 +100,8 @@ func raizDoRepo(t *testing.T) string {
 	return raiz
 }
 
-// exigirBancada pula o teste, em vez de falhar, quando a bancada nao esta no
-// ar: quem nao tem Docker nao pode ver falha falsa.
+// exigirBancada skips the test, instead of failing, when the bancada is down:
+// whoever has no Docker cannot be shown a false failure.
 func exigirBancada(t *testing.T) (chave string, porta int) {
 	t.Helper()
 
@@ -108,24 +110,25 @@ func exigirBancada(t *testing.T) (chave string, porta int) {
 	if valor := os.Getenv(envPortaBancada); valor != "" {
 		var err error
 		porta, err = strconv.Atoi(valor)
-		require.NoErrorf(t, err, "%s=%q nao e um numero de porta", envPortaBancada, valor)
+		require.NoErrorf(t, err, "%s=%q is not a port number", envPortaBancada, valor)
 	}
 
 	if _, err := os.Stat(chave); err != nil {
-		t.Skipf("bancada fora do ar: a chave de teste %s nao existe. "+
-			"Rode `make bancada-up` (precisa de Docker).", chave)
+		t.Skipf("bancada is down: the test key %s does not exist. "+
+			"Run `make bancada-up` (needs Docker).", chave)
 	}
 
 	endereco := net.JoinHostPort(hostBancada, strconv.Itoa(porta))
 	conn, err := net.DialTimeout("tcp", endereco, 2*time.Second)
 	if err != nil {
-		t.Skipf("bancada fora do ar: nada escuta em %s (%v). "+
-			"Rode `make bancada-up` (precisa de Docker).", endereco, err)
+		t.Skipf("bancada is down: nothing is listening on %s (%v). "+
+			"Run `make bancada-up` (needs Docker).", endereco, err)
 	}
 	_ = conn.Close()
 
-	// Sem o ssh-agent de quem roda a suite: a bancada so aceita a chave
-	// gerada, e um agente com varias chaves esgota o MaxAuthTries do sshd.
+	// Without the ssh-agent of whoever runs the suite: the bancada only
+	// accepts the generated key, and an ssh-agent with several keys exhausts
+	// the sshd's MaxAuthTries.
 	t.Setenv(transport.EnvSocketSSHAgent, "")
 
 	return chave, porta
@@ -142,9 +145,9 @@ func opcoesDaBancada(chave string, porta int, knownHosts string) transport.SSHOp
 	}
 }
 
-// knownHostsAprendido registra a chave de host da bancada aprendendo-a pela
-// propria recusa de primeiro acesso. Nenhum teste daqui usa
-// --insecure-host-key: o CLI conecta com verificacao de verdade.
+// knownHostsAprendido records the bancada's host key by learning it from the
+// first-access refusal itself. No test here uses --insecure-host-key: the CLI
+// connects with real verification.
 func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 	t.Helper()
 
@@ -154,7 +157,7 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 	tr, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, caminho))
 	if err == nil {
 		_ = tr.Close()
-		t.Fatal("a conexao foi aceita com o known_hosts vazio")
+		t.Fatal("the connection was accepted with an empty known_hosts")
 	}
 
 	var e *output.Error
@@ -163,15 +166,16 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 
 	const prefixo = "acrescente a linha ao arquivo: "
 	_, linha, achou := strings.Cut(e.Diag.Message, prefixo)
-	require.Truef(t, achou, "a mensagem nao trouxe a linha do known_hosts: %s", e.Diag.Message)
+	require.Truef(t, achou, "the message did not carry the known_hosts line: %s", e.Diag.Message)
 
 	require.NoError(t, os.WriteFile(caminho, []byte(strings.TrimSpace(linha)+"\n"), 0o600))
 	return caminho
 }
 
-// montarFixtureRemota escreve a fixture no HOME do container e a remove no
-// fim. O `sh -c` esta aqui, no teste, e nao no ngx: o ngx nunca monta linha de
-// shell, e o que ele executa no alvo continua sendo argv explicito.
+// montarFixtureRemota writes the fixture into the container's HOME and removes
+// it at the end. The `sh -c` is here, in the test, and not in ngx: ngx never
+// assembles a shell line, and what it runs on the target remains explicit
+// argv.
 func montarFixtureRemota(t *testing.T, chave string, porta int, knownHosts string) {
 	t.Helper()
 
@@ -195,7 +199,7 @@ FIM
 
 	stdout, stderr, saida, err := tr.Run(ctx, []string{"sh", "-c", script})
 	require.NoError(t, err)
-	require.Zerof(t, saida, "montagem da fixture remota falhou: %s %s", stdout, stderr)
+	require.Zerof(t, saida, "setting up the remote fixture failed: %s %s", stdout, stderr)
 
 	t.Cleanup(func() {
 		limpeza, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, knownHosts))
@@ -208,7 +212,7 @@ FIM
 	})
 }
 
-// arvoreDoEnvelope decodifica so o que este teste observa do data do inspect.
+// arvoreDoEnvelope decodes only what this test observes of inspect's data.
 type arvoreDoEnvelope struct {
 	Config []struct {
 		File string `json:"file"`
@@ -225,7 +229,7 @@ func dataDoInspect(t *testing.T, bruto []byte) arvoreDoEnvelope {
 	return env.Data
 }
 
-// argumentosDeConexao monta as flags de acesso remoto da bancada.
+// argumentosDeConexao assembles the bancada's remote access flags.
 func argumentosDeConexao(chave string, porta int, knownHosts string) []string {
 	return []string{
 		"--host", hostBancada,
@@ -237,13 +241,14 @@ func argumentosDeConexao(chave string, porta int, knownHosts string) []string {
 	}
 }
 
-// O inspect remoto ponta a ponta: a arvore vem do container, o alvo aparece no
-// meta, e nenhum dos tres segredos atravessa a saida.
+// The remote inspect end to end: the tree comes from the container, the target
+// shows up in meta, and none of the three secrets crosses the output.
 //
-// O diretorio corrente e o da armadilha do glob (test/bancada/armadilha-local),
-// que tem um arquivo homonimo ao do container. Se o Glob nao estivesse
-// injetado no parser, o marcador dele apareceria aqui — e o ngx estaria
-// apresentando arquivos da maquina do operador como configuracao do servidor.
+// The current directory is the glob trap's (test/bancada/armadilha-local),
+// which holds a file with the same name as the container's. If the Glob were
+// not injected into the parser, its marker would show up here — and ngx would
+// be presenting files from the operator's machine as the server's
+// configuration.
 func TestInspectRemotoLeOContainerEnaoVazaSegredo(t *testing.T) {
 	chave, porta := exigirBancada(t)
 	knownHosts := knownHostsAprendido(t, chave, porta)
@@ -252,12 +257,12 @@ func TestInspectRemotoLeOContainerEnaoVazaSegredo(t *testing.T) {
 	armadilha := filepath.Join(raizDoRepo(t), "test", "bancada", "armadilha-local")
 	t.Chdir(armadilha)
 
-	// Controle: no disco local o mesmo padrao casa a armadilha. Sem esta
-	// prova, o teste passaria por vacuidade num diretorio vazio.
+	// Control: on the local disk the same pattern matches the trap. Without
+	// this proof, the test would pass vacuously in an empty directory.
 	locais, err := transport.Local().Glob(dirConfDRemoto + "/*.conf")
 	require.NoError(t, err)
 	require.Contains(t, locais, filepath.Join(dirConfDRemoto, arquivoArmadilha),
-		"a armadilha local nao esta no lugar")
+		"the local trap is not in place")
 
 	ctx, out := contextoDeTeste(t, nil)
 	ctx.SSHConfigPath = sshConfigDeTeste(t, "")
@@ -271,16 +276,16 @@ func TestInspectRemotoLeOContainerEnaoVazaSegredo(t *testing.T) {
 
 	env := envelopeDe(t, out)
 	require.True(t, env.OK)
-	// O unico diagnostico esperado e o informativo de ssh-agent ausente,
-	// que o proprio teste provoca ao limpar SSH_AUTH_SOCK.
+	// The only expected diagnostic is the informational one about the missing
+	// ssh-agent, which the test itself provokes by clearing SSH_AUTH_SOCK.
 	for _, d := range env.Diagnostics {
-		require.NotEqualf(t, output.SeverityError, d.Severity, "diagnostico de erro: %s", d.Message)
+		require.NotEqualf(t, output.SeverityError, d.Severity, "error diagnostic: %s", d.Message)
 	}
 	require.Equal(t, fmt.Sprintf("ssh://%s@%s:%d", usuarioBancada, hostBancada, porta), env.Meta.Target)
 	require.NotEmpty(t, env.Meta.ConfigHash)
 
-	// A arvore e a do container: o arquivo do curinga relativo, mais os
-	// modulos reais que o curinga absoluto trouxe.
+	// The tree is the container's: the file from the relative wildcard, plus
+	// the real modules the absolute wildcard brought in.
 	data := dataDoInspect(t, out.Bytes())
 	var caminhos []string
 	modulos := 0
@@ -291,30 +296,30 @@ func TestInspectRemotoLeOContainerEnaoVazaSegredo(t *testing.T) {
 		}
 	}
 	require.Contains(t, caminhos, dirConfDRemoto+"/"+arquivoDoContainer)
-	require.Positive(t, modulos, "o curinga absoluto nao trouxe nenhum modulo do container")
+	require.Positive(t, modulos, "the absolute wildcard brought in no module from the container")
 	require.Equal(t, 2, data.Summary.Servers)
 
 	bruto := out.String()
 	require.NotContains(t, bruto, marcadorArmadilha,
-		"a configuracao do disco local vazou para a arvore lida da bancada")
+		"the local disk configuration leaked into the tree read from the bancada")
 	require.NotContains(t, bruto, arquivoArmadilha)
 
-	// Redacao: nenhuma das tres formas de segredo sai na saida, e as
-	// diretivas continuam visiveis — sumir com o no faria o agente concluir
-	// que a diretiva nao existe.
+	// Redaction: none of the three shapes of secret goes out in the output,
+	// and the directives stay visible — making the node disappear would make
+	// the agent conclude the directive does not exist.
 	for _, segredo := range []string{tokenDaBancada, htpasswdDaBancada, chaveTLSDaBancada} {
-		require.NotContainsf(t, bruto, segredo, "o segredo %q vazou na saida", segredo)
+		require.NotContainsf(t, bruto, segredo, "the secret %q leaked into the output", segredo)
 	}
 	require.GreaterOrEqualf(t, strings.Count(bruto, output.RedactedValue), 3,
-		"as tres diretivas sensiveis tem de sair redigidas, nao omitidas: %s", bruto)
+		"the three sensitive directives have to go out redacted, not omitted: %s", bruto)
 	for _, diretiva := range []string{"proxy_set_header", "auth_basic_user_file", "ssl_certificate_key"} {
 		require.Contains(t, bruto, diretiva)
 	}
 }
 
-// A outra metade da DR5, no caminho de leitura: como ngxtest, /etc/nginx e
-// ilegivel por SFTP. O ngx reporta a recusa em vez de devolver uma arvore
-// vazia — e nao repete a leitura com privilegio por conta propria.
+// The other half of DR5, on the reading path: as ngxtest, /etc/nginx is
+// unreadable over SFTP. ngx reports the refusal instead of returning an empty
+// tree — and does not retry the read with privilege on its own.
 func TestInspectRemotoDaConfigRealReportaFaltaDePermissao(t *testing.T) {
 	chave, porta := exigirBancada(t)
 	knownHosts := knownHostsAprendido(t, chave, porta)
@@ -339,13 +344,13 @@ func TestInspectRemotoDaConfigRealReportaFaltaDePermissao(t *testing.T) {
 			recusa = strings.ToLower(d.Message)
 		}
 	}
-	// A asserção é sobre a mensagem NOSSA, e não sobre "permission denied":
-	// a string do runtime muda entre sistemas e versoes de biblioteca, e um
-	// consumidor que ramifique por ela quebra sozinho. O contrato e a causa
-	// classificada.
+	// The assertion is about OUR message, and not about the raw runtime
+	// string: the runtime string changes between systems and library
+	// versions, and a consumer that branches on it breaks on its own. The
+	// contract is the classified cause.
 	require.Contains(t, recusa, "permissao",
-		"a recusa de leitura tem de aparecer; arvore vazia em silencio seria mentira")
+		"the read refusal has to show up; a silently empty tree would be a lie")
 	require.NotContains(t, recusa, "permission denied",
-		"a string crua do runtime nao pode vazar para o diagnostico")
-	require.Nil(t, env.Data, "sem leitura nao ha arvore: campo indisponivel e omitido")
+		"the raw runtime string cannot leak into the diagnostic")
+	require.Nil(t, env.Data, "with no read there is no tree: an unavailable field is omitted")
 }

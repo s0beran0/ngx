@@ -8,46 +8,47 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// TestData e o veredito de `nginx -t` no data do envelope.
+// TestData is the verdict of `nginx -t` in the envelope's data.
 //
-// Os diagnosticos nao estao aqui: eles vao para o envelope, que e onde um
-// agente ja sabe procurar por achado localizado e onde a severidade derruba
-// o ok. Repeti-los dentro do data criaria duas listas que podem discordar.
+// The diagnostics are not here: they go into the envelope, which is where an
+// agent already knows to look for a located finding and where severity brings
+// ok down. Repeating them inside data would create two lists that can
+// disagree.
 type TestData struct {
-	// OK vem do codigo de saida do nginx, nao do texto.
+	// OK comes from nginx's exit code, not from the text.
 	OK bool `json:"ok"`
 
-	// ConfigFile e o arquivo de topo que o nginx testou, quando ele diz
-	// qual foi. Omitido quando nao diz — nunca deduzido do -c.
+	// ConfigFile is the top-level file nginx tested, when it says which one
+	// it was. Omitted when it does not say — never inferred from -c.
 	ConfigFile string `json:"config_file,omitempty"`
 
-	// Raw e a saida original do nginx, preservada para o caso que o parser
-	// nao reconheceu. Sem ela, uma saida nova viraria um envelope vazio e
-	// quem depura ficaria sem nada.
+	// Raw is nginx's original output, kept for the case the parser did not
+	// recognize. Without it, a new output format would become an empty
+	// envelope and whoever is debugging would be left with nothing.
 	Raw string `json:"raw,omitempty"`
 }
 
-// RenderHuman escreve a linha que um humano quer ler. Os diagnosticos ja
-// foram impressos pelo renderer antes de chegar aqui.
+// RenderHuman writes the line a human wants to read. The diagnostics were
+// already printed by the renderer before getting here.
 func (d TestData) RenderHuman(w io.Writer) error {
-	veredito := "reprovada"
+	veredito := "rejected"
 	if d.OK {
-		veredito = "aprovada"
+		veredito = "accepted"
 	}
 	if d.ConfigFile == "" {
-		_, err := fmt.Fprintf(w, "configuracao %s\n", veredito)
+		_, err := fmt.Fprintf(w, "configuration %s\n", veredito)
 		return err
 	}
-	_, err := fmt.Fprintf(w, "configuracao %s: %s\n", veredito, d.ConfigFile)
+	_, err := fmt.Fprintf(w, "configuration %s: %s\n", veredito, d.ConfigFile)
 	return err
 }
 
-// newTestCmd registra `ngx test`: `nginx -t` executado pelo runtime do
-// contexto, portanto no alvo de --host e com o privilegio de --sudo.
+// newTestCmd registers `ngx test`: `nginx -t` run by the context's runtime,
+// therefore on the --host target and with the privilege of --sudo.
 func newTestCmd(ctx *Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "test",
-		Short: "Roda `nginx -t` e devolve os diagnosticos estruturados",
+		Short: "Run `nginx -t` and return structured diagnostics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			execCtx, cancelar := ctx.contextoDeExecucao(cmd.Context())
@@ -55,9 +56,9 @@ func newTestCmd(ctx *Context) *cobra.Command {
 
 			res, err := ctx.NovoRuntime().TestConfig(execCtx)
 			if err != nil {
-				// Aqui o nginx nao chegou a responder: binario ausente,
-				// privilegio negado, transporte caido. Isso e falha de
-				// infraestrutura, exit 1, e nao configuracao reprovada.
+				// Here nginx never got to answer: missing binary, denied
+				// privilege, transport down. That is an infrastructure
+				// failure, exit 1, and not a rejected configuration.
 				return err
 			}
 
@@ -79,13 +80,13 @@ func newTestCmd(ctx *Context) *cobra.Command {
 				return nil
 			}
 
-			// Configuracao reprovada e resultado, nao falha: o envelope
-			// acima ja saiu com os diagnosticos localizados. O que falta e
-			// so o exit 3, e por isso o erro vai embrulhado — um segundo
-			// envelope no stdout quebraria quem le a saida como um unico
-			// documento JSON.
+			// A rejected configuration is a result, not a failure: the
+			// envelope above already went out with the located diagnostics.
+			// All that is missing is exit 3, which is why the error goes
+			// wrapped — a second envelope on stdout would break whoever reads
+			// the output as a single JSON document.
 			return semRerrenderizar(output.InvalidConfig(
-				"`nginx -t` reprovou a configuracao em %s", ctx.transporte().Describe()))
+				"`nginx -t` rejected the configuration on %s", ctx.transporte().Describe()))
 		},
 	}
 }

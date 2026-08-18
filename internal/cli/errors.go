@@ -2,10 +2,10 @@ package cli
 
 import "github.com/s0beran0/ngx/internal/output"
 
-// comandoDe devolve o nome do comando que estava executando, para que o
-// envelope de erro identifique a operacao que falhou. Antes de o cobra
-// resolver o comando — flag global invalida, por exemplo — nao ha nome, e o
-// fallback e o proprio binario.
+// comandoDe returns the name of the command that was running, so that the
+// error envelope identifies the operation that failed. Before cobra resolves
+// the command — an invalid global flag, for example — there is no name, and
+// the fallback is the binary itself.
 func comandoDe(ctx *Context) string {
 	if ctx == nil || ctx.Command == "" {
 		return "ngx"
@@ -13,20 +13,20 @@ func comandoDe(ctx *Context) string {
 	return ctx.Command
 }
 
-// erroJaRenderizado carrega o exit code de um comando que ja escreveu o
-// proprio envelope.
+// erroJaRenderizado carries the exit code of a command that already wrote its
+// own envelope.
 //
-// Existe por causa de um caso que nao e erro: `nginx -t` reprovar a
-// configuracao e a resposta a pergunta que se fez, e a resposta e o envelope
-// completo, com os diagnosticos localizados. Falta so o codigo de saida 3.
-// Sem este embrulho, executar renderizaria um segundo envelope — o de erro —
-// e o stdout deixaria de ser um unico documento JSON, que e o contrato com
-// quem consome.
+// It exists because of a case that is not an error: `nginx -t` rejecting the
+// configuration is the answer to the question that was asked, and that answer
+// is the complete envelope, with the located diagnostics. All that is missing
+// is exit code 3. Without this wrapper, executar would render a second
+// envelope — the error one — and stdout would stop being a single JSON
+// document, which is the contract with whoever consumes it.
 //
-// Unwrap devolve o *output.Error interno para que errors.As e output.CodeOf
-// continuem enxergando o codigo; o campo e explicito, e nao embutido, porque
-// um *output.Error embutido promoveria o Unwrap dele e a cadeia pularia
-// justamente o erro tipado.
+// Unwrap returns the inner *output.Error so that errors.As and output.CodeOf
+// keep seeing the code; the field is explicit, and not embedded, because an
+// embedded *output.Error would promote its Unwrap and the chain would skip
+// precisely the typed error.
 type erroJaRenderizado struct {
 	err *output.Error
 }
@@ -35,7 +35,7 @@ func (e *erroJaRenderizado) Error() string { return e.err.Error() }
 
 func (e *erroJaRenderizado) Unwrap() error { return e.err }
 
-// semRerrenderizar marca um erro tipado como ja apresentado ao usuario.
+// semRerrenderizar marks a typed error as already shown to the user.
 func semRerrenderizar(err *output.Error) error {
 	return &erroJaRenderizado{err: err}
 }

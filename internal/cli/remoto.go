@@ -12,57 +12,58 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// ConectarSSH abre um transporte remoto e devolve, junto, o que a montagem
-// observou pelo caminho — host key aceita sem verificacao, ssh-agent
-// indisponivel, chave ilegivel.
+// ConectarSSH opens a remote transport and returns, along with it, what
+// building it observed on the way — a host key accepted without verification,
+// an unavailable ssh-agent, an unreadable key.
 //
-// E um campo do Context, e nao uma chamada direta a transport, pelo mesmo
-// motivo que GlobalSettingsPath e campo: um teste do CLI precisa exercitar a
-// fiacao das flags sem abrir um socket. Em producao o valor e sempre
+// It is a Context field, and not a direct call to transport, for the same
+// reason GlobalSettingsPath is a field: a CLI test needs to exercise the flag
+// wiring without opening a socket. In production the value is always
 // transport.SSHComDiagnosticos.
 type ConectarSSH func(transport.SSHOptions) (transport.Transport, []output.Diagnostic, error)
 
-// flagsDeConexao sao as flags que so fazem sentido com --host. Passar
-// qualquer uma delas sem destino e erro de uso, nao um valor ignorado em
-// silencio: quem digitou --user deploy sem --host acredita que a conexao vai
-// usar aquele usuario.
+// flagsDeConexao are the flags that only make sense with --host. Passing any
+// of them without a destination is a usage error, not a value silently
+// ignored: whoever typed --user deploy without --host believes the connection
+// is going to use that user.
 //
-// --sudo fica de fora de proposito: privilegio explicito (DR5) vale tambem
-// para o alvo local.
+// --sudo is left out on purpose: explicit privilege (DR5) applies to the local
+// target too.
 var flagsDeConexao = []string{"host", "user", "port", "key", "known-hosts", "insecure-host-key"}
 
-// registrarFlagsDeConexao adiciona as flags globais de acesso remoto.
+// registrarFlagsDeConexao adds the global remote access flags.
 //
-// Nao existe flag de senha, e isso e decisao de seguranca, nao esquecimento:
-// o valor de uma flag aparece em `ps`, no historico do shell e no log de
-// qualquer CI. O segredo vem de NGX_SSH_PASSWORD ou de um prompt sem eco,
-// ambos resolvidos dentro de transport.MontarAutenticacao.
+// There is no password flag, and that is a security decision, not an
+// oversight: a flag's value shows up in `ps`, in the shell history and in the
+// log of any CI. The secret comes from NGX_SSH_PASSWORD or from a prompt with
+// no echo, both handled inside transport.MontarAutenticacao.
 //
-// --port nasce em 0, e nao em 22, porque zero e o que distingue "nao
-// informado" de "informado como 22". A precedencia da DR2 depende dessa
-// distincao: flag explicita vence o ~/.ssh/config, que vence o default.
+// --port starts at 0, and not at 22, because zero is what distinguishes "not
+// given" from "given as 22". DR2's precedence depends on that distinction: an
+// explicit flag beats ~/.ssh/config, which beats the default.
 func registrarFlagsDeConexao(p *pflag.FlagSet, f *GlobalFlags) {
-	p.StringVar(&f.Host, "host", "", "opera num host remoto por SSH (alias do ~/.ssh/config ou endereco)")
-	p.StringVar(&f.User, "user", "", "usuario SSH")
-	p.IntVar(&f.Port, "port", 0, "porta SSH")
-	p.StringVar(&f.Key, "key", "", "caminho da chave privada")
-	p.StringVar(&f.KnownHosts, "known-hosts", "", "caminho do known_hosts")
+	p.StringVar(&f.Host, "host", "", "operate on a remote host over SSH (~/.ssh/config alias or address)")
+	p.StringVar(&f.User, "user", "", "SSH user")
+	p.IntVar(&f.Port, "port", 0, "SSH port")
+	p.StringVar(&f.Key, "key", "", "path to the private key")
+	p.StringVar(&f.KnownHosts, "known-hosts", "", "path to the known_hosts file")
 	p.BoolVar(&f.InsecureHostKey, "insecure-host-key", false,
-		"aceita a host key sem verificar (inseguro; produz aviso na saida)")
-	p.BoolVar(&f.Sudo, "sudo", false, "escala privilegio nos comandos que exigirem")
+		"accept the host key without verifying it (insecure; emits a warning in the output)")
+	p.BoolVar(&f.Sudo, "sudo", false, "escalate privilege on the commands that require it")
 }
 
-// abrirTransporte decide o alvo da execucao e o guarda no Context.
+// abrirTransporte decides the target of the execution and stores it in the
+// Context.
 //
-// Sem --host o caminho e o de sempre: transporte local, nenhuma resolucao de
-// ~/.ssh/config, nenhum socket. Toda a v0.1 e uso local — uma regressao aqui
-// quebraria o que ja funciona para servir o que ainda ninguem usa.
+// Without --host the path is the usual one: local transport, no ~/.ssh/config
+// resolution, no socket. All of v0.1 is local use — a regression here would
+// break what already works in order to serve what nobody uses yet.
 //
-// Os diagnosticos ficam no Context, e nao sao devolvidos apenas para quem
-// chamou, porque eles precisam alcancar o envelope tanto no caminho de
-// sucesso quanto no de erro. Um aviso de --insecure-host-key que suma da
-// saida faz o escape da DR1 virar silencioso, que e exatamente o que a
-// decisao existe para impedir.
+// The diagnostics stay in the Context, and are not returned only to the
+// caller, because they need to reach the envelope both on the success path and
+// on the error one. An --insecure-host-key warning that vanishes from the
+// output makes DR1's escape hatch silent, which is exactly what the decision
+// exists to prevent.
 func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 	f := ctx.Flags
 
@@ -82,9 +83,9 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 		KnownHostsPath:  f.KnownHosts,
 		InsecureHostKey: f.InsecureHostKey,
 		Timeout:         f.Timeout,
-		// Password fica vazio de proposito: transport.MontarAutenticacao le
-		// NGX_SSH_PASSWORD ou pergunta no terminal. Nenhum segredo atravessa
-		// a linha de comando.
+		// Password is left empty on purpose: transport.MontarAutenticacao
+		// reads NGX_SSH_PASSWORD or asks on the terminal. No secret crosses
+		// the command line.
 	}
 
 	caminhoConfig, diagCaminho := caminhoSSHConfig(ctx)
@@ -92,9 +93,9 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 		ctx.TransportDiags = append(ctx.TransportDiags, *diagCaminho)
 	}
 
-	// A precedencia da DR2 e inteira do transport: flag explicita vence o
-	// ~/.ssh/config, que vence o default. Reimplementar isso aqui criaria
-	// uma segunda fonte de verdade que pode discordar da primeira.
+	// DR2's precedence belongs entirely to transport: an explicit flag beats
+	// ~/.ssh/config, which beats the default. Reimplementing it here would
+	// create a second source of truth that can disagree with the first.
 	resolvido, diags, err := transport.ResolverSSHConfig(opts, caminhoConfig)
 	ctx.TransportDiags = append(ctx.TransportDiags, diags...)
 	if err != nil {
@@ -111,9 +112,9 @@ func abrirTransporte(ctx *Context, cmd *cobra.Command) error {
 	return nil
 }
 
-// recusarFlagsDeConexaoSemHost transforma em erro de uso o que seria uma
-// surpresa silenciosa. Usa Changed, e nao o valor, para pegar tambem
-// --user "" e --port 0 digitados explicitamente.
+// recusarFlagsDeConexaoSemHost turns what would be a silent surprise into a
+// usage error. It uses Changed, and not the value, so as to also catch
+// --user "" and --port 0 typed explicitly.
 func recusarFlagsDeConexaoSemHost(cmd *cobra.Command) error {
 	if cmd == nil {
 		return nil
@@ -123,20 +124,20 @@ func recusarFlagsDeConexaoSemHost(cmd *cobra.Command) error {
 			continue
 		}
 		if flag := cmd.Flags().Lookup(nome); flag != nil && flag.Changed {
-			return output.Usage("--%s so faz sentido junto de --host", nome)
+			return output.Usage("--%s only makes sense together with --host", nome)
 		}
 	}
 	return nil
 }
 
-// caminhoSSHConfig devolve o arquivo a consultar. Um Context com o campo
-// preenchido manda — e o que permite testar a resolucao sem depender do HOME
-// de quem roda os testes.
+// caminhoSSHConfig returns the file to consult. A Context with the field
+// filled in wins — that is what allows testing the resolution without
+// depending on the HOME of whoever runs the tests.
 //
-// Nao conseguir localizar o diretorio do usuario nao aborta a conexao: a
-// resolucao segue com flags e defaults, e o aviso (DR7) diz por que o
-// ~/.ssh/config nao foi consultado. Abortar quebraria quem passou --host,
-// --user e --port explicitamente e nao precisa do arquivo para nada.
+// Failing to locate the user's directory does not abort the connection: the
+// resolution goes on with flags and defaults, and the warning (DR7) says why
+// ~/.ssh/config was not consulted. Aborting would break whoever passed --host,
+// --user and --port explicitly and does not need the file at all.
 func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 	if ctx.SSHConfigPath != "" {
 		return ctx.SSHConfigPath, nil
@@ -148,7 +149,7 @@ func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 			Severity: output.SeverityWarning,
 			Code:     transport.CodigoAvisoSSHConfig,
 			Message: fmt.Sprintf(
-				"o ~/.ssh/config nao foi consultado (%v); valendo apenas as flags e os defaults",
+				"~/.ssh/config was not consulted (%v); only the flags and the defaults apply",
 				err,
 			),
 		}
@@ -156,12 +157,12 @@ func caminhoSSHConfig(ctx *Context) (string, *output.Diagnostic) {
 	return caminho, nil
 }
 
-// conectar devolve o conector a usar. O default de producao mora aqui, e nao
-// em Execute, para que um Context montado a mao por um teste de outro assunto
-// continue funcionando.
+// conectar returns the connector to use. The production default lives here,
+// and not in Execute, so that a Context assembled by hand by a test about
+// another subject keeps working.
 //
-// E SSHComDiagnosticos, nunca SSH: a segunda descarta os diagnosticos de host
-// key e de ssh-agent, e um aviso perdido e um aviso que nao existe.
+// It is SSHComDiagnosticos, never SSH: the latter discards the host key and
+// ssh-agent diagnostics, and a lost warning is a warning that does not exist.
 func (c *Context) conectar() ConectarSSH {
 	if c.ConectarSSH != nil {
 		return c.ConectarSSH
@@ -169,8 +170,9 @@ func (c *Context) conectar() ConectarSSH {
 	return transport.SSHComDiagnosticos
 }
 
-// transporte devolve o alvo das operacoes, caindo no local quando o Context
-// foi montado sem passar por preparar (testes de outros assuntos).
+// transporte returns the target of the operations, falling back to the local
+// one when the Context was assembled without going through preparar (tests
+// about other subjects).
 func (c *Context) transporte() transport.Transport {
 	if c.Transport == nil {
 		return transport.Local()
@@ -178,12 +180,12 @@ func (c *Context) transporte() transport.Transport {
 	return c.Transport
 }
 
-// NovoEnvelope cria o envelope do comando ja com o alvo no meta e com os
-// diagnosticos da conexao dentro.
+// NovoEnvelope creates the command's envelope already with the target in meta
+// and with the connection diagnostics inside.
 //
-// Todo comando monta a saida por aqui em vez de chamar output.New direto:
-// alvo e avisos de conexao valem para qualquer comando, e o que cada comando
-// tem que lembrar de fazer, algum comando esquece.
+// Every command builds its output through here instead of calling output.New
+// directly: target and connection warnings apply to any command, and what
+// every command has to remember to do, some command forgets.
 func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 	env := output.New(comando)
 	if c.Transport != nil {
@@ -195,29 +197,29 @@ func (c *Context) NovoEnvelope(comando string) *output.Envelope {
 	return env
 }
 
-// NovoRuntime monta o runtime sobre o transporte do contexto.
+// NovoRuntime builds the runtime on top of the context's transport.
 //
-// ComSudo carrega a flag --sudo diretamente: sem ela, um comando que precise
-// de privilegio e reportado, nunca repetido com sudo (DR5).
-// TransporteDeLeitura devolve o transporte que os comandos usam para LER
-// configuracao, ja com a leitura privilegiada quando --sudo foi pedido.
+// ComSudo carries the --sudo flag directly: without it, a command that needs
+// privilege is reported, never retried with sudo (DR5).
+// TransporteDeLeitura returns the transport the commands use to READ
+// configuration, already with privileged reading when --sudo was asked for.
 //
-// A escalada e minima: cada arquivo e tentado primeiro como o usuario da
-// conexao, e so o que for recusado por permissao e repetido com sudo. Numa
-// configuracao onde um arquivo entre 132 e restrito -- medido num nginx de
-// producao real --, 131 seguem sendo lidos sem privilegio nenhum.
+// The escalation is minimal: each file is tried first as the connection user,
+// and only what is refused for permission is retried with sudo. On a
+// configuration where one file out of 132 is restricted -- measured on a real
+// production nginx --, 131 keep being read with no privilege at all.
 //
-// Sem --sudo devolve o transporte cru: a DR5 exige que privilegio seja
-// pedido, nunca inferido.
+// Without --sudo it returns the raw transport: DR5 requires privilege to be
+// asked for, never inferred.
 func (c *Context) TransporteDeLeitura(ctx context.Context) transport.Transport {
 	sudo := c.Flags != nil && c.Flags.Sudo
 	return transport.ComLeituraPrivilegiadaEDump(ctx, c.transporte(), sudo, c.dumpDeFallback)
 }
 
-// dumpDeFallback entrega a configuracao efetiva por `nginx -T`, o ultimo
-// recurso de leitura. Num servidor endurecido o sudoers libera comandos
-// especificos -- tipicamente o nginx -- e recusa um `cat` generico; ali este
-// e o unico caminho que funciona.
+// dumpDeFallback delivers the effective configuration via `nginx -T`, the last
+// resort for reading. On a hardened server the sudoers file allows specific
+// commands -- typically nginx -- and refuses a generic `cat`; there this is
+// the only path that works.
 func (c *Context) dumpDeFallback(ctx context.Context) (map[string][]byte, error) {
 	d, err := c.NovoRuntime().DumpConfig(ctx)
 	if err != nil {
@@ -230,9 +232,9 @@ func (c *Context) dumpDeFallback(ctx context.Context) (map[string][]byte, error)
 	return arquivos, nil
 }
 
-// DiagnosticosDeLeitura recolhe o que o transporte de leitura observou --
-// quais caminhos exigiram privilegio, quais nem com ele abriram. Ler
-// configuracao de servidor com sudo nao pode acontecer calado.
+// DiagnosticosDeLeitura collects what the reading transport observed -- which
+// paths required privilege, which did not open even with it. Reading a
+// server's configuration with sudo cannot happen silently.
 func DiagnosticosDeLeitura(tr transport.Transport) []output.Diagnostic {
 	return transport.Diagnosticos(tr)
 }
@@ -247,9 +249,9 @@ func (c *Context) NovoRuntime() *runtime.Runtime {
 	)
 }
 
-// fecharTransporte libera a conexao. Chamar duas vezes e seguro pelo contrato
-// do Transport, e o campo e zerado para que um Context reaproveitado nao
-// aponte para um transporte morto.
+// fecharTransporte releases the connection. Calling it twice is safe by the
+// Transport contract, and the field is zeroed so that a reused Context does
+// not point at a dead transport.
 func (c *Context) fecharTransporte() error {
 	if c.Transport == nil {
 		return nil
@@ -259,13 +261,13 @@ func (c *Context) fecharTransporte() error {
 	return tr.Close()
 }
 
-// avisarFalhaAoFechar e o ultimo recurso para um Close que falhou depois de o
-// envelope ja ter sido escrito. O envelope e imutavel a essa altura, e uma
-// conexao que nao fechou direito nao muda o resultado do comando — mas
-// tambem nao pode desaparecer.
+// avisarFalhaAoFechar is the last resort for a Close that failed after the
+// envelope had already been written. The envelope is immutable by then, and a
+// connection that did not close cleanly does not change the command's result —
+// but it also cannot disappear.
 func avisarFalhaAoFechar(stderr io.Writer, err error) {
 	if err == nil {
 		return
 	}
-	fmt.Fprintf(stderr, "ngx: falha ao encerrar a conexao: %v\n", err)
+	fmt.Fprintf(stderr, "ngx: failed to close the connection: %v\n", err)
 }

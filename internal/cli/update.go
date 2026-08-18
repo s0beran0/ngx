@@ -9,17 +9,17 @@ import (
 	"github.com/s0beran0/ngx/internal/update"
 )
 
-// UpdateData e o data do envelope de `ngx update`. Espelha update.Resultado
-// para que o pacote de atualizacao nao precise conhecer o envelope.
+// UpdateData is the data of the `ngx update` envelope. It mirrors
+// update.Resultado so the update package does not need to know the envelope.
 type UpdateData = update.Resultado
 
-// newUpdateCmd registra `ngx update`: baixa a release mais nova do canal,
-// verifica assinatura e checksum, e troca o proprio binario.
+// newUpdateCmd registers `ngx update`: downloads the newest release of the
+// channel, verifies signature and checksum, and swaps the binary itself.
 //
-// O comando NAO fala com o alvo remoto, e por isso ignora --host de
-// proposito: atualizar o ngx e sobre a maquina onde o ngx roda, e ninguem
-// espera que `ngx --host web1 update` mexa no binario do servidor -- ate
-// porque a DR3 diz que nada e instalado la.
+// The command does NOT talk to the remote target, and therefore ignores --host
+// on purpose: updating ngx is about the machine where ngx runs, and nobody
+// expects `ngx --host web1 update` to touch the server's binary -- especially
+// because DR3 says nothing is installed there.
 func newUpdateCmd(ctx *Context) *cobra.Command {
 	var (
 		canal    string
@@ -29,10 +29,10 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Atualiza o proprio ngx a partir das releases assinadas",
-		Long: "Baixa a release mais nova do canal, confere a assinatura minisign e o " +
-			"checksum, e so entao troca o binario. Falha de verificacao deixa o ngx " +
-			"atual intacto.",
+		Short: "Update ngx itself from the signed releases",
+		Long: "Downloads the newest release of the channel, checks the minisign signature " +
+			"and the checksum, and only then swaps the binary. A failed verification " +
+			"leaves the current ngx intact.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			execCtx, cancelar := ctx.contextoDeExecucao(cmd.Context())
@@ -60,18 +60,18 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&canal, "channel", "",
-		"canal de release: stable (padrao) ou beta, que inclui pre-lancamentos")
+		"release channel: stable (default) or beta, which includes pre-releases")
 	cmd.Flags().StringVar(&versao, "version", "",
-		"instala exatamente esta versao, inclusive mais antiga que a atual")
+		"install exactly this version, even one older than the current")
 	cmd.Flags().BoolVar(&conferir, "check", false,
-		"so informa se ha versao nova; nao baixa nem troca nada")
+		"only report whether a new version exists; download and replace nothing")
 	return cmd
 }
 
-// canalEscolhido resolve a precedencia do canal: a flag vence a variavel de
-// ambiente, que vence o default. NGX_CHANNEL existe porque o install.sh ja a
-// usa, e quem instalou pelo canal beta espera continuar nele sem repetir a
-// flag a cada atualizacao.
+// canalEscolhido resolves the channel precedence: the flag beats the
+// environment variable, which beats the default. NGX_CHANNEL exists because
+// install.sh already uses it, and whoever installed from the beta channel
+// expects to stay on it without repeating the flag on every update.
 func canalEscolhido(ctx *Context, flag string) string {
 	if flag != "" {
 		return flag
@@ -82,10 +82,11 @@ func canalEscolhido(ctx *Context, flag string) string {
 	return ""
 }
 
-// erroDeUpdate preserva o erro tipado do pacote de atualizacao. Ele ja carrega
-// codigo e mensagem proprios -- reembrulhar apagaria a distincao entre "nao ha
-// versao nova", "a assinatura nao confere" e "faltou permissao para escrever",
-// que sao tres desfechos que quem consome a saida precisa separar.
+// erroDeUpdate preserves the typed error from the update package. It already
+// carries its own code and message -- rewrapping would erase the distinction
+// between "there is no new version", "the signature does not check out" and
+// "there was no permission to write", which are three outcomes whoever
+// consumes the output needs to tell apart.
 func erroDeUpdate(err error) error {
 	var tipado *output.Error
 	if errors.As(err, &tipado) {

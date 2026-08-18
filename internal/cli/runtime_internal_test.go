@@ -15,9 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Saidas gravadas de um nginx real. Nenhum teste deste arquivo executa nginx,
-// abre socket ou toca o disco: o que esta em jogo e a fiacao entre o CLI e o
-// runtime, e um teste que dependesse de um nginx instalado testaria o nginx.
+// Recorded outputs from a real nginx. No test in this file runs nginx, opens
+// a socket or touches the disk: what is at stake is the wiring between the CLI
+// and the runtime, and a test that depended on an installed nginx would be
+// testing nginx.
 const (
 	saidaDetectOK = `nginx version: nginx/1.24.0
 built by gcc 12.2.0 (Debian 12.2.0-14)
@@ -42,17 +43,17 @@ nginx: configuration file /etc/nginx/nginx.conf test failed
 	pidfilePadrao = "/var/run/nginx.pid"
 )
 
-// respostaGravada e o que um comando escreveu, congelado.
+// respostaGravada is what a command wrote, frozen.
 type respostaGravada struct {
 	stdout string
 	stderr string
 	exit   int
 }
 
-// transporteGravado responde por argv exato e serve arquivos de memoria. E
-// mais rico que o transporteFalso de remoto_internal_test.go, que devolve
-// sempre a mesma saida: aqui um comando precisa responder diferente de
-// outro, porque `status` executa dois.
+// transporteGravado answers by exact argv and serves files from memory. It is
+// richer than the transporteFalso of remoto_internal_test.go, which always
+// returns the same output: here one command has to answer differently from
+// another, because `status` runs two of them.
 type transporteGravado struct {
 	descricao string
 	respostas map[string]respostaGravada
@@ -96,7 +97,7 @@ func (t *transporteGravado) Run(_ context.Context, argv []string) ([]byte, []byt
 
 	r, ok := t.respostas[strings.Join(argv, " ")]
 	if !ok {
-		return nil, []byte("transporte de teste: argv nao gravado: " + strings.Join(argv, " ")), 127, nil
+		return nil, []byte("test transport: argv not recorded: " + strings.Join(argv, " ")), 127, nil
 	}
 	return []byte(r.stdout), []byte(r.stderr), r.exit, nil
 }
@@ -111,10 +112,10 @@ func (t *transporteGravado) chamadas() [][]string {
 	return append([][]string(nil), t.executados...)
 }
 
-// rodarComTransporte executa o CLI contra um transporte gravado, entrando
-// pelo caminho remoto (--host). E o caminho que prova as duas coisas ao mesmo
-// tempo: que o comando executa o nginx pelo runtime e que ele o faz no alvo
-// de --host, e nao na maquina de quem digitou.
+// rodarComTransporte runs the CLI against a recorded transport, entering
+// through the remote path (--host). It is the path that proves two things at
+// once: that the command runs nginx through the runtime and that it does so on
+// the --host target, and not on the machine of whoever typed it.
 func rodarComTransporte(t *testing.T, tr *transporteGravado, args ...string) (output.ExitCode, *bytes.Buffer) {
 	t.Helper()
 
@@ -129,31 +130,31 @@ func rodarComTransporte(t *testing.T, tr *transporteGravado, args ...string) (ou
 	return executar(NewRoot(ctx), ctx, completos, &errBuf), out
 }
 
-// documentoUnico decodifica a saida e exige que ela seja um unico envelope.
-// Um segundo documento JSON no stdout quebraria qualquer consumidor.
+// documentoUnico decodes the output and requires it to be a single envelope.
+// A second JSON document on stdout would break any consumer.
 func documentoUnico(t *testing.T, out *bytes.Buffer) output.Envelope {
 	t.Helper()
 	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
 
 	var env output.Envelope
-	require.NoError(t, dec.Decode(&env), "saida: %s", out.String())
+	require.NoError(t, dec.Decode(&env), "output: %s", out.String())
 
 	var sobra json.RawMessage
 	require.ErrorIs(t, dec.Decode(&sobra), io.EOF,
-		"o stdout precisa ter um unico envelope, e nao dois: %s", out.String())
+		"stdout has to hold a single envelope, and not two: %s", out.String())
 
 	return env
 }
 
-// campos devolve o data do envelope como mapa, que e o unico jeito de afirmar
-// que uma chave esta *ausente* — um struct de destino preencheria o zero
-// value e a omissao passaria despercebida.
+// campos returns the envelope's data as a map, which is the only way to assert
+// that a key is *absent* — a destination struct would fill in the zero value
+// and the omission would go unnoticed.
 func campos(t *testing.T, out *bytes.Buffer) map[string]any {
 	t.Helper()
 	var resposta struct {
 		Data map[string]any `json:"data"`
 	}
-	require.NoError(t, json.Unmarshal(out.Bytes(), &resposta), "saida: %s", out.String())
+	require.NoError(t, json.Unmarshal(out.Bytes(), &resposta), "output: %s", out.String())
 	return resposta.Data
 }
 
@@ -181,9 +182,9 @@ func TestComandoTestExecutaNginxNoAlvoEDevolveOEnvelope(t *testing.T) {
 	require.Equal(t, "/etc/nginx/nginx.conf", data["config_file"])
 }
 
-// Configuracao reprovada e resultado, nao falha de infraestrutura: exit 3, e
-// o envelope sai inteiro, com cada diagnostico no arquivo e na linha que o
-// nginx informou.
+// A rejected configuration is a result, not an infrastructure failure: exit 3,
+// and the envelope goes out whole, with each diagnostic on the file and line
+// nginx reported.
 func TestComandoTestComConfiguracaoReprovadaEhExit3ComDiagnosticoLocalizado(t *testing.T) {
 	tr := novoTransporteGravado().
 		responde("nginx -t", respostaGravada{stderr: saidaTesteReprovado, exit: 1})
@@ -205,16 +206,16 @@ func TestComandoTestComConfiguracaoReprovadaEhExit3ComDiagnosticoLocalizado(t *t
 	require.Equal(t, "/etc/nginx/conf.d/app.conf", emerg.File)
 	require.Equal(t, 12, emerg.Line)
 	require.NotContains(t, emerg.Message, "app.conf:12",
-		"a localizacao vira campo, nao fica so no texto")
+		"the location becomes a field, it does not stay only in the text")
 
 	require.Equal(t, false, campos(t, out)["ok"])
 }
 
-// O binario que executa nao e mais um detalhe do plano: --nginx-bin chega ao
-// argv, e --sudo prefixa o comando. Sem --sudo, nada de sudo — o ngx nao
-// escala privilegio por conta propria (DR5).
+// The binary that runs is no longer a detail of the plan: --nginx-bin reaches
+// the argv, and --sudo prefixes the command. Without --sudo, no sudo — ngx
+// does not escalate privilege on its own (DR5).
 func TestComandoTestHonraSudoENginxBin(t *testing.T) {
-	t.Run("sem --sudo", func(t *testing.T) {
+	t.Run("without --sudo", func(t *testing.T) {
 		tr := transporteComTesteOK()
 		code, _ := rodarComTransporte(t, tr, "test")
 
@@ -222,7 +223,7 @@ func TestComandoTestHonraSudoENginxBin(t *testing.T) {
 		require.Equal(t, [][]string{{"nginx", "-t"}}, tr.chamadas())
 	})
 
-	t.Run("com --sudo", func(t *testing.T) {
+	t.Run("with --sudo", func(t *testing.T) {
 		tr := novoTransporteGravado().
 			responde("sudo -n nginx -t", respostaGravada{stderr: saidaTesteOK})
 
@@ -232,7 +233,7 @@ func TestComandoTestHonraSudoENginxBin(t *testing.T) {
 		require.Equal(t, [][]string{{"sudo", "-n", "nginx", "-t"}}, tr.chamadas())
 	})
 
-	t.Run("com --nginx-bin e --sudo", func(t *testing.T) {
+	t.Run("with --nginx-bin and --sudo", func(t *testing.T) {
 		tr := novoTransporteGravado().
 			responde("sudo -n /usr/local/sbin/nginx -t", respostaGravada{stderr: saidaTesteOK})
 
@@ -244,8 +245,9 @@ func TestComandoTestHonraSudoENginxBin(t *testing.T) {
 	})
 }
 
-// Binario ausente e falha de infraestrutura, exit 1 — o oposto do exit 3 de
-// configuracao reprovada. O envelope de erro sai com o codigo do runtime.
+// A missing binary is an infrastructure failure, exit 1 — the opposite of the
+// exit 3 of a rejected configuration. The error envelope goes out with the
+// runtime's code.
 func TestComandoTestSemNginxNoAlvoEhFalhaInterna(t *testing.T) {
 	tr := novoTransporteGravado().
 		responde("nginx -t", respostaGravada{stderr: "bash: nginx: command not found", exit: 127})
@@ -296,13 +298,13 @@ func TestComandoStatusJuntaDeteccaoEEstadoDoProcesso(t *testing.T) {
 	require.Equal(t, 4242, resposta.Data.Process.MasterPID)
 	require.Equal(t, pidfilePadrao, resposta.Data.Process.PIDFile)
 
-	// O `kill -0` nao leva sudo nem quando --sudo foi pedido em outro
-	// comando: perguntar se um pid existe nao exige privilegio.
+	// The `kill -0` does not take sudo even when --sudo was asked for on
+	// another command: asking whether a pid exists requires no privilege.
 	require.Equal(t, [][]string{{"nginx", "-V"}, {"kill", "-0", "4242"}}, tr.chamadas())
 }
 
-// Pidfile ausente e evidencia, nao suposicao: o nginx apaga o arquivo ao
-// parar. Aqui running sai false, com o diagnostico que diz por que.
+// A missing pidfile is evidence, not an assumption: nginx deletes the file
+// when it stops. Here running goes out false, with the diagnostic saying why.
 func TestComandoStatusSemPidfileDizQueNaoEstaRodando(t *testing.T) {
 	tr := novoTransporteGravado().
 		responde("nginx -V", respostaGravada{stderr: saidaDetectOK})
@@ -312,7 +314,7 @@ func TestComandoStatusSemPidfileDizQueNaoEstaRodando(t *testing.T) {
 	require.Equal(t, output.ExitOK, code)
 
 	env := documentoUnico(t, out)
-	require.True(t, env.OK, "estado apurado nao derruba o comando")
+	require.True(t, env.OK, "a determined state does not bring the command down")
 	require.Len(t, env.Diagnostics, 1)
 	require.Equal(t, "NGX-0225", env.Diagnostics[0].Code)
 
@@ -321,12 +323,12 @@ func TestComandoStatusSemPidfileDizQueNaoEstaRodando(t *testing.T) {
 	require.NotContains(t, processo, "master_pid")
 }
 
-// O que o nginx nao informa e omitido, nunca estimado. Um build sem
-// --pid-path nao diz onde o pidfile fica, entao o ngx nao chuta um caminho:
-// pid_file some, running some, e um diagnostico explica a ausencia. Reportar
-// running false aqui diria que o nginx caiu.
+// What nginx does not report is omitted, never estimated. A build without
+// --pid-path does not say where the pidfile lives, so ngx does not guess a
+// path: pid_file goes away, running goes away, and a diagnostic explains the
+// absence. Reporting running false here would say nginx went down.
 func TestComandoStatusOmiteORunningQuandoNaoDaParaSaber(t *testing.T) {
-	t.Run("build sem --pid-path", func(t *testing.T) {
+	t.Run("build without --pid-path", func(t *testing.T) {
 		tr := novoTransporteGravado().
 			responde("nginx -V", respostaGravada{stderr: saidaDetectSemPIDPath})
 
@@ -348,7 +350,7 @@ func TestComandoStatusOmiteORunningQuandoNaoDaParaSaber(t *testing.T) {
 		require.NotContains(t, processo, "pid_file")
 	})
 
-	t.Run("pid de outro usuario", func(t *testing.T) {
+	t.Run("pid of another user", func(t *testing.T) {
 		tr := novoTransporteGravado().
 			responde("nginx -V", respostaGravada{stderr: saidaDetectOK}).
 			responde("kill -0 4242", respostaGravada{
@@ -367,7 +369,7 @@ func TestComandoStatusOmiteORunningQuandoNaoDaParaSaber(t *testing.T) {
 
 		processo := campos(t, out)["process"].(map[string]any)
 		require.NotContains(t, processo, "running",
-			"sem evidencia, o campo sai — nunca vira false")
+			"with no evidence the field goes away — it never becomes false")
 		require.Equal(t, float64(4242), processo["master_pid"])
 	})
 }
@@ -394,9 +396,9 @@ func TestComandoStatusHonraSudoENginxBin(t *testing.T) {
 	require.Equal(t, "/usr/local/sbin/nginx", resposta.Data.Nginx.Binary)
 }
 
-// Privilegio faltando e reportado, nunca contornado: o ngx nao repete o
-// comando com sudo por conta propria, e o diagnostico diz qual comando o
-// operador teria de autorizar.
+// Missing privilege is reported, never worked around: ngx does not retry the
+// command with sudo on its own, and the diagnostic says which command the
+// operator would have to authorize.
 func TestComandoStatusSemPrivilegioReportaEParaSemRepetirComSudo(t *testing.T) {
 	tr := novoTransporteGravado().
 		responde("nginx -V", respostaGravada{
@@ -408,7 +410,7 @@ func TestComandoStatusSemPrivilegioReportaEParaSemRepetirComSudo(t *testing.T) {
 
 	require.Equal(t, output.ExitInternal, code)
 	require.Equal(t, [][]string{{"nginx", "-V"}}, tr.chamadas(),
-		"o comando nao pode ser repetido com sudo por conta propria")
+		"the command cannot be retried with sudo on its own")
 
 	env := documentoUnico(t, out)
 	require.False(t, env.OK)
@@ -416,8 +418,8 @@ func TestComandoStatusSemPrivilegioReportaEParaSemRepetirComSudo(t *testing.T) {
 	require.Contains(t, env.Diagnostics[0].Message, "--sudo")
 }
 
-// Todo codigo de diagnostico do runtime que o CLI publica segue a secao 6.0
-// do desenho: NGX- mais quatro digitos, sem letra e sem severidade embutida.
+// Every runtime diagnostic code the CLI publishes follows section 6.0 of the
+// design: NGX- plus four digits, with no letter and no embedded severity.
 func TestCodigosDeDiagnosticoDoRuntimeSeguemOFormatoDaSpec(t *testing.T) {
 	tr := novoTransporteGravado().
 		responde("nginx -t", respostaGravada{stderr: saidaTesteReprovado, exit: 1})
@@ -431,11 +433,12 @@ func TestCodigosDeDiagnosticoDoRuntimeSeguemOFormatoDaSpec(t *testing.T) {
 	}
 }
 
-// A saida humana nao pode ser o JSON cru quando o dado sabe se apresentar.
+// The human output cannot be the raw JSON when the data knows how to present
+// itself.
 func TestSaidaHumanaDosComandosDeRuntime(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, TestData{OK: true, ConfigFile: "/etc/nginx/nginx.conf"}.RenderHuman(&out))
-	require.Equal(t, "configuracao aprovada: /etc/nginx/nginx.conf\n", out.String())
+	require.Equal(t, "configuration accepted: /etc/nginx/nginx.conf\n", out.String())
 
 	rodando := true
 	out.Reset()
@@ -443,10 +446,10 @@ func TestSaidaHumanaDosComandosDeRuntime(t *testing.T) {
 		Nginx:   nil,
 		Process: ProcessData{Running: &rodando, MasterPID: 4242},
 	}.RenderHuman(&out))
-	require.Equal(t, "master 4242 rodando\n", out.String())
+	require.Equal(t, "master 4242 running\n", out.String())
 
 	out.Reset()
 	require.NoError(t, StatusData{}.RenderHuman(&out))
-	require.Equal(t, "estado do processo indisponivel\n", out.String(),
-		"campo ausente vira frase ausente, nunca zero")
+	require.Equal(t, "process state unavailable\n", out.String(),
+		"an absent field becomes an absent sentence, never a zero")
 }

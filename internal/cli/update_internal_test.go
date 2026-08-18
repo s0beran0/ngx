@@ -8,10 +8,11 @@ import (
 	"github.com/s0beran0/ngx/internal/update"
 )
 
-// A precedencia do canal: flag vence ambiente, ambiente vence default. A
-// variavel importa porque o install.sh ja a usa -- quem instalou pelo beta
-// espera continuar no beta sem repetir a flag a cada atualizacao, e cair
-// silenciosamente para stable faria o update dizer que nao ha versao nova.
+// The channel precedence: the flag beats the environment, the environment
+// beats the default. The variable matters because install.sh already uses it
+// -- whoever installed from beta expects to stay on beta without repeating the
+// flag on every update, and silently falling back to stable would make update
+// say there is no new version.
 func TestCanalEscolhidoRespeitaPrecedencia(t *testing.T) {
 	comEnv := func(v string) *Context {
 		return &Context{Getenv: func(k string) string {
@@ -23,11 +24,11 @@ func TestCanalEscolhidoRespeitaPrecedencia(t *testing.T) {
 	}
 
 	assert.Equal(t, "beta", canalEscolhido(comEnv("stable"), "beta"),
-		"flag explicita vence a variavel de ambiente")
+		"an explicit flag beats the environment variable")
 	assert.Equal(t, "beta", canalEscolhido(comEnv("beta"), ""),
-		"sem flag, a variavel de ambiente vale")
+		"with no flag, the environment variable applies")
 	assert.Equal(t, "", canalEscolhido(comEnv(""), ""),
-		"sem nenhum dos dois, quem decide o default e o pacote update")
+		"with neither of the two, the update package decides the default")
 	assert.Equal(t, "", canalEscolhido(&Context{}, ""),
-		"Context sem Getenv nao pode entrar em panico")
+		"a Context with no Getenv cannot panic")
 }

@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Uma flag global invalida e um erro cru do cobra, nao um *output.Error: e
-// exatamente o ramo de conversao em executar que precisa transformar isso
-// num envelope no stdout com NGX-0002, e nao so devolver um exit code sem
-// nenhum sinal do que deu errado. comandoDe cai no fallback "ngx" aqui
-// porque o cobra nunca chega a resolver qual comando estava sendo executado.
+// An invalid global flag is a raw cobra error, not an *output.Error: it is
+// exactly the conversion branch in executar that has to turn this into an
+// envelope on stdout with NGX-0002, and not just return an exit code with no
+// sign at all of what went wrong. comandoDe falls back to "ngx" here because
+// cobra never gets to resolve which command was being run.
 func TestFlagInvalidaProduzExitDeUso(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -30,8 +30,8 @@ func TestFlagInvalidaProduzExitDeUso(t *testing.T) {
 	require.Equal(t, "NGX-0002", env.Diagnostics[0].Code)
 }
 
-// Mesmo ramo de conversao de erro cru do cobra, agora via comando
-// desconhecido em vez de flag invalida.
+// The same conversion branch for a raw cobra error, now via an unknown
+// command instead of an invalid flag.
 func TestComandoDesconhecidoProduzExitDeUso(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -47,8 +47,8 @@ func TestComandoDesconhecidoProduzExitDeUso(t *testing.T) {
 	require.Equal(t, "NGX-0002", env.Diagnostics[0].Code)
 }
 
-// --json e --human sao mutuamente exclusivos; pedir os dois e erro de uso,
-// nao uma precedencia silenciosa.
+// --json and --human are mutually exclusive; asking for both is a usage
+// error, not a silent precedence.
 func TestJSONEHumanJuntosSaoErroDeUso(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -70,8 +70,8 @@ func TestVersionSaiNoEnvelopeJSONSemTTY(t *testing.T) {
 	require.Equal(t, "version", env.Command)
 }
 
-// O erro precisa sair no envelope, no stdout, para o agente conseguir ler.
-// Escrever so no stderr obrigaria o agente a capturar dois streams.
+// The error has to go out in the envelope, on stdout, so the agent can read
+// it. Writing only to stderr would force the agent to capture two streams.
 func TestErroDeExecucaoSaiNoEnvelope(t *testing.T) {
 	var out, errBuf bytes.Buffer
 

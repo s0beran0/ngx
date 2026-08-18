@@ -13,22 +13,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// caminhosIsolados devolve dois caminhos dentro de um t.TempDir() para uso
-// em Context.GlobalSettingsPath/LocalSettingsPath, para que preparar rode
-// settings.Load sem tocar no filesystem real (/etc/ngx/ngx.yaml) nem
-// depender do cwd do processo de teste.
+// caminhosIsolados returns two paths inside a t.TempDir() for use in
+// Context.GlobalSettingsPath/LocalSettingsPath, so that preparar runs
+// settings.Load without touching the real filesystem (/etc/ngx/ngx.yaml) nor
+// depending on the cwd of the test process.
 func caminhosIsolados(t *testing.T) (global, local string) {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "global.yaml"), filepath.Join(dir, "local.yaml")
 }
 
-// Um comando pode devolver um erro tipado embrulhado com %w — o padrao
-// idiomatico para anexar contexto (ex.: fmt.Errorf("ao ler %s: %w", caminho,
-// output.InvalidConfig(...))), e o que comandos futuros vao escrever.
-// executar precisa preservar o exit code e o diagnostico originais em vez de
-// substituir por um Usage generico so porque uma type assertion direta nao
-// atravessa o wrapping.
+// A command may return a typed error wrapped with %w — the idiomatic pattern
+// to attach context (e.g. fmt.Errorf("while reading %s: %w", caminho,
+// output.InvalidConfig(...))), and what future commands are going to write.
+// executar has to preserve the original exit code and diagnostic instead of
+// replacing them with a generic Usage just because a direct type assertion
+// does not traverse the wrapping.
 func TestExecutarPreservaErroTipadoEmbrulhado(t *testing.T) {
 	global, local := caminhosIsolados(t)
 
@@ -45,7 +45,7 @@ func TestExecutarPreservaErroTipadoEmbrulhado(t *testing.T) {
 		Use:  "falha-embrulhada",
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			return fmt.Errorf("ao ler config: %w", output.InvalidConfig("configuracao invalida"))
+			return fmt.Errorf("while reading config: %w", output.InvalidConfig("invalid configuration"))
 		},
 	})
 
@@ -61,11 +61,11 @@ func TestExecutarPreservaErroTipadoEmbrulhado(t *testing.T) {
 	require.Equal(t, "NGX-0003", env.Diagnostics[0].Code)
 }
 
-// Um output.format invalido no arquivo de configuracao e erro de uso mesmo
-// com --quiet: a validacao roda em preparar, antes do portao de --quiet do
-// Renderer, entao o erro nunca fica em silencio so porque o usuario pediu
-// saida minima. Os caminhos de settings sao isolados via Context.*SettingsPath,
-// sem precisar trocar o cwd do processo de teste.
+// An invalid output.format in the configuration file is a usage error even
+// with --quiet: the validation runs in preparar, before the Renderer's --quiet
+// gate, so the error is never silenced just because the user asked for minimal
+// output. The settings paths are isolated via Context.*SettingsPath, with no
+// need to change the cwd of the test process.
 func TestFormatoInvalidoNaConfigEhErroDeUsoMesmoComQuiet(t *testing.T) {
 	global, local := caminhosIsolados(t)
 	require.NoError(t, os.WriteFile(local, []byte("output:\n  format: xlm\n"), 0o644))

@@ -19,7 +19,7 @@ func rodarInspect(t *testing.T, args ...string) (output.ExitCode, *output.Envelo
 
 	var env output.Envelope
 	if out.Len() > 0 {
-		require.NoError(t, json.Unmarshal(out.Bytes(), &env), "saida: %s", out.String())
+		require.NoError(t, json.Unmarshal(out.Bytes(), &env), "output: %s", out.String())
 	}
 	return code, &env, out.String()
 }
@@ -37,7 +37,7 @@ func TestInspectRetornaSucesso(t *testing.T) {
 	require.Equal(t, "inspect", env.Command)
 }
 
-// O hash no meta e a ancora dos IDs que saem no data.
+// The hash in meta is the anchor of the IDs that go out in data.
 func TestInspectPublicaOConfigHashNoMeta(t *testing.T) {
 	_, env, _ := rodarInspect(t, "inspect", "-c", fixture(t))
 
@@ -61,8 +61,8 @@ func TestInspectResumeAConfiguracao(t *testing.T) {
 	require.Equal(t, 1, resposta.Data.Summary.Files)
 }
 
-// Os IDs precisam sair no JSON: e por eles que o agente referencia um no na
-// chamada seguinte.
+// The IDs have to go out in the JSON: they are how the agent references a
+// node on the next call.
 func TestInspectEmiteIDsNaArvore(t *testing.T) {
 	_, _, bruto := rodarInspect(t, "inspect", "-c", fixture(t))
 
@@ -78,18 +78,18 @@ func TestInspectEmiteSpans(t *testing.T) {
 	require.Contains(t, bruto, `"head_span"`)
 }
 
-// O teste que fecha o ciclo da redacao: o valor sensivel nao pode aparecer na
-// saida, mas a diretiva sim.
+// The test that closes the redaction loop: the sensitive value cannot show up
+// in the output, but the directive must.
 func TestInspectRedigeChavePrivada(t *testing.T) {
 	_, _, bruto := rodarInspect(t, "inspect", "-c", fixture(t))
 
 	require.NotContains(t, bruto, "/etc/ssl/private/api.key")
-	require.Contains(t, bruto, "ssl_certificate_key", "a diretiva continua visivel")
+	require.Contains(t, bruto, "ssl_certificate_key", "the directive stays visible")
 	require.Contains(t, bruto, output.RedactedValue)
 }
 
-// Arquivo inexistente e falha de IO, nao erro de uso: a flag estava correta,
-// o disco e que nao tinha o arquivo.
+// A nonexistent file is an IO failure, not a usage error: the flag was
+// correct, it was the disk that did not have the file.
 func TestInspectComArquivoInexistenteEhFalhaInterna(t *testing.T) {
 	code, env, _ := rodarInspect(t, "inspect", "-c", "testdata/nao-existe.conf")
 
@@ -111,18 +111,18 @@ func TestInspectCombineResolveIncludes(t *testing.T) {
 	require.Equal(t, output.ExitOK, code)
 	require.Contains(t, bruto, `"origin"`)
 	require.NotContains(t, bruto, `"directive":"include"`,
-		"o include foi resolvido e nao aparece mais na arvore")
+		"the include was resolved and no longer appears in the tree")
 }
 
-// Configuracao invalida (erro de sintaxe) e exit 3 -- output.InvalidConfig --
-// nao exit 1: quem errou foi o .conf do usuario, nao o proprio ngx. O
-// diagnostico precisa carregar arquivo e linha do problema, herdados do
-// config.ParseErrors que config.Parse devolve, em vez de uma mensagem unica
-// sem localizacao.
+// Invalid configuration (a syntax error) is exit 3 -- output.InvalidConfig --
+// not exit 1: the one that got it wrong was the user's .conf, not ngx itself.
+// The diagnostic has to carry the file and line of the problem, inherited from
+// the config.ParseErrors that config.Parse returns, instead of a single
+// message with no location.
 func TestInspectComSintaxeInvalidaEhErroDeConfiguracaoComDiagnosticoLocalizado(t *testing.T) {
 	code, env, _ := rodarInspect(t, "inspect", "-c", filepath.Join("testdata", "invalido.conf"))
 
-	require.Equal(t, 3, int(code), "exit code do contrato de configuracao invalida")
+	require.Equal(t, 3, int(code), "exit code from the invalid configuration contract")
 	require.False(t, env.OK)
 
 	require.Len(t, env.Diagnostics, 1)
@@ -132,17 +132,17 @@ func TestInspectComSintaxeInvalidaEhErroDeConfiguracaoComDiagnosticoLocalizado(t
 	require.NotEmpty(t, d.Message)
 }
 
-// "if () { ... }" derrubava o processo dentro do crossplane (prepareIfArgs,
-// util.go:83): sem envelope, sem exit code util, com stack trace da
-// dependencia no stderr -- a pior saida possivel para um consumidor que le o
-// stdout como JSON. O contrato aqui e o mesmo de qualquer sintaxe invalida:
-// envelope no stdout, exit 3 e diagnostico localizado.
+// "if () { ... }" used to take the process down inside crossplane
+// (prepareIfArgs, util.go:83): no envelope, no useful exit code, with the
+// dependency's stack trace on stderr -- the worst possible output for a
+// consumer that reads stdout as JSON. The contract here is the same as for any
+// invalid syntax: envelope on stdout, exit 3 and a located diagnostic.
 func TestInspectComIfSemExpressaoNaoDerrubaOProcesso(t *testing.T) {
 	code, env, bruto := rodarInspect(t, "inspect", "-c", filepath.Join("testdata", "if_vazio.conf"))
 
 	require.Equal(t, 3, int(code))
 	require.False(t, env.OK)
-	require.NotEmpty(t, bruto, "a saida precisa ser um envelope, nao um panic")
+	require.NotEmpty(t, bruto, "the output has to be an envelope, not a panic")
 	require.Len(t, env.Diagnostics, 1)
 	require.Equal(t, "if_vazio.conf", filepath.Base(env.Diagnostics[0].File))
 	require.Equal(t, 3, env.Diagnostics[0].Line)

@@ -1,5 +1,5 @@
-// Command ngx e o ponto de entrada. A unica responsabilidade aqui e o wiring
-// e a traducao do exit code.
+// Command ngx is the entry point. The only responsibility here is the wiring
+// and the translation of the exit code.
 package main
 
 import (
