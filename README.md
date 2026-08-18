@@ -38,10 +38,12 @@ altera a configuracao do nginx.
   recusa instalar de proposito, porque ausencia de verificacao e falha, nunca
   um "segui em frente". **A unica forma de obter o `ngx` hoje e compilar da
   fonte.**
-- **Existem dois comandos:** `version` e `inspect`. Comandos previstos no
-  desenho (`get`, `tree`, `fmt`, `test`, `diff`, `apply`, `update`) ainda nao
-  existem — `ngx update` sai com "unknown command", mesmo havendo codigo de
-  atualizacao no repositorio, porque o comando nao esta registrado.
+- **Existem quatro comandos:** `version`, `inspect`, `test` e `status`.
+  Comandos previstos no desenho (`get`, `tree`, `fmt`, `diff`, `apply`,
+  `update`) ainda nao existem — `ngx update` sai com "unknown command", mesmo
+  havendo codigo de atualizacao no repositorio, porque o comando nao esta
+  registrado. O `status` ainda nao detecta drift, entao ele nunca sai com o
+  codigo 7 previsto no desenho.
 - **O acesso remoto por SSH existe e funciona**, mas nao foi exercitado contra
   um servidor de producao por este projeto. Ver [`docs/remoto.md`](docs/remoto.md).
 - **A saida "humana" ainda e crua:** hoje ela e o JSON dos dados formatado com
@@ -120,6 +122,39 @@ $ ./bin/ngx inspect -c internal/cli/testdata/exemplo.conf | jq -c '.data.config[
 `--combine` resolve os `include` numa arvore unica em vez de uma lista de
 arquivos.
 
+### `ngx test`
+
+Roda `nginx -t` no alvo e devolve o veredito com cada diagnostico no arquivo e
+na linha que o nginx informou:
+
+```console
+$ ./bin/ngx test | jq -c '.data.ok, .diagnostics[0]'
+false
+{"severity":"error","code":"NGX-0224","message":"invalid number of arguments in \"listen\" directive","file":"/etc/nginx/conf.d/app.conf","line":12}
+```
+
+Configuracao reprovada sai com **codigo 3, e o envelope completo**: reprovar e
+o resultado da pergunta que se fez, nao uma falha de infraestrutura. Falha de
+verdade — nao ha nginx no alvo, falta privilegio, a conexao caiu — sai com
+codigo 1 e o diagnostico correspondente (`NGX-0220`, `NGX-0221`, `NGX-0222`).
+
+### `ngx status`
+
+Junta o que o binario diz de si (`nginx -V`) com o estado do processo:
+
+```console
+$ ./bin/ngx status | jq -c '.data.nginx.version, .data.process'
+"1.24.0"
+{"running":true,"master_pid":4242,"pid_file":"/var/run/nginx.pid"}
+```
+
+O que o nginx nao informa **e omitido, nunca estimado**. Um build sem
+`--pid-path` nao diz onde o pidfile fica: `pid_file` e `running` somem do JSON
+e um diagnostico explica a ausencia, em vez de o `ngx` chutar um caminho ou
+reportar `running: false` — que diria, sem evidencia, que o nginx caiu. O
+mesmo vale para um pid de outro usuario, que existe mas nao pode ser
+consultado.
+
 ### `ngx version`
 
 ```console
@@ -164,6 +199,13 @@ de mutacao da v0.2.
 As flags de acesso remoto (`--host`, `--user`, `--port`, `--key`,
 `--known-hosts`, `--insecure-host-key`, `--sudo`) estao documentadas em
 [`docs/remoto.md`](docs/remoto.md).
+
+`--sudo` governa a execucao do binario do nginx e vale tambem no alvo local:
+`test` e `status` executam `nginx -t` e `nginx -V` com `sudo -n` quando a flag
+esta presente. Sem ela, um comando que precise de privilegio e **reportado**,
+com a linha exata a autorizar — o `ngx` nunca repete o comando com `sudo` por
+conta propria. O `inspect` continua fora disso: ele le arquivos, e leitura
+(local ou por SFTP) nao passa por `sudo`.
 
 ## Configuracao do proprio ngx
 

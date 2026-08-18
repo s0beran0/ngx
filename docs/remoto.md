@@ -192,7 +192,7 @@ roda com `--sudo` explicito. Sem a flag, o `ngx` reporta que o comando exige
 privilegio e **qual comando e** — nao tenta de novo com `sudo`, nao adivinha.
 
 ```console
-$ ngx --host web1 --sudo inspect
+$ ngx --host web1 --sudo test
 ```
 
 Uma ferramenta dirigida por agente de IA que escala privilegio sozinha, num
@@ -206,13 +206,14 @@ Detalhes que evitam surpresa:
   (`NGX-0222`) em vez de travar esperando digitacao.
 - `--sudo` vale tambem no alvo **local**. Privilegio explicito nao e uma regra
   do caminho remoto; e uma regra do `ngx`.
-- **Na v0.1, `--sudo` nao muda nada na pratica.** Ele governa a execucao do
-  binario do nginx (`nginx -T`, `nginx -t`), e nenhum dos dois comandos que
-  existem hoje executa o nginx: o `inspect` le os arquivos por SFTP. E leitura
-  por SFTP nao passa por `sudo` — ela acontece com as permissoes do usuario
-  que conectou. Se `/etc/nginx/nginx.conf` nao for legivel por ele, o
-  `inspect` falha ao abrir o arquivo, e `--sudo` nao ajuda. A saida a curto
-  prazo e conectar com um usuario que tenha leitura.
+- **`--sudo` vale para quem executa o nginx, e nao para quem le arquivo.** Os
+  comandos `test` e `status` executam o binario (`nginx -t`, `nginx -V`) e
+  passam a rodar `sudo -n nginx ...` quando a flag esta presente. O `inspect`
+  nao: ele le os arquivos por SFTP, e leitura por SFTP nao passa por `sudo` —
+  ela acontece com as permissoes do usuario que conectou. Se
+  `/etc/nginx/nginx.conf` nao for legivel por ele, o `inspect` falha ao abrir
+  o arquivo, e `--sudo` nao ajuda. A saida a curto prazo e conectar com um
+  usuario que tenha leitura.
 
 ## No Windows, habilite o servico `ssh-agent`
 

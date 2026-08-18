@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -120,6 +121,15 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 		return output.ExitOK
 	}
 
+	// O comando que ja escreveu o proprio envelope so quer o exit code. E o
+	// caso de `test` com a configuracao reprovada: o resultado saiu inteiro,
+	// e renderizar um envelope de erro por cima colocaria dois documentos
+	// JSON no stdout.
+	var jaRenderizado *erroJaRenderizado
+	if errors.As(err, &jaRenderizado) {
+		return output.CodeOf(err)
+	}
+
 	// errors.As, nao uma type assertion direta: um comando pode devolver um
 	// *output.Error embrulhado com %w para anexar contexto (padrao
 	// idiomatico, ex.: fmt.Errorf("ao ler %s: %w", caminho,
@@ -194,7 +204,24 @@ func NewRoot(ctx *Context) *cobra.Command {
 
 	root.AddCommand(newVersionCmd(ctx))
 	root.AddCommand(newInspectCmd(ctx))
+	root.AddCommand(newTestCmd(ctx))
+	root.AddCommand(newStatusCmd(ctx))
 	return root
+}
+
+// contextoDeExecucao aplica o --timeout global a uma operacao que executa
+// algo no alvo. O cancelamento e sempre devolvido e o chamador sempre o
+// difere: um timeout de zero (ou negativo, digitado por engano) nao pode
+// virar uma operacao sem limite nenhum pendurada numa conexao SSH, entao
+// nesse caso vale o default da flag.
+func (c *Context) contextoDeExecucao(pai context.Context) (context.Context, context.CancelFunc) {
+	if pai == nil {
+		pai = context.Background()
+	}
+	if c.Flags == nil || c.Flags.Timeout <= 0 {
+		return context.WithCancel(pai)
+	}
+	return context.WithTimeout(pai, c.Flags.Timeout)
 }
 
 func preparar(ctx *Context, cmd *cobra.Command) error {
