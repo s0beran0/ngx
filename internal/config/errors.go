@@ -82,7 +82,16 @@ func (e ParseErrors) Error() string {
 	}
 
 	primeiro := e[0]
-	msg := fmt.Sprintf("%s:%d: %s", primeiro.File, primeiro.Line, primeiro.Message)
+
+	// Linha zero significa "nao ha linha", nao "linha zero": um arquivo que
+	// nem abriu nao tem posicao a oferecer. Imprimir `arquivo:0` inventa uma
+	// referencia que nao existe e parece defeito para quem le -- e a regra do
+	// projeto e omitir o indisponivel, nunca preenche-lo.
+	local := primeiro.File
+	if primeiro.Line > 0 {
+		local = fmt.Sprintf("%s:%d", primeiro.File, primeiro.Line)
+	}
+	msg := fmt.Sprintf("%s: %s", local, primeiro.Message)
 	if len(e) > 1 {
 		msg = fmt.Sprintf("%s (e mais %d erro(s))", msg, len(e)-1)
 	}

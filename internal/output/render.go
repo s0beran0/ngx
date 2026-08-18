@@ -126,7 +126,16 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 			// Line e Column sao opcionais por design (omitempty): sem uma
 			// linha valida, anexar ":0:0" seria uma coordenada falsa.
 			if d.Line > 0 {
-				loc = fmt.Sprintf(" %s:%d:%d", d.File, d.Line, d.Column)
+				switch {
+				case d.Line > 0 && d.Column > 0:
+					loc = fmt.Sprintf(" %s:%d:%d", d.File, d.Line, d.Column)
+				case d.Line > 0:
+					loc = fmt.Sprintf(" %s:%d", d.File, d.Line)
+				default:
+					// Sem posicao conhecida: so o arquivo. `arquivo:0:0`
+					// aparenta defeito e nao aponta lugar nenhum.
+					loc = fmt.Sprintf(" %s", d.File)
+				}
 			} else {
 				loc = fmt.Sprintf(" %s", d.File)
 			}

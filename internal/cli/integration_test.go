@@ -339,7 +339,13 @@ func TestInspectRemotoDaConfigRealReportaFaltaDePermissao(t *testing.T) {
 			recusa = strings.ToLower(d.Message)
 		}
 	}
-	require.Contains(t, recusa, "permission denied",
+	// A asserção é sobre a mensagem NOSSA, e não sobre "permission denied":
+	// a string do runtime muda entre sistemas e versoes de biblioteca, e um
+	// consumidor que ramifique por ela quebra sozinho. O contrato e a causa
+	// classificada.
+	require.Contains(t, recusa, "permissao",
 		"a recusa de leitura tem de aparecer; arvore vazia em silencio seria mentira")
+	require.NotContains(t, recusa, "permission denied",
+		"a string crua do runtime nao pode vazar para o diagnostico")
 	require.Nil(t, env.Data, "sem leitura nao ha arvore: campo indisponivel e omitido")
 }

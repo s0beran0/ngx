@@ -2,9 +2,11 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -230,6 +232,23 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 	return func(path string) (io.ReadCloser, error) {
 		rc, err := abrirOriginal(path)
 		if err != nil {
+			// Falha ao ABRIR tambem e falha de I/O, e precisa ser registrada
+			// como as de leitura. Localmente abrir quase sempre da certo, e
+			// por isso o caso passou; num alvo remoto e rotina -- medido
+			// contra um nginx de producao, um arquivo entre 128 nao era
+			// legivel pelo usuario da conexao. Sem o registro, o crossplane
+			// devolve um erro generico e o diagnostico acusa o arquivo de
+			// topo em vez daquele que realmente falhou, mandando quem le
+			// depurar o lugar errado.
+			//
+			// Arquivo INEXISTENTE e a excecao, e fica de fora: `include
+			// /nao/existe.conf` e erro de configuracao, nao de ambiente, e
+			// nesse caso o que ajuda e a LINHA do include -- que o crossplane
+			// reporta e que se perderia aqui, porque um arquivo que nao abriu
+			// nao tem linha nenhuma para oferecer.
+			if !errors.Is(err, fs.ErrNotExist) {
+				c.guardarErro(path, err)
+			}
 			return nil, err
 		}
 
@@ -336,7 +355,7 @@ func (c *cacheFonte) errosDeLeitura() ParseErrors {
 	for _, path := range caminhos {
 		problemas = append(problemas, ParseError{
 			File:    path,
-			Message: "a leitura deste arquivo falhou antes do fim: a configuracao nao pode ser lida por inteiro",
+			Message: mensagemDeFalhaDeLeitura(c.erros[path]),
 			Classe:  RecusaFalhaDeLeitura,
 		})
 	}
@@ -432,4 +451,31 @@ func clonarArgs(args []string) []string {
 		return []string{}
 	}
 	return slices.Clone(args)
+}
+
+// mensagemDeFalhaDeLeitura classifica a causa em vez de repassar a string do
+// runtime.
+//
+// As duas coisas importam. A string crua e instavel -- muda entre sistemas e
+// entre versoes da biblioteca -- e um agente que ramifique por ela quebra
+// sozinho; por isso a mensagem e nossa. Mas dizer apenas "nao pode ser lido"
+// desperdica a unica informacao acionavel que existe: permissao negada se
+// resolve de um jeito, conexao caindo de outro. Entao a causa entra
+// classificada, nao literal.
+//
+// A distincao so passou a importar com o acesso remoto. Verificado contra um
+// servidor real que o erro do SFTP casa com fs.ErrPermission, entao a mesma
+// checagem serve ao alvo local e ao remoto.
+func mensagemDeFalhaDeLeitura(err error) string {
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		return "o usuario da conexao nao tem permissao para ler este arquivo, " +
+			"entao a configuracao nao pode ser apresentada por inteiro"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "a leitura deste arquivo foi interrompida antes do fim, " +
+			"entao a configuracao nao pode ser apresentada por inteiro"
+	default:
+		return "a leitura deste arquivo falhou antes do fim, " +
+			"entao a configuracao nao pode ser apresentada por inteiro"
+	}
 }

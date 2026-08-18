@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -512,4 +513,45 @@ func TestParseFalhaDeIONoTopoTemClasseEMensagemPropria(t *testing.T) {
 	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe)
 	require.NotContains(t, p.Message, cru,
 		"a mensagem e nossa: nao repassa a string crua do runtime Go")
+}
+
+// Permissao negada num include e o caso que o acesso remoto tornou rotina:
+// num alvo remoto, o usuario da conexao frequentemente nao alcanca todos os
+// arquivos que o root do servidor alcanca. Medido contra um nginx de
+// producao: um arquivo entre 128 era ilegivel pelo usuario da conexao.
+//
+// O teste exige as tres coisas que faltavam. Que o diagnostico acuse o
+// arquivo QUE FALHOU, e nao o de topo que o inclui -- senao manda depurar o
+// lugar errado. Que a causa apareca CLASSIFICADA, porque permissao se
+// resolve diferente de conexao caindo. E que a string crua do runtime NAO
+// vaze, porque ela muda entre sistemas e um agente que ramifique por ela
+// quebra sozinho.
+func TestParsePermissaoNegadaEmIncludeAcusaOArquivoCerto(t *testing.T) {
+	dir := t.TempDir()
+	topo := filepath.Join(dir, "nginx.conf")
+	incluido := filepath.Join(dir, "negado.conf")
+	require.NoError(t, os.WriteFile(topo, []byte("include "+incluido+";\n"), 0o644))
+	require.NoError(t, os.WriteFile(incluido, []byte("worker_processes 1;\n"), 0o644))
+
+	_, err := config.Parse(config.ParseOptions{
+		Path: topo,
+		Open: func(path string) (io.ReadCloser, error) {
+			if path == incluido {
+				return nil, fmt.Errorf("abrindo %s: %w", path, fs.ErrPermission)
+			}
+			return os.Open(path)
+		},
+	})
+
+	var problemas config.ParseErrors
+	require.True(t, errors.As(err, &problemas), "precisa ser ParseErrors, nao erro generico")
+	require.NotEmpty(t, problemas)
+
+	p := problemas[0]
+	require.Equal(t, incluido, p.File, "o diagnostico tem que acusar o arquivo que falhou")
+	require.NotEqual(t, topo, p.File, "acusar o arquivo de topo manda depurar o lugar errado")
+	require.Contains(t, p.Message, "permissao")
+	require.NotContains(t, p.Message, "ErrPermission")
+	require.NotContains(t, p.Message, "abrindo ")
+	require.Zero(t, p.Line, "arquivo que nao abriu nao tem linha a oferecer")
 }

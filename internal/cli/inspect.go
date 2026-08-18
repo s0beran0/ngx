@@ -134,7 +134,13 @@ func erroDeParse(err error) error {
 
 	itens := make([]string, len(problemas))
 	for i, p := range problemas {
-		itens[i] = fmt.Sprintf("%s:%d: %s", p.File, p.Line, p.Message)
+		// Sem linha conhecida (arquivo que nem abriu), o `:0` seria uma
+		// referencia inventada. Campo indisponivel se omite.
+		if p.Line > 0 {
+			itens[i] = fmt.Sprintf("%s:%d: %s", p.File, p.Line, p.Message)
+		} else {
+			itens[i] = fmt.Sprintf("%s: %s", p.File, p.Message)
+		}
 	}
 
 	e := output.InvalidConfig("%s", strings.Join(itens, "; "))
