@@ -1,84 +1,95 @@
 # ngx
 
-CLI em Go que torna o nginx operável por agentes de IA: saída JSON estruturada,
-leitura por seletor, mudanças transacionais com rollback. Projeto pessoal de
-Eduardo Benck, open source sob MIT.
+A Go CLI that makes nginx operable by AI agents: structured JSON output,
+selector-based reading, transactional changes with rollback. Personal project
+by Eduardo Benck, open source under MIT.
 
-Design e decisões: `docs/superpowers/specs/`. Planos de implementação:
+Design and decisions: `docs/superpowers/specs/`. Implementation plans:
 `docs/superpowers/plans/`.
 
-## Dois públicos, uma ferramenta
+## Two audiences, one tool
 
-O `ngx` é usado por **agentes de IA** e por **humanos**, e isso não é acidente:
-a saída é JSON quando stdout não é um terminal, e legível quando é. `--json` e
-`--human` forçam. Todo comando novo precisa servir aos dois.
+`ngx` is used by **AI agents** and by **humans**, and that is not an accident:
+output is JSON when stdout is not a terminal, and readable when it is. `--json`
+and `--human` force either one. Every new command has to serve both.
 
-Onde o comportamento diverge, a divergência é deliberada e vira regra de
-segurança: `--no-redact` só é aceito em terminal, porque um humano depurando
-pode ver o segredo e um agente lendo o pipe, estruturalmente, não consegue nem
-pedir.
+Where behaviour diverges, the divergence is deliberate and becomes a safety
+rule: `--no-redact` is only accepted on a terminal, because a human debugging
+can see the secret and an agent reading the pipe, structurally, cannot even ask
+for it.
 
-**Cuidado com a palavra "agente".** Ela aparece com dois sentidos no projeto:
-o *agente de IA* que consome a saída, e o `ssh-agent`, programa do sistema
-operacional que guarda chaves SSH e não tem relação nenhuma com IA. Escreva
-sempre `ssh-agent` com o prefixo; "agente" sozinho significa o consumidor.
-Confundir os dois leva a implementar a coisa errada.
+**Careful with the word "agent".** It shows up in two senses in this project:
+the *AI agent* that consumes the output, and `ssh-agent`, an operating system
+program that holds SSH keys and has nothing to do with AI. Always write
+`ssh-agent` with the prefix; "agent" alone means the consumer. Confusing the
+two leads to implementing the wrong thing.
 
-## Convenções
+## Everything in this repository is written in English
 
-- Go 1.25, zero CGO, binário estático.
-- **Tudo que sai do repositório é em inglês**: comentários de código,
-  mensagens de diagnóstico, textos de `--help`, README e `docs/`. É projeto
-  open source e quem contribui ou consome a saída não fala necessariamente
-  português. Sem acentuação em comentário de código.
-- Os planos e specs em `docs/superpowers/` **ficam em português**: são registro
-  de decisão deste projeto, não documentação de usuário.
-- **Mensagens de commit nunca mencionam Claude, IA ou co-autoria.** Sem trailer
-  `Co-Authored-By`, sem "Generated with". Autoria exclusiva do Eduardo.
-- Nenhuma menção a SEA Tecnologia em código, licença ou documentação.
-- Toda lista em JSON serializa como `[]`, nunca `null` — um agente que faz
-  `.length` numa lista nula quebra.
-- Campo indisponível é omitido, nunca estimado. Ausência é informação; número
-  errado é mentira.
-- Nenhum `exec` de shell. `exec.Command` com argv explícito.
+Code, comments, diagnostic messages, `--help` text, README, `docs/` — including
+`docs/superpowers/` — commit messages, and identifiers. No exceptions.
 
-## Despachando subagentes
+*Why:* this is an open source project. A contributor who does not speak
+Portuguese hits the barrier before reading a single line of prose: they hit it
+in a stack trace, in a symbol name, in a diagnostic they are trying to branch
+on. Half-translated is worse than either extreme, because it teaches nobody
+which half to trust.
 
-**O retorno de um subagente e um sumario, nunca o trabalho.** Todo dispatch
-exige, com estas palavras:
+Code comments carry no accents.
 
-> Escreva a analise completa em `<caminho>`. Como resposta final, no maximo
-> 15 linhas: veredito numa linha, cada achado como uma linha (severidade +
-> titulo + arquivo:linha), e o caminho do relatorio. Nao repita a analise na
-> resposta.
+## Conventions
 
-*Por que:* o retorno entra no contexto de quem coordena e e relido em **todo
-turno seguinte**. Medido nesta base: a sessao de coordenacao consumiu 309
-milhoes de tokens de historico relido contra 131 milhoes de 41 subagentes
-somados — 70% do custo total — porque os relatorios voltavam inteiros. Um
-review de 3 mil tokens recebido cedo custa perto de um milhao sozinho.
+- Go 1.25, zero CGO, static binary.
+- **Commit messages never mention Claude, AI or co-authorship.** No
+  `Co-Authored-By` trailer, no "Generated with". Authorship is Eduardo's alone.
+- No mention of SEA Tecnologia in code, licence or documentation. The
+  separation is about ownership and licensing, not about use: SEA uses the tool
+  like any other open source.
+- Every JSON list serialises as `[]`, never `null` — an agent calling `.length`
+  on a null list breaks.
+- An unavailable field is omitted, never estimated. Absence is information; a
+  wrong number is a lie.
+- Never branch on human-readable text. Diagnostics get a class or a code, and
+  callers switch on that. Message wording changes; contracts do not. This cost
+  a real defect: a `--sudo` hint that only appeared when the message contained
+  the word "permissao", and vanished silently the day the project was
+  translated.
+- No shell `exec`. `exec.Command` with explicit argv.
 
-**Um defeito por dispatch.** Nada aplica teto de chamadas: a ferramenta de
-subagente nao tem esse parametro e hook `PreToolUse` nao dispara dentro de
-subagente (medido — sonda no projeto e no global, zero entradas). O teto e um
-pedido, e so e atendido quando a tarefa cabe nele: o mesmo agente estourou
-70 contra um teto de 50 com 6 itens, e usou 13 contra 25 com um item. Se voce
-esta escrevendo o terceiro item da lista, quebre em dois dispatches.
+## Dispatching subagents
 
-Declare mesmo assim uma referencia de chamadas, uma **condicao de parada
-verificavel** ("pare quando a suite passar e commite" — modelo nao conta as
-proprias chamadas, mas sabe ler um teste), e peca o numero usado no
-relatorio, que e o que torna o estouro visivel. Limitar turnos nao piora a
-qualidade: num estudo em SWE-bench, teto dinamico melhorou a taxa de sucesso
-do Claude em 1,6% e cortou 15,6% do custo. Aqui rendeu 35% com os mesmos
-achados.
+**A subagent's return is a summary, never the work.** Every dispatch requires,
+in these words:
 
-Detalhe, template de dispatch e as demais regras:
-`docs/superpowers/escrevendo-planos.md`.
+> Write the full analysis to `<path>`. As your final response, at most 15
+> lines: verdict on one line, each finding as one line (severity + title +
+> file:line), and the report path. Do not repeat the analysis in the response.
 
-## Escrevendo planos e revisando
+*Why:* the return enters the coordinator's context and is re-read on **every
+following turn**. Measured on this codebase: the coordination session consumed
+309 million tokens of re-read history against 131 million from 41 subagents
+combined — 70% of the total cost — because reports came back whole. A 3,000
+token review received early costs close to a million on its own.
 
-Antes de escrever um plano de implementação ou despachar um review, leia
-`docs/superpowers/escrevendo-planos.md`. Ele registra cinco regras tiradas de
-defeitos reais desta base — a mais cara: código que integra biblioteca de
-terceiro precisa ser derivado do fonte dela, não escrito de memória.
+**One defect per dispatch.** Nothing enforces a tool-call ceiling: the subagent
+tool has no budget parameter, and a `PreToolUse` hook does not fire inside a
+subagent (measured — a probe registered both project-locally and globally,
+zero entries). The ceiling is a request, and it is only honoured when the task
+fits inside it: the same agent overran 70 against a ceiling of 50 with 6 items,
+and used 13 against 25 with one. If you are writing the third item in the list,
+split it into two dispatches.
+
+Still declare a reference count, a **verifiable stopping condition** ("stop
+when the suite passes and commit" — a model does not count its own calls, but
+it can read a test result), and ask for the count used in the report, which is
+what makes an overrun visible.
+
+Detail, dispatch template and the remaining rules:
+`docs/superpowers/writing-plans.md`.
+
+## Writing plans and reviewing
+
+Before writing an implementation plan or dispatching a review, read
+`docs/superpowers/writing-plans.md`. It records rules taken from real defects
+in this codebase — the most expensive one: code that integrates a third-party
+library has to be derived from its source, not written from memory.

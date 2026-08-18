@@ -10,7 +10,7 @@ import (
 
 // An agent consuming the output does `.diagnostics.length`. A null list
 // breaks that access, so an empty list needs to serialize as [].
-func TestEnvelopeSerializaDiagnosticsVaziosComoArray(t *testing.T) {
+func TestEnvelopeSerializesEmptyDiagnosticsAsArray(t *testing.T) {
 	env := output.New("status")
 
 	b, err := json.Marshal(env)
@@ -20,7 +20,7 @@ func TestEnvelopeSerializaDiagnosticsVaziosComoArray(t *testing.T) {
 	require.NotContains(t, string(b), `"diagnostics":null`)
 }
 
-func TestEnvelopeNasceOK(t *testing.T) {
+func TestEnvelopeStartsOK(t *testing.T) {
 	env := output.New("status")
 
 	require.True(t, env.OK)
@@ -32,7 +32,7 @@ func TestEnvelopeNasceOK(t *testing.T) {
 // meta against future renaming. Later tasks consume those names verbatim;
 // without this test, any field could be renamed without breaking anything
 // here.
-func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
+func TestEnvelopeSerializesAllFieldsWithExpectedTags(t *testing.T) {
 	env := output.New("lint")
 	env.Data = map[string]string{"result": "ok"}
 	env.Meta = output.Meta{
@@ -85,7 +85,7 @@ func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
 
 // The error severity is what brings the envelope's ok down. Warning and info
 // do not.
-func TestAddDiagnosticErrorDerrubaOK(t *testing.T) {
+func TestAddDiagnosticErrorBringsOKDown(t *testing.T) {
 	env := output.New("test")
 
 	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityWarning, Message: "careful"})
@@ -101,7 +101,7 @@ func TestAddDiagnosticErrorDerrubaOK(t *testing.T) {
 }
 
 // Absent optional fields must not pollute the agent's output.
-func TestDiagnosticOmiteCamposVazios(t *testing.T) {
+func TestDiagnosticOmitsEmptyFields(t *testing.T) {
 	b, err := json.Marshal(output.Diagnostic{
 		Severity: output.SeverityError,
 		Code:     "NGX-0002",

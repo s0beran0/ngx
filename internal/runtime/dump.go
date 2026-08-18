@@ -37,21 +37,21 @@ type Dump struct {
 	Diagnostics []output.Diagnostic `json:"diagnostics"`
 }
 
-// reMarcadorArquivo matches the header nginx emits before each file:
+// reFileMarker matches the header nginx emits before each file:
 // "# configuration file /etc/nginx/nginx.conf:".
 //
 // The marker is only recognized at the start of the line and with the
 // trailing colon, because a comment line inside a configuration may contain
 // the same text and must not split the file in two.
-var reMarcadorArquivo = regexp.MustCompile(`^# configuration file (.+):$`)
+var reFileMarker = regexp.MustCompile(`^# configuration file (.+):$`)
 
 // DumpConfig runs `nginx -T` on the target and splits the output into files.
 //
 // This is the command that, measured on a real host, fails for an ordinary
 // user and only works with sudo. Without --sudo ngx does not escalate:
-// executar returns the privilege error saying what the command is (DR5).
+// run returns the privilege error saying what the command is (DR5).
 func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
-	e, err := r.executar(ctx, "-T")
+	e, err := r.run(ctx, "-T")
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +63,10 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 		// diagnostic lines inside the content of a file.
 		Files:       DividirDump(e.stdout),
 		Diagnostics: ParseDiagnosticos(e.stderr),
-		ConfigFile:  arquivoTestado(e.stderr),
+		ConfigFile:  testedFile(e.stderr),
 	}
 	if d.ConfigFile == "" {
-		d.ConfigFile = arquivoTestado(e.stdout)
+		d.ConfigFile = testedFile(e.stdout)
 	}
 	return d, nil
 }
@@ -78,41 +78,41 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 //
 // Content that appears before the first marker is discarded -- it belongs to
 // no file, and attributing it to the first one would be inventing provenance.
-func DividirDump(texto string) []DumpFile {
-	arquivos := []DumpFile{}
-	if strings.TrimSpace(texto) == "" {
-		return arquivos
+func DividirDump(text string) []DumpFile {
+	files := []DumpFile{}
+	if strings.TrimSpace(text) == "" {
+		return files
 	}
 
-	var atual *DumpFile
-	var conteudo strings.Builder
+	var current *DumpFile
+	var content strings.Builder
 
-	fecha := func() {
-		if atual != nil {
-			atual.Content = conteudo.String()
-			arquivos = append(arquivos, *atual)
+	flush := func() {
+		if current != nil {
+			current.Content = content.String()
+			files = append(files, *current)
 		}
-		conteudo.Reset()
+		content.Reset()
 	}
 
 	// A trailing newline is an artifact of the dump itself, not a blank
 	// line of the last file: without stripping it here, the content of the
 	// last file would come out with one extra empty line compared to the
 	// others.
-	for _, linha := range strings.Split(strings.TrimSuffix(texto, "\n"), "\n") {
-		sem := strings.TrimRight(linha, "\r")
-		if m := reMarcadorArquivo.FindStringSubmatch(sem); m != nil {
-			fecha()
-			atual = &DumpFile{Path: m[1]}
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		trimmed := strings.TrimRight(line, "\r")
+		if m := reFileMarker.FindStringSubmatch(trimmed); m != nil {
+			flush()
+			current = &DumpFile{Path: m[1]}
 			continue
 		}
-		if atual == nil {
+		if current == nil {
 			continue
 		}
-		conteudo.WriteString(sem)
-		conteudo.WriteString("\n")
+		content.WriteString(trimmed)
+		content.WriteString("\n")
 	}
-	fecha()
+	flush()
 
-	return arquivos
+	return files
 }

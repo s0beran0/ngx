@@ -5,7 +5,7 @@ package runtime
 // the output of nginx 1.20.1 as packaged by Oracle Linux 9, the same host
 // where `nginx -T` was measured to fail for an ordinary user.
 const (
-	saidaVMenosMaiusculo = `nginx version: nginx/1.20.1
+	outputDashV = `nginx version: nginx/1.20.1
 built by gcc 11.2.1 20220127 (Red Hat 11.2.1-9) (GCC)
 built with OpenSSL 3.0.1 14 Dec 2021
 TLS SNI support enabled
@@ -13,30 +13,30 @@ configure arguments: --prefix=/usr/share/nginx --sbin-path=/usr/sbin/nginx --mod
 `
 
 	// An nginx.org build, where the paths are relative to the prefix.
-	saidaVCaminhoRelativo = `nginx version: nginx/1.24.0
+	outputDashVRelativePaths = `nginx version: nginx/1.24.0
 configure arguments: --prefix=/usr/local/nginx --conf-path=conf/nginx.conf --pid-path=logs/nginx.pid --with-http_ssl_module
 `
 
-	saidaTesteOK = `nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+	outputTestOK = `nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 `
 
-	saidaTesteFalhou = `nginx: [emerg] unknown directive "foo" in /etc/nginx/conf.d/a.conf:3
+	outputTestFailed = `nginx: [emerg] unknown directive "foo" in /etc/nginx/conf.d/a.conf:3
 nginx: configuration file /etc/nginx/nginx.conf test failed
 `
 
-	saidaTesteComAviso = `nginx: [warn] conflicting server name "exemplo.com" on 0.0.0.0:80, ignored
+	outputTestWithWarning = `nginx: [warn] conflicting server name "exemplo.com" on 0.0.0.0:80, ignored
 nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 `
 
 	// The case measured on the real host: an ordinary user cannot read the
 	// configuration.
-	saidaSemPrivilegio = `nginx: [alert] could not open error log file: open() "/var/log/nginx/error.log" failed (13: Permission denied)
+	outputNoPrivilege = `nginx: [alert] could not open error log file: open() "/var/log/nginx/error.log" failed (13: Permission denied)
 nginx: [emerg] open() "/etc/nginx/nginx.conf" failed (13: Permission denied)
 `
 
-	saidaDump = `# configuration file /etc/nginx/nginx.conf:
+	outputDump = `# configuration file /etc/nginx/nginx.conf:
 user nginx;
 worker_processes auto;
 

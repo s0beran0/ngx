@@ -27,11 +27,11 @@ const (
 	NomeAssinatura = "checksums.txt.minisig"
 )
 
-// limiteDownload caps what we accept to read from the network into memory. An
+// downloadLimit caps what we accept to read from the network into memory. An
 // ngx artifact is a few dozen megabytes; with no ceiling, a hostile server
 // (or a redirect to the wrong place) takes the machine down through memory
 // consumption instead of failing.
-const limiteDownload = 128 << 20 // 128 MiB
+const downloadLimit = 128 << 20 // 128 MiB
 
 // Asset is an artifact attached to a release.
 type Asset struct {
@@ -49,47 +49,47 @@ type Release struct {
 }
 
 // AssetPorNome returns the artifact with the exact name.
-func (r *Release) AssetPorNome(nome string) (Asset, error) {
+func (r *Release) AssetPorNome(name string) (Asset, error) {
 	for _, a := range r.Assets {
-		if a.Name == nome {
+		if a.Name == name {
 			return a, nil
 		}
 	}
-	return Asset{}, erro(CodigoAssetAusente,
+	return Asset{}, newError(CodigoAssetAusente,
 		"release %s does not carry the file %q, so there is no way to verify the download; "+
-			"published artifacts: %s", r.Version, nome, listaDeNomes(r.Assets))
+			"published artifacts: %s", r.Version, name, assetNames(r.Assets))
 }
 
 // AssetDaPlataforma picks the artifact for the given system and
 // architecture. The choice is made by suffix (_<so>_<arch>.<ext>) instead of
 // by a name assembled from the version: the goreleaser name template can
 // change without the update having to be rewritten.
-func (r *Release) AssetDaPlataforma(so, arch string) (Asset, error) {
-	sufixos := []string{
-		fmt.Sprintf("_%s_%s.tar.gz", so, arch),
-		fmt.Sprintf("_%s_%s.zip", so, arch),
+func (r *Release) AssetDaPlataforma(goos, goarch string) (Asset, error) {
+	suffixes := []string{
+		fmt.Sprintf("_%s_%s.tar.gz", goos, goarch),
+		fmt.Sprintf("_%s_%s.zip", goos, goarch),
 	}
-	for _, s := range sufixos {
+	for _, s := range suffixes {
 		for _, a := range r.Assets {
 			if strings.HasSuffix(a.Name, s) {
 				return a, nil
 			}
 		}
 	}
-	return Asset{}, erro(CodigoAssetAusente,
+	return Asset{}, newError(CodigoAssetAusente,
 		"release %s does not carry an artifact for %s/%s; published artifacts: %s",
-		r.Version, so, arch, listaDeNomes(r.Assets))
+		r.Version, goos, goarch, assetNames(r.Assets))
 }
 
-func listaDeNomes(assets []Asset) string {
+func assetNames(assets []Asset) string {
 	if len(assets) == 0 {
 		return "none"
 	}
-	nomes := make([]string, 0, len(assets))
+	names := make([]string, 0, len(assets))
 	for _, a := range assets {
-		nomes = append(nomes, a.Name)
+		names = append(names, a.Name)
 	}
-	return strings.Join(nomes, ", ")
+	return strings.Join(names, ", ")
 }
 
 // Cliente talks to the GitHub API.
@@ -138,36 +138,36 @@ func (c *Cliente) repo() string {
 // non-draft entry, because the API returns them ordered by creation
 // descending -- and the beta channel accepts both a prerelease and a stable,
 // whichever comes first (DD1).
-func (c *Cliente) Latest(ctx context.Context, canal Channel) (*Release, error) {
-	if canal == ChannelBeta {
+func (c *Cliente) Latest(ctx context.Context, channel Channel) (*Release, error) {
+	if channel == ChannelBeta {
 		var releases []Release
 		url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", c.base(), c.repo())
-		if err := c.pegarJSON(ctx, url, &releases); err != nil {
+		if err := c.getJSON(ctx, url, &releases); err != nil {
 			return nil, err
 		}
 		for i := range releases {
 			if releases[i].Draft {
 				continue
 			}
-			return normalizar(&releases[i]), nil
+			return normalize(&releases[i]), nil
 		}
-		return nil, erro(CodigoReleaseAusente,
+		return nil, newError(CodigoReleaseAusente,
 			"the beta channel has no published release in %s", c.repo())
 	}
 
 	var rel Release
 	url := fmt.Sprintf("%s/repos/%s/releases/latest", c.base(), c.repo())
-	if err := c.pegarJSON(ctx, url, &rel); err != nil {
+	if err := c.getJSON(ctx, url, &rel); err != nil {
 		return nil, err
 	}
-	return normalizar(&rel), nil
+	return normalize(&rel), nil
 }
 
 // PorVersao resolves a specific version by tag. It is the downgrade path and
 // the deliberate version-change path: it never happens without someone asking
 // for it.
-func (c *Cliente) PorVersao(ctx context.Context, versao string) (*Release, error) {
-	tag := strings.TrimSpace(versao)
+func (c *Cliente) PorVersao(ctx context.Context, version string) (*Release, error) {
+	tag := strings.TrimSpace(version)
 	if tag == "" {
 		return nil, output.Usage("give the version in the vX.Y.Z format")
 	}
@@ -176,96 +176,96 @@ func (c *Cliente) PorVersao(ctx context.Context, versao string) (*Release, error
 	}
 	var rel Release
 	url := fmt.Sprintf("%s/repos/%s/releases/tags/%s", c.base(), c.repo(), tag)
-	if err := c.pegarJSON(ctx, url, &rel); err != nil {
+	if err := c.getJSON(ctx, url, &rel); err != nil {
 		return nil, err
 	}
-	return normalizar(&rel), nil
+	return normalize(&rel), nil
 }
 
 // Baixar reads a whole artifact into memory, respecting the ceiling.
 func (c *Cliente) Baixar(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, erroCausa(err, CodigoRede, "invalid download url: %s", url)
+		return nil, wrapError(err, CodigoRede, "invalid download url: %s", url)
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "ngx-update")
 
 	resp, err := c.http().Do(req)
 	if err != nil {
-		return nil, erroCausa(err, CodigoRede,
+		return nil, wrapError(err, CodigoRede,
 			"could not download %s: the network failed or the time limit ran out", url)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, erro(CodigoRede,
+		return nil, newError(CodigoRede,
 			"the download of %s returned HTTP %d", url, resp.StatusCode)
 	}
 
-	dados, err := io.ReadAll(io.LimitReader(resp.Body, limiteDownload+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, downloadLimit+1))
 	if err != nil {
-		return nil, erroCausa(err, CodigoRede,
+		return nil, wrapError(err, CodigoRede,
 			"the download of %s was interrupted before the end", url)
 	}
-	if int64(len(dados)) > limiteDownload {
-		return nil, erro(CodigoRede,
+	if int64(len(data)) > downloadLimit {
+		return nil, newError(CodigoRede,
 			"the download of %s went past the limit of %d bytes and was aborted",
-			url, int64(limiteDownload))
+			url, int64(downloadLimit))
 	}
-	return dados, nil
+	return data, nil
 }
 
-func (c *Cliente) pegarJSON(ctx context.Context, url string, destino any) error {
+func (c *Cliente) getJSON(ctx context.Context, url string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return erroCausa(err, CodigoRede, "invalid url: %s", url)
+		return wrapError(err, CodigoRede, "invalid url: %s", url)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "ngx-update")
 
 	resp, err := c.http().Do(req)
 	if err != nil {
-		return erroCausa(err, CodigoRede,
+		return wrapError(err, CodigoRede,
 			"could not query the GitHub API at %s: the network failed or the "+
 				"time limit ran out", url)
 	}
 	defer resp.Body.Close()
 
-	if err := statusDaAPI(resp, url); err != nil {
+	if err := apiStatus(resp, url); err != nil {
 		return err
 	}
 
-	corpo, err := io.ReadAll(io.LimitReader(resp.Body, limiteDownload+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, downloadLimit+1))
 	if err != nil {
-		return erroCausa(err, CodigoRede, "the response from %s was interrupted", url)
+		return wrapError(err, CodigoRede, "the response from %s was interrupted", url)
 	}
-	if err := json.Unmarshal(corpo, destino); err != nil {
-		return erroCausa(err, CodigoRede,
+	if err := json.Unmarshal(body, dest); err != nil {
+		return wrapError(err, CodigoRede,
 			"the response from %s is not the JSON expected from the GitHub API", url)
 	}
 	return nil
 }
 
-// statusDaAPI translates the HTTP status. The 403 with X-RateLimit-Remaining:
+// apiStatus translates the HTTP status. The 403 with X-RateLimit-Remaining:
 // 0 has handling of its own because it is the most likely failure in real use
 // -- the GitHub API without authentication allows 60 calls per hour per IP --
 // and a generic error would send the person investigating the network or the
 // repository.
-func statusDaAPI(resp *http.Response, url string) error {
+func apiStatus(resp *http.Response, url string) error {
 	switch resp.StatusCode {
 	case http.StatusOK:
 		return nil
 	case http.StatusForbidden, http.StatusTooManyRequests:
 		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
-			return erro(CodigoRateLimit,
+			return newError(CodigoRateLimit,
 				"the GitHub API rate limit was reached%s. It is not a problem with "+
 					"ngx nor with your network: the API without authentication allows "+
 					"60 calls per hour per IP. Wait for the window to reopen or download "+
 					"the new version manually from the releases page",
-				quandoReabre(resp))
+				rateLimitResetHint(resp))
 		}
-		return erro(CodigoRede, "the GitHub API refused the query to %s with HTTP %d",
+		return newError(CodigoRede, "the GitHub API refused the query to %s with HTTP %d",
 			url, resp.StatusCode)
 	case http.StatusNotFound:
 		// The 404 on /releases/latest has a common and far from obvious
@@ -274,21 +274,21 @@ func statusDaAPI(resp *http.Response, url string) error {
 		// releases. Without saying so, the reader concludes the project
 		// publishes nothing.
 		if strings.HasSuffix(url, "/releases/latest") {
-			return erro(CodigoReleaseAusente,
+			return newError(CodigoReleaseAusente,
 				"no stable release found at %s. This endpoint ignores prereleases: "+
 					"if the project has only published -rc or -beta versions, "+
 					"use --channel beta (or NGX_CHANNEL=beta) to reach them", url)
 		}
-		return erro(CodigoReleaseAusente,
+		return newError(CodigoReleaseAusente,
 			"the GitHub API did not find %s: the requested version may not exist or "+
 				"may have no published release", url)
 	default:
-		return erro(CodigoRede, "the GitHub API returned HTTP %d for %s",
+		return newError(CodigoRede, "the GitHub API returned HTTP %d for %s",
 			resp.StatusCode, url)
 	}
 }
 
-func quandoReabre(resp *http.Response) string {
+func rateLimitResetHint(resp *http.Response) string {
 	reset := resp.Header.Get("X-RateLimit-Reset")
 	if reset == "" {
 		return ""
@@ -300,9 +300,9 @@ func quandoReabre(resp *http.Response) string {
 	return " (the window reopens at " + time.Unix(epoch, 0).UTC().Format(time.RFC3339) + ")"
 }
 
-// normalizar guarantees that Assets is never nil: a null list would serialize
+// normalize guarantees that Assets is never nil: a null list would serialize
 // as null and would break whoever does .length on the output.
-func normalizar(r *Release) *Release {
+func normalize(r *Release) *Release {
 	if r.Assets == nil {
 		r.Assets = []Asset{}
 	}
@@ -312,6 +312,6 @@ func normalizar(r *Release) *Release {
 // Latest queries the official repository with the default client. It is the
 // signature Task D4 specifies; whoever needs a timeout or another endpoint
 // uses Cliente directly.
-func Latest(ctx context.Context, canal Channel) (*Release, error) {
-	return NovoCliente(0).Latest(ctx, canal)
+func Latest(ctx context.Context, channel Channel) (*Release, error) {
+	return NovoCliente(0).Latest(ctx, channel)
 }

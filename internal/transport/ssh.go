@@ -41,19 +41,19 @@ const (
 // output has no way of knowing whether the command is slow or dead.
 const TimeoutSSHPadrao = 30 * time.Second
 
-// metacaracteresGlob are the characters that make a pattern a pattern. The
+// globMetacharacters are the characters that make a pattern a pattern. The
 // backslash is in there because path.Match treats it as an escape: a pattern
 // containing one has to go through expansion, not through the Lstat shortcut.
-const metacaracteresGlob = `*?[\`
+const globMetacharacters = `*?[\`
 
-// leitorRemoto is the subset of *sftp.Client that pattern expansion uses.
+// remoteReader is the subset of *sftp.Client that pattern expansion uses.
 //
 // It exists as an interface for one reason only: the DR6 home-grown glob is
 // the part of this layer that needs real testing, and a test that requires a
 // live SFTP server does not exercise the case that matters — an I/O error in
 // the middle of the listing. With the interface, that error is injected
 // directly.
-type leitorRemoto interface {
+type remoteReader interface {
 	ReadDir(p string) ([]os.FileInfo, error)
 	Lstat(p string) (os.FileInfo, error)
 }
@@ -62,15 +62,15 @@ type leitorRemoto interface {
 // session. Nothing is installed on the target (DR3) — ngx reads what is
 // already there and runs the binary that already exists.
 type sshTransport struct {
-	cliente *ssh.Client
-	arquivo *sftp.Client
+	client     *ssh.Client
+	sftpClient *sftp.Client
 
-	// destino is "user@host:port", the form Describe publishes in the
+	// target is "user@host:port", the form Describe publishes in the
 	// envelope.
-	destino string
+	target string
 
-	umaVez     sync.Once
-	erroFechar error
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // SSH connects to the host described by opts and returns the remote transport.
@@ -98,26 +98,26 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		return nil, diags, output.Usage("no target host provided")
 	}
 
-	porta := opts.Port
-	if porta == 0 {
-		porta = PortaSSHPadrao
+	port := opts.Port
+	if port == 0 {
+		port = PortaSSHPadrao
 	}
-	usuario := opts.User
-	if usuario == "" {
-		usuario = usuarioCorrente()
+	user := opts.User
+	if user == "" {
+		user = currentUser()
 	}
 
-	verificar, diagsHost, err := VerificadorHostKey(opts)
-	if len(diagsHost) > 0 {
-		diags = append(diags, diagsHost...)
+	verifyHostKey, hostKeyDiags, err := VerificadorHostKey(opts)
+	if len(hostKeyDiags) > 0 {
+		diags = append(diags, hostKeyDiags...)
 	}
 	if err != nil {
 		return nil, diags, err
 	}
 
-	auth, diagsAuth, err := MontarAutenticacao(opts)
-	if len(diagsAuth) > 0 {
-		diags = append(diags, diagsAuth...)
+	auth, authDiags, err := MontarAutenticacao(opts)
+	if len(authDiags) > 0 {
+		diags = append(diags, authDiags...)
 	}
 	if err != nil {
 		return nil, diags, err
@@ -128,14 +128,14 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		timeout = TimeoutSSHPadrao
 	}
 
-	endereco := net.JoinHostPort(host, strconv.Itoa(porta))
+	address := net.JoinHostPort(host, strconv.Itoa(port))
 	conf := &ssh.ClientConfig{
-		User:            usuario,
+		User:            user,
 		Auth:            auth.Metodos,
-		HostKeyCallback: verificar,
+		HostKeyCallback: verifyHostKey,
 		Timeout:         timeout,
 	}
-	cliente, err := ssh.Dial("tcp", endereco, conf)
+	client, err := ssh.Dial("tcp", address, conf)
 
 	// A server usually offers several host key types and the client picks
 	// one. If known_hosts recorded the host under another type, the
@@ -149,9 +149,9 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 	// is loosened: the same verification runs again, just over an algorithm
 	// that known_hosts covers.
 	if err != nil {
-		if tipos := tiposRegistrados(err); len(tipos) > 0 {
-			conf.HostKeyAlgorithms = tipos
-			cliente, err = ssh.Dial("tcp", endereco, conf)
+		if types := recordedKeyTypes(err); len(types) > 0 {
+			conf.HostKeyAlgorithms = types
+			client, err = ssh.Dial("tcp", address, conf)
 		}
 	}
 
@@ -168,39 +168,39 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		// whoever consumes the output has to separate without interpreting
 		// text —, and would turn a verification refusal into a generic
 		// network or credential failure.
-		var tipado *output.Error
-		if errors.As(err, &tipado) {
-			return nil, diags, tipado
+		var typed *output.Error
+		if errors.As(err, &typed) {
+			return nil, diags, typed
 		}
-		return nil, diags, erroConexaoSSH(usuario, endereco, auth.Nomes, err)
+		return nil, diags, sshConnectionError(user, address, auth.Nomes, err)
 	}
 
-	arquivo, err := sftp.NewClient(cliente)
+	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
-		_ = cliente.Close()
-		return nil, diags, erroSessaoSFTP(usuario, endereco, err)
+		_ = client.Close()
+		return nil, diags, sftpSessionError(user, address, err)
 	}
 
 	return &sshTransport{
-		cliente: cliente,
-		arquivo: arquivo,
-		destino: fmt.Sprintf("%s@%s", usuario, endereco),
+		client:     client,
+		sftpClient: sftpClient,
+		target:     fmt.Sprintf("%s@%s", user, address),
 	}, diags, nil
 }
 
-func (t *sshTransport) Open(caminho string) (io.ReadCloser, error) {
-	// No direct `return t.arquivo.Open(...)`: on the error path that would
+func (t *sshTransport) Open(name string) (io.ReadCloser, error) {
+	// No direct `return t.sftpClient.Open(...)`: on the error path that would
 	// return a non-nil interface holding a nil *sftp.File, and whoever
 	// checks `rc != nil` before `err` would panic.
-	f, err := t.arquivo.Open(caminho)
+	f, err := t.sftpClient.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	return f, nil
 }
 
-func (t *sshTransport) Glob(padrao string) ([]string, error) {
-	return globRemoto(t.arquivo, padrao)
+func (t *sshTransport) Glob(pattern string) ([]string, error) {
+	return remoteGlob(t.sftpClient, pattern)
 }
 
 func (t *sshTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, int, error) {
@@ -211,62 +211,62 @@ func (t *sshTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, 
 		return nil, nil, 0, err
 	}
 
-	sessao, err := t.cliente.NewSession()
+	session, err := t.client.NewSession()
 	if err != nil {
 		// Opening a channel fails when the connection is already down:
 		// transport, not the command's verdict.
 		return nil, nil, 0, err
 	}
-	defer func() { _ = sessao.Close() }()
+	defer func() { _ = session.Close() }()
 
 	var stdout, stderr bytes.Buffer
-	sessao.Stdout = &stdout
-	sessao.Stderr = &stderr
+	session.Stdout = &stdout
+	session.Stderr = &stderr
 
-	comando := montarLinhaDeComando(argv)
+	command := buildCommandLine(argv)
 
-	fim := make(chan error, 1)
-	go func() { fim <- sessao.Run(comando) }()
+	done := make(chan error, 1)
+	go func() { done <- session.Run(command) }()
 
 	select {
-	case err := <-fim:
-		return classificarSaidaSSH(stdout.Bytes(), stderr.Bytes(), err)
+	case err := <-done:
+		return classifySSHExit(stdout.Bytes(), stderr.Bytes(), err)
 	case <-ctx.Done():
 		// Best effort: ask the server to kill the process and tear down
 		// the channel, which is what releases Run.
-		_ = sessao.Signal(ssh.SIGKILL)
-		_ = sessao.Close()
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
 		// Wait for the goroutine before touching the buffers. Reading
 		// them while the session copy is still writing would be a data
 		// race.
-		<-fim
+		<-done
 		return stdout.Bytes(), stderr.Bytes(), 0, ctx.Err()
 	}
 }
 
 func (t *sshTransport) Close() error {
-	t.umaVez.Do(func() {
-		var erros []error
-		if t.arquivo != nil {
-			if err := t.arquivo.Close(); err != nil {
-				erros = append(erros, err)
+	t.closeOnce.Do(func() {
+		var errs []error
+		if t.sftpClient != nil {
+			if err := t.sftpClient.Close(); err != nil {
+				errs = append(errs, err)
 			}
 		}
-		if t.cliente != nil {
-			if err := t.cliente.Close(); err != nil {
-				erros = append(erros, err)
+		if t.client != nil {
+			if err := t.client.Close(); err != nil {
+				errs = append(errs, err)
 			}
 		}
-		t.erroFechar = errors.Join(erros...)
+		t.closeErr = errors.Join(errs...)
 	})
-	return t.erroFechar
+	return t.closeErr
 }
 
 func (t *sshTransport) Describe() string {
-	return "ssh://" + t.destino
+	return "ssh://" + t.target
 }
 
-// classificarSaidaSSH applies the central Transport rule to the outcome of a
+// classifySSHExit applies the central Transport rule to the outcome of a
 // remote session.
 //
 // *ssh.ExitError is the server reporting the command's exit code: it ran to
@@ -277,20 +277,20 @@ func (t *sshTransport) Describe() string {
 // saying how. That is what happens when the connection drops halfway, and in
 // that case there is no exit code — returning zero with a nil err would make
 // an interrupted command look like success. An I/O error reads the same way.
-func classificarSaidaSSH(stdout, stderr []byte, err error) ([]byte, []byte, int, error) {
+func classifySSHExit(stdout, stderr []byte, err error) ([]byte, []byte, int, error) {
 	if err == nil {
 		return stdout, stderr, 0, nil
 	}
 
-	var saida *ssh.ExitError
-	if errors.As(err, &saida) {
-		return stdout, stderr, saida.ExitStatus(), nil
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		return stdout, stderr, exitErr.ExitStatus(), nil
 	}
 
 	return stdout, stderr, 0, err
 }
 
-// montarLinhaDeComando turns argv into the string the SSH exec channel
+// buildCommandLine turns argv into the string the SSH exec channel
 // accepts.
 //
 // The SSH protocol has no way of sending an argv: the "exec" request carries a
@@ -298,15 +298,15 @@ func classificarSaidaSSH(stdout, stderr []byte, err error) ([]byte, []byte, int,
 // is unavoidable, what prevents injection is escaping per argument — each argv
 // element becomes a token the shell cannot reinterpret. Joining argv with
 // spaces, unquoted, would be the same as running a shell with user input.
-func montarLinhaDeComando(argv []string) string {
-	partes := make([]string, 0, len(argv))
+func buildCommandLine(argv []string) string {
+	parts := make([]string, 0, len(argv))
 	for _, arg := range argv {
-		partes = append(partes, escaparArgumento(arg))
+		parts = append(parts, quoteArgument(arg))
 	}
-	return strings.Join(partes, " ")
+	return strings.Join(parts, " ")
 }
 
-// escaparArgumento wraps the argument in single quotes, the only POSIX shell
+// quoteArgument wraps the argument in single quotes, the only POSIX shell
 // quoting that interprets absolutely nothing inside — no $, no backtick, no
 // backslash.
 //
@@ -314,11 +314,11 @@ func montarLinhaDeComando(argv []string) string {
 // the quoting is closed, the quote is escaped outside with a backslash, and
 // the quoting is reopened. An empty argument becomes an empty pair of quotes
 // and remains an argument, instead of vanishing from the line.
-func escaparArgumento(arg string) string {
+func quoteArgument(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
-// globRemoto expands a path pattern on the remote host over ReadDir and
+// remoteGlob expands a path pattern on the remote host over ReadDir and
 // path.Match, propagating I/O errors as errors (DR6).
 //
 // sftp.Client has a Glob, and it does not serve: the comment in its own source
@@ -343,95 +343,95 @@ func escaparArgumento(arg string) string {
 // matching semantics. What changes is the error handling.
 //
 // With no match it returns an empty list and a nil err, never nil.
-func globRemoto(remoto leitorRemoto, padrao string) ([]string, error) {
+func remoteGlob(remote remoteReader, pattern string) ([]string, error) {
 	// Validate the syntax before touching the network: a malformed pattern
 	// is a usage error, not a reason for a round trip to the server.
-	if _, err := path.Match(padrao, ""); err != nil {
+	if _, err := path.Match(pattern, ""); err != nil {
 		return nil, err
 	}
 
-	if !temMetacaractereGlob(padrao) {
-		if _, err := remoto.Lstat(padrao); err != nil {
+	if !hasGlobMetacharacter(pattern) {
+		if _, err := remote.Lstat(pattern); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				return []string{}, nil
 			}
 			return nil, err
 		}
-		return []string{padrao}, nil
+		return []string{pattern}, nil
 	}
 
-	dir, arquivo := path.Split(padrao)
-	dir = limparDirGlob(dir)
+	dir, base := path.Split(pattern)
+	dir = cleanGlobDir(dir)
 
-	if !temMetacaractereGlob(dir) {
-		return globNoDiretorio(remoto, dir, arquivo, []string{})
+	if !hasGlobMetacharacter(dir) {
+		return globInDir(remote, dir, base, []string{})
 	}
 
 	// Protects against infinite recursion: a pattern that reduces to itself
 	// (which a loose backslash can produce) would never converge.
-	if dir == padrao {
+	if dir == pattern {
 		return nil, path.ErrBadPattern
 	}
 
-	diretorios, err := globRemoto(remoto, dir)
+	dirs, err := remoteGlob(remote, dir)
 	if err != nil {
 		return nil, err
 	}
 
-	achados := []string{}
-	for _, d := range diretorios {
-		achados, err = globNoDiretorio(remoto, d, arquivo, achados)
+	matches := []string{}
+	for _, d := range dirs {
+		matches, err = globInDir(remote, d, base, matches)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return achados, nil
+	return matches, nil
 }
 
-// globNoDiretorio appends to achados the entries of dir that match the
+// globInDir appends to matches the entries of dir that match the
 // pattern.
 //
 // The sorting is deliberate: the SFTP ReadDir hands back whatever the server
 // sends, in whatever order it likes, and the list of include files feeds the
 // canonical hash of the configuration. An unstable order would become an
 // unstable hash.
-func globNoDiretorio(remoto leitorRemoto, dir, padrao string, achados []string) ([]string, error) {
-	entradas, err := remoto.ReadDir(dir)
+func globInDir(remote remoteReader, dir, pattern string, matches []string) ([]string, error) {
+	entries, err := remote.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// A nonexistent directory is absence of matches, not a
 			// failure: the pattern simply matches nothing.
-			return achados, nil
+			return matches, nil
 		}
 		return nil, err
 	}
 
-	nomes := make([]string, 0, len(entradas))
-	for _, e := range entradas {
-		nomes = append(nomes, e.Name())
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
 	}
-	sort.Strings(nomes)
+	sort.Strings(names)
 
-	for _, nome := range nomes {
-		casa, err := path.Match(padrao, nome)
+	for _, name := range names {
+		matched, err := path.Match(pattern, name)
 		if err != nil {
 			return nil, err
 		}
-		if casa {
-			achados = append(achados, path.Join(dir, nome))
+		if matched {
+			matches = append(matches, path.Join(dir, name))
 		}
 	}
-	return achados, nil
+	return matches, nil
 }
 
-func temMetacaractereGlob(p string) bool {
-	return strings.ContainsAny(p, metacaracteresGlob)
+func hasGlobMetacharacter(p string) bool {
+	return strings.ContainsAny(p, globMetacharacters)
 }
 
-// limparDirGlob normalizes the directory half returned by path.Split, which
+// cleanGlobDir normalizes the directory half returned by path.Split, which
 // always comes with a trailing slash. A relative pattern has an empty
 // directory and becomes ".", which is what ReadDir expects.
-func limparDirGlob(dir string) string {
+func cleanGlobDir(dir string) string {
 	switch dir {
 	case "":
 		return "."
@@ -442,7 +442,7 @@ func limparDirGlob(dir string) string {
 	}
 }
 
-// erroConexaoSSH describes the handshake failure naming the authentication
+// sshConnectionError describes the handshake failure naming the authentication
 // methods that were offered.
 //
 // The list of methods is what separates "the network does not reach it" from
@@ -450,10 +450,10 @@ func limparDirGlob(dir string) string {
 // a refusal caused by a missing key in the ssh-agent is indistinguishable from
 // a host that is down, and whoever reads the output has no way of choosing
 // what to fix.
-func erroConexaoSSH(usuario, endereco string, metodos []string, causa error) error {
-	oferecidos := "none"
-	if len(metodos) > 0 {
-		oferecidos = strings.Join(metodos, ", ")
+func sshConnectionError(user, address string, methods []string, cause error) error {
+	offered := "none"
+	if len(methods) > 0 {
+		offered = strings.Join(methods, ", ")
 	}
 
 	return &output.Error{
@@ -464,16 +464,16 @@ func erroConexaoSSH(usuario, endereco string, metodos []string, causa error) err
 			Message: fmt.Sprintf(
 				"could not connect to %s@%s: %v. Authentication methods "+
 					"offered: %s",
-				usuario, endereco, causa, oferecidos),
+				user, address, cause, offered),
 		},
-		Err: causa,
+		Err: cause,
 	}
 }
 
-// erroSessaoSFTP describes the case where SSH comes up and SFTP does not. The
+// sftpSessionError describes the case where SSH comes up and SFTP does not. The
 // distinction matters because the fix lives in the server's sshd, not in the
 // caller's credentials.
-func erroSessaoSFTP(usuario, endereco string, causa error) error {
+func sftpSessionError(user, address string, cause error) error {
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -483,31 +483,31 @@ func erroSessaoSFTP(usuario, endereco string, causa error) error {
 				"the connection to %s@%s was established, but the SFTP subsystem did "+
 					"not answer: %v. ngx reads the configuration over SFTP; check whether "+
 					"the server's sshd has the subsystem enabled",
-				usuario, endereco, causa),
+				user, address, cause),
 		},
-		Err: causa,
+		Err: cause,
 	}
 }
 
-// tiposRegistrados returns the key types known_hosts has for the host, and
+// recordedKeyTypes returns the key types known_hosts has for the host, and
 // only when the failure was "it presented a type that is not on record". It
 // returns nothing for a genuinely changed key or an unknown host: in those
 // cases repeating the handshake would be bypassing the verification, not
 // adjusting it.
-func tiposRegistrados(err error) []string {
-	var chave *knownhosts.KeyError
-	if !errors.As(err, &chave) || len(chave.Want) == 0 {
+func recordedKeyTypes(err error) []string {
+	var keyErr *knownhosts.KeyError
+	if !errors.As(err, &keyErr) || len(keyErr.Want) == 0 {
 		return nil
 	}
 
-	tipos := make([]string, 0, len(chave.Want))
-	vistos := map[string]bool{}
-	for i := range chave.Want {
-		t := chave.Want[i].Key.Type()
-		if !vistos[t] {
-			vistos[t] = true
-			tipos = append(tipos, t)
+	types := make([]string, 0, len(keyErr.Want))
+	seen := map[string]bool{}
+	for i := range keyErr.Want {
+		t := keyErr.Want[i].Key.Type()
+		if !seen[t] {
+			seen[t] = true
+			types = append(types, t)
 		}
 	}
-	return tipos
+	return types
 }

@@ -26,12 +26,12 @@ type Output struct {
 	Redact []string `koanf:"redact"`
 }
 
-// chaveRedact is the koanf path of Output.Redact, used in Load() to decide
+// redactKey is the koanf path of Output.Redact, used in Load() to decide
 // when the declared list replaces the default one. It is extracted as a
 // constant because renaming the `koanf:"redact"` or `koanf:"output"` tag
 // without updating this value would break the replacement silently, with no
 // compile error.
-const chaveRedact = "output.redact"
+const redactKey = "output.redact"
 
 // Settings is the effective ngx configuration.
 type Settings struct {
@@ -89,7 +89,7 @@ func Load(globalPath, localPath string) (*Settings, error) {
 	// the list -- k.Get returns nil and the defaults must survive;
 	// otherwise redaction would silently turn off, failing open on a
 	// security feature.
-	if v := k.Get(chaveRedact); v != nil {
+	if v := k.Get(redactKey); v != nil {
 		s.Output.Redact = nil
 	}
 

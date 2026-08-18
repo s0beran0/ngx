@@ -10,52 +10,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type dadoRedigivel struct {
+type redactableData struct {
 	Valor string `json:"valor"`
 }
 
-func (d dadoRedigivel) Redacted(rs output.RedactSet) any {
+func (d redactableData) Redacted(rs output.RedactSet) any {
 	if rs.Matches("ssl_certificate_key", []string{d.Valor}) {
-		return dadoRedigivel{Valor: output.RedactedValue}
+		return redactableData{Valor: output.RedactedValue}
 	}
 	return d
 }
 
-// dadoNaoRedigivel deliberately does not implement Redactable: it exists to
+// nonRedactableData deliberately does not implement Redactable: it exists to
 // pin the fail-open behavior when Data does not know how to redact itself.
-type dadoNaoRedigivel struct {
+type nonRedactableData struct {
 	Valor string `json:"valor"`
 }
 
-type dadoHumano struct{}
+type humanData struct{}
 
-func (dadoHumano) RenderHuman(w io.Writer) error {
+func (humanData) RenderHuman(w io.Writer) error {
 	_, err := io.WriteString(w, "human output\n")
 	return err
 }
 
-// dadoHumanoRedigivel implements both interfaces: Redactable and
+// redactableHumanData implements both interfaces: Redactable and
 // HumanRenderable. It exists to prove that redaction also reaches the
 // FormatHuman path, not only JSON.
-type dadoHumanoRedigivel struct {
+type redactableHumanData struct {
 	Valor string `json:"valor"`
 }
 
-func (d dadoHumanoRedigivel) Redacted(rs output.RedactSet) any {
+func (d redactableHumanData) Redacted(rs output.RedactSet) any {
 	if rs.Matches("ssl_certificate_key", []string{d.Valor}) {
-		return dadoHumanoRedigivel{Valor: output.RedactedValue}
+		return redactableHumanData{Valor: output.RedactedValue}
 	}
 	return d
 }
 
-func (d dadoHumanoRedigivel) RenderHuman(w io.Writer) error {
+func (d redactableHumanData) RenderHuman(w io.Writer) error {
 	_, err := io.WriteString(w, d.Valor+"\n")
 	return err
 }
 
 // The auto format without a TTY has to become JSON: that is the agent reading
 // a pipe.
-func TestFormatAutoSemTTYProduzJSON(t *testing.T) {
+func TestFormatAutoWithoutTTYProducesJSON(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatAuto, IsTTY: false}
 
@@ -68,12 +68,12 @@ func TestFormatAutoSemTTYProduzJSON(t *testing.T) {
 
 // With a TTY, when the data implements HumanRenderable, RenderHuman is used
 // instead of serializing the struct as JSON.
-func TestFormatAutoComTTYUsaRenderHumanQuandoDisponivel(t *testing.T) {
+func TestFormatAutoWithTTYUsesRenderHumanWhenAvailable(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatAuto, IsTTY: true}
 
 	env := output.New("status")
-	env.Data = dadoHumano{}
+	env.Data = humanData{}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "human output")
@@ -81,12 +81,12 @@ func TestFormatAutoComTTYUsaRenderHumanQuandoDisponivel(t *testing.T) {
 
 // With a TTY but without RenderHuman on the data, the human format falls back
 // to indented JSON instead of printing the raw Go struct.
-func TestFormatHumanSemHumanRenderableCaiParaJSONIndentado(t *testing.T) {
+func TestFormatHumanWithoutHumanRenderableFallsBackToIndentedJSON(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true}
 
 	env := output.New("status")
-	env.Data = dadoNaoRedigivel{Valor: "abc"}
+	env.Data = nonRedactableData{Valor: "abc"}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "\"valor\": \"abc\"")
@@ -94,7 +94,7 @@ func TestFormatHumanSemHumanRenderableCaiParaJSONIndentado(t *testing.T) {
 
 // Without Data, the human format writes nothing beyond the diagnostics (the
 // Data == nil early return).
-func TestFormatHumanComDataNilNaoEscreveNada(t *testing.T) {
+func TestFormatHumanWithNilDataWritesNothing(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true}
 
@@ -104,7 +104,7 @@ func TestFormatHumanComDataNilNaoEscreveNada(t *testing.T) {
 }
 
 // The human format prints each diagnostic with its location.
-func TestFormatHumanImprimeDiagnosticos(t *testing.T) {
+func TestFormatHumanPrintsDiagnostics(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true}
 
@@ -123,7 +123,7 @@ func TestFormatHumanImprimeDiagnosticos(t *testing.T) {
 
 // A diagnostic with a file but no line must not print the fake coordinate
 // ":0:0" -- Line and Column are optional by design.
-func TestFormatHumanDiagnosticoComArquivoSemLinhaNaoImprimeZeroZero(t *testing.T) {
+func TestFormatHumanDiagnosticWithFileButNoLineDoesNotPrintZeroZero(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true}
 
@@ -143,7 +143,7 @@ func TestFormatHumanDiagnosticoComArquivoSemLinhaNaoImprimeZeroZero(t *testing.T
 // the secret, an agent reading the pipe cannot even ask for it. The point of
 // the gate is that the secret never reaches the output -- if the check were
 // moved after the switch, the buffer would no longer be empty here.
-func TestNoRedactEhRecusadoSemTTY(t *testing.T) {
+func TestNoRedactIsRefusedWithoutTTY(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, NoRedact: true}
 
@@ -154,7 +154,7 @@ func TestNoRedactEhRecusadoSemTTY(t *testing.T) {
 	require.Empty(t, buf.String())
 }
 
-func TestNoRedactEhAceitoComTTY(t *testing.T) {
+func TestNoRedactIsAcceptedWithTTY(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestNoRedactEhAceitoComTTY(t *testing.T) {
 	}
 
 	env := output.New("get")
-	env.Data = dadoRedigivel{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableData{Valor: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "/etc/ssl/priv.key")
@@ -173,7 +173,7 @@ func TestNoRedactEhAceitoComTTY(t *testing.T) {
 
 // Without --no-redact, the data goes through redaction before being
 // serialized.
-func TestRenderAplicaRedacaoNoDado(t *testing.T) {
+func TestRenderAppliesRedactionToData(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
 	require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestRenderAplicaRedacaoNoDado(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	env.Data = dadoRedigivel{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableData{Valor: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.NotContains(t, buf.String(), "/etc/ssl/priv.key")
@@ -193,7 +193,7 @@ func TestRenderAplicaRedacaoNoDado(t *testing.T) {
 // -- it guards against someone moving redaction inside renderJSON, a change
 // that would pass the whole JSON suite and leak the secret in the human
 // output.
-func TestRenderHumanAplicaRedacaoNoDado(t *testing.T) {
+func TestRenderHumanAppliesRedactionToData(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestRenderHumanAplicaRedacaoNoDado(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatHuman, IsTTY: true, Redact: set}
 
 	env := output.New("get")
-	env.Data = dadoHumanoRedigivel{Valor: "/etc/ssl/priv.key"}
+	env.Data = redactableHumanData{Valor: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.NotContains(t, buf.String(), "/etc/ssl/priv.key")
@@ -213,7 +213,7 @@ func TestRenderHumanAplicaRedacaoNoDado(t *testing.T) {
 // even with redaction rules active. It is the most likely failure mode when a
 // real tree (e.g. Task 13) gets plugged into Data without implementing the
 // interface.
-func TestRenderNaoRedigeDadoQueNaoImplementaRedactable(t *testing.T) {
+func TestRenderDoesNotRedactDataThatDoesNotImplementRedactable(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestRenderNaoRedigeDadoQueNaoImplementaRedactable(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	env.Data = dadoNaoRedigivel{Valor: "/etc/ssl/priv.key"}
+	env.Data = nonRedactableData{Valor: "/etc/ssl/priv.key"}
 	require.NoError(t, r.Render(env))
 
 	require.Contains(t, buf.String(), "/etc/ssl/priv.key")
@@ -229,7 +229,7 @@ func TestRenderNaoRedigeDadoQueNaoImplementaRedactable(t *testing.T) {
 
 // Render does not mutate the caller's envelope: the original Data stays
 // intact after the call, even when redaction swaps the serialized value.
-func TestRenderNaoMutaDataDoChamador(t *testing.T) {
+func TestRenderDoesNotMutateCallerData(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestRenderNaoMutaDataDoChamador(t *testing.T) {
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, Redact: set}
 
 	env := output.New("get")
-	original := dadoRedigivel{Valor: "/etc/ssl/priv.key"}
+	original := redactableData{Valor: "/etc/ssl/priv.key"}
 	env.Data = original
 	require.NoError(t, r.Render(env))
 
@@ -247,7 +247,7 @@ func TestRenderNaoMutaDataDoChamador(t *testing.T) {
 // A Format outside auto/json/human is a usage error, it never silently falls
 // back to JSON. That matters because Format usually comes from output.format
 // in the YAML configuration file, which is free-form string.
-func TestFormatInvalidoEhRecusado(t *testing.T) {
+func TestInvalidFormatIsRefused(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.Format("xml"), IsTTY: false}
 
@@ -260,18 +260,18 @@ func TestFormatInvalidoEhRecusado(t *testing.T) {
 
 // Quiet suppresses the success output but never the error one: an agent needs
 // to know what went wrong.
-func TestQuietSuprimeSucessoMasNaoErro(t *testing.T) {
-	var sucesso bytes.Buffer
-	r := &output.Renderer{Out: &sucesso, Format: output.FormatJSON, Quiet: true}
+func TestQuietSuppressesSuccessButNotError(t *testing.T) {
+	var success bytes.Buffer
+	r := &output.Renderer{Out: &success, Format: output.FormatJSON, Quiet: true}
 	require.NoError(t, r.Render(output.New("status")))
-	require.Empty(t, sucesso.String())
+	require.Empty(t, success.String())
 
-	var falha bytes.Buffer
-	r2 := &output.Renderer{Out: &falha, Format: output.FormatJSON, Quiet: true}
+	var failure bytes.Buffer
+	r2 := &output.Renderer{Out: &failure, Format: output.FormatJSON, Quiet: true}
 	env := output.New("test")
 	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityError, Message: "failed"})
 	require.NoError(t, r2.Render(env))
-	require.Contains(t, falha.String(), "failed")
+	require.Contains(t, failure.String(), "failed")
 }
 
 // --quiet suppresses success, never a warning. An ok=true envelope may carry
@@ -279,24 +279,24 @@ func TestQuietSuprimeSucessoMasNaoErro(t *testing.T) {
 // turned off); swallowing it makes the escape silent, which is what DR1
 // forbids. The pair of cases exists to prove the distinction: without a
 // warning it stays mute, with one it speaks.
-func TestQuietSuprimeSucessoMasNuncaAviso(t *testing.T) {
-	casos := []struct {
-		nome    string
+func TestQuietSuppressesSuccessButNeverWarning(t *testing.T) {
+	cases := []struct {
+		name    string
 		diags   []output.Diagnostic
-		emitido bool
+		emitted bool
 	}{
 		{"a clean success stays mute", nil, false},
 		{"info stays mute as well", []output.Diagnostic{{Severity: output.SeverityInfo, Code: "NGX-0212"}}, false},
 		{"a warning speaks", []output.Diagnostic{{Severity: output.SeverityWarning, Code: "NGX-0211"}}, true},
 		{"an error speaks", []output.Diagnostic{{Severity: output.SeverityError, Code: "NGX-0201"}}, true},
 	}
-	for _, c := range casos {
-		t.Run(c.nome, func(t *testing.T) {
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
 			r := &output.Renderer{Out: &out, Quiet: true, Format: output.FormatJSON}
 			env := &output.Envelope{OK: true, Command: "inspect", Diagnostics: c.diags}
 			require.NoError(t, r.Render(env))
-			if c.emitido {
+			if c.emitted {
 				require.NotEmpty(t, out.String(), "a suppressed warning is a nonexistent warning")
 			} else {
 				require.Empty(t, out.String())

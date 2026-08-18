@@ -15,64 +15,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// parDeChaves generates a minisign pair inside the test itself. No fixed key
+// keyPair generates a minisign pair inside the test itself. No fixed key
 // is versioned: a test key embedded in the repository becomes, sooner or
 // later, a key someone mistakes for the production one.
-func parDeChaves(t *testing.T) (minisign.PublicKey, minisign.PrivateKey) {
+func keyPair(t *testing.T) (minisign.PublicKey, minisign.PrivateKey) {
 	t.Helper()
 	pub, priv, err := minisign.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	return pub, priv
 }
 
-// textoDaChave returns the public key in the single-line format, which is how
+// keyText returns the public key in the single-line format, which is how
 // it goes into the binary via -ldflags.
-func textoDaChave(t *testing.T, pub minisign.PublicKey) string {
+func keyText(t *testing.T, pub minisign.PublicKey) string {
 	t.Helper()
 	return pub.String()
 }
 
-// checksumsPara assembles a checksums.txt in the goreleaser format: SHA256 in
+// checksumsFor assembles a checksums.txt in the goreleaser format: SHA256 in
 // hexadecimal, two spaces, the file name.
-func checksumsPara(arquivos map[string][]byte) []byte {
+func checksumsFor(files map[string][]byte) []byte {
 	var b bytes.Buffer
 	// The order does not matter to the parser, but iterating a map directly
 	// would leave the fixture unstable across runs.
-	for _, nome := range chavesOrdenadas(arquivos) {
-		soma := sha256.Sum256(arquivos[nome])
-		fmt.Fprintf(&b, "%s  %s\n", hex.EncodeToString(soma[:]), nome)
+	for _, name := range sortedKeys(files) {
+		sum := sha256.Sum256(files[name])
+		fmt.Fprintf(&b, "%s  %s\n", hex.EncodeToString(sum[:]), name)
 	}
 	return b.Bytes()
 }
 
-func chavesOrdenadas(m map[string][]byte) []string {
-	nomes := make([]string, 0, len(m))
+func sortedKeys(m map[string][]byte) []string {
+	names := make([]string, 0, len(m))
 	for k := range m {
-		nomes = append(nomes, k)
+		names = append(names, k)
 	}
-	for i := 1; i < len(nomes); i++ {
-		for j := i; j > 0 && nomes[j] < nomes[j-1]; j-- {
-			nomes[j], nomes[j-1] = nomes[j-1], nomes[j]
+	for i := 1; i < len(names); i++ {
+		for j := i; j > 0 && names[j] < names[j-1]; j-- {
+			names[j], names[j-1] = names[j-1], names[j]
 		}
 	}
-	return nomes
+	return names
 }
 
-// tarGzCom packs the files into a tar.gz, the way goreleaser does for Unix.
-func tarGzCom(t *testing.T, arquivos map[string][]byte) []byte {
+// tarGzWith packs the files into a tar.gz, the way goreleaser does for Unix.
+func tarGzWith(t *testing.T, files map[string][]byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	for _, nome := range chavesOrdenadas(arquivos) {
-		dados := arquivos[nome]
+	for _, name := range sortedKeys(files) {
+		data := files[name]
 		require.NoError(t, tw.WriteHeader(&tar.Header{
-			Name:     nome,
+			Name:     name,
 			Mode:     0o755,
-			Size:     int64(len(dados)),
+			Size:     int64(len(data)),
 			Typeflag: tar.TypeReg,
 		}))
-		_, err := tw.Write(dados)
+		_, err := tw.Write(data)
 		require.NoError(t, err)
 	}
 	require.NoError(t, tw.Close())
@@ -80,15 +80,15 @@ func tarGzCom(t *testing.T, arquivos map[string][]byte) []byte {
 	return buf.Bytes()
 }
 
-// zipCom packs the files into a zip, the way goreleaser does for Windows.
-func zipCom(t *testing.T, arquivos map[string][]byte) []byte {
+// zipWith packs the files into a zip, the way goreleaser does for Windows.
+func zipWith(t *testing.T, files map[string][]byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	for _, nome := range chavesOrdenadas(arquivos) {
-		w, err := zw.Create(nome)
+	for _, name := range sortedKeys(files) {
+		w, err := zw.Create(name)
 		require.NoError(t, err)
-		_, err = w.Write(arquivos[nome])
+		_, err = w.Write(files[name])
 		require.NoError(t, err)
 	}
 	require.NoError(t, zw.Close())

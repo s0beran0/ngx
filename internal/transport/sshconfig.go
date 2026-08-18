@@ -48,12 +48,12 @@ type SSHOptions struct {
 	Timeout         time.Duration
 }
 
-// posicaoDeErro matches the "(line, column): " prefix that
+// errorPositionRe matches the "(line, column): " prefix that
 // kevinburke/ssh_config puts in the message. The library formats the position
 // inside the error string and does not expose the Position in any public type:
 // recovering the exact place of the problem is only possible by re-reading the
 // message.
-var posicaoDeErro = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
+var errorPositionRe = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 
 // ResolverSSHConfig resolves the connection options for the requested host,
 // applying the DR2 precedence: an explicit flag beats the file, the file beats
@@ -74,7 +74,7 @@ var posicaoDeErro = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 // in silence.
 //
 // The list of diagnostics is never nil.
-func ResolverSSHConfig(flags SSHOptions, caminhoConfig string) (SSHOptions, []output.Diagnostic, error) {
+func ResolverSSHConfig(flags SSHOptions, configPath string) (SSHOptions, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	alias := strings.TrimSpace(flags.Host)
@@ -82,28 +82,28 @@ func ResolverSSHConfig(flags SSHOptions, caminhoConfig string) (SSHOptions, []ou
 		return SSHOptions{}, diags, output.Usage("no target host provided")
 	}
 
-	resolvido := flags
-	resolvido.Host = alias
+	resolved := flags
+	resolved.Host = alias
 
-	cfg, aviso := carregarSSHConfig(caminhoConfig)
-	if aviso != nil {
-		diags = append(diags, *aviso)
+	cfg, warning := loadSSHConfig(configPath)
+	if warning != nil {
+		diags = append(diags, *warning)
 	}
 
 	if cfg != nil {
-		diags = aplicarArquivo(&resolvido, cfg, alias, caminhoConfig, diags)
+		diags = applyFile(&resolved, cfg, alias, configPath, diags)
 	}
 
 	// Defaults: the last level of the precedence, applied over whatever is
 	// still empty after flags and file.
-	if resolvido.Port == 0 {
-		resolvido.Port = PortaSSHPadrao
+	if resolved.Port == 0 {
+		resolved.Port = PortaSSHPadrao
 	}
-	if resolvido.User == "" {
-		resolvido.User = usuarioCorrente()
+	if resolved.User == "" {
+		resolved.User = currentUser()
 	}
 
-	return resolvido, diags, nil
+	return resolved, diags, nil
 }
 
 // CaminhoSSHConfigPadrao returns ~/.ssh/config. filepath.Join uses the native
@@ -118,46 +118,46 @@ func CaminhoSSHConfigPadrao() (string, error) {
 	return filepath.Join(home, ".ssh", "config"), nil
 }
 
-// carregarSSHConfig reads and parses the file. It returns (nil, nil) when the
+// loadSSHConfig reads and parses the file. It returns (nil, nil) when the
 // file does not exist — absence is normal — and (nil, warning) when it exists
 // but cannot be read or parsed.
-func carregarSSHConfig(caminho string) (*ssh_config.Config, *output.Diagnostic) {
-	if caminho == "" {
+func loadSSHConfig(path string) (*ssh_config.Config, *output.Diagnostic) {
+	if path == "" {
 		return nil, nil
 	}
 
-	f, err := os.Open(caminho)
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		d := avisoSSHConfig(caminho, 0, 0, err.Error())
+		d := warnSSHConfig(path, 0, 0, err.Error())
 		return nil, &d
 	}
 	defer f.Close()
 
 	cfg, err := ssh_config.Decode(f)
 	if err != nil {
-		linha, coluna, motivo := posicaoDoErro(err)
-		d := avisoSSHConfig(caminho, linha, coluna, motivo)
+		line, column, reason := errorPosition(err)
+		d := warnSSHConfig(path, line, column, reason)
 		return nil, &d
 	}
 	return cfg, nil
 }
 
-// aplicarArquivo fills the fields the flag left empty with what the file says
+// applyFile fills the fields the flag left empty with what the file says
 // for that alias.
-func aplicarArquivo(
+func applyFile(
 	opts *SSHOptions,
 	cfg *ssh_config.Config,
-	alias, caminho string,
+	alias, path string,
 	diags []output.Diagnostic,
 ) []output.Diagnostic {
-	ler := func(chave string) string {
-		v, err := cfg.Get(alias, chave)
+	read := func(key string) string {
+		v, err := cfg.Get(alias, key)
 		if err != nil {
-			diags = append(diags, avisoSSHConfig(caminho, 0, 0,
-				fmt.Sprintf("could not read %s: %v", chave, err)))
+			diags = append(diags, warnSSHConfig(path, 0, 0,
+				fmt.Sprintf("could not read %s: %v", key, err)))
 			return ""
 		}
 		return strings.TrimSpace(v)
@@ -167,20 +167,20 @@ func aplicarArquivo(
 	// up in the file, and HostName is the translation of that alias into
 	// the real target. It is the same thing ssh does when `ssh web1`
 	// connects to 10.0.0.1.
-	if hostName := ler("HostName"); hostName != "" {
+	if hostName := read("HostName"); hostName != "" {
 		opts.Host = hostName
 	}
 
 	if opts.User == "" {
-		opts.User = ler("User")
+		opts.User = read("User")
 	}
 
 	if opts.Port == 0 {
-		if porta := ler("Port"); porta != "" {
-			n, err := strconv.Atoi(porta)
+		if port := read("Port"); port != "" {
+			n, err := strconv.Atoi(port)
 			if err != nil || n <= 0 || n > 65535 {
-				diags = append(diags, avisoSSHConfig(caminho, 0, 0,
-					fmt.Sprintf("Port %q is not a valid port number; using %d", porta, PortaSSHPadrao)))
+				diags = append(diags, warnSSHConfig(path, 0, 0,
+					fmt.Sprintf("Port %q is not a valid port number; using %d", port, PortaSSHPadrao)))
 			} else {
 				opts.Port = n
 			}
@@ -188,19 +188,19 @@ func aplicarArquivo(
 	}
 
 	if opts.KeyPath == "" {
-		if key := ler("IdentityFile"); key != "" {
-			opts.KeyPath = expandirTil(key)
+		if key := read("IdentityFile"); key != "" {
+			opts.KeyPath = expandTilde(key)
 		}
 	}
 
 	return diags
 }
 
-// avisoSSHConfig builds the DR7 diagnostic. The message says what was not read
+// warnSSHConfig builds the DR7 diagnostic. The message says what was not read
 // and what still holds, because a warning that only says "it failed" leads
 // whoever consumes the output to think the host was not in the file — and the
 // cause is another one.
-func avisoSSHConfig(caminho string, linha, coluna int, motivo string) output.Diagnostic {
+func warnSSHConfig(path string, line, column int, reason string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
 		Code:     CodigoAvisoSSHConfig,
@@ -208,63 +208,63 @@ func avisoSSHConfig(caminho string, linha, coluna int, motivo string) output.Dia
 			"%s could not be read (%s); the ssh_config resolution was skipped and only "+
 				"the explicit flags (--host, --user, --port, --key) and the defaults "+
 				"(port %d, current user) apply",
-			caminho, motivo, PortaSSHPadrao),
-		File:   caminho,
-		Line:   linha,
-		Column: coluna,
+			path, reason, PortaSSHPadrao),
+		File:   path,
+		Line:   line,
+		Column: column,
 	}
 }
 
-// posicaoDoErro splits the position from the message. An error with no
+// errorPosition splits the position from the message. An error with no
 // position returns zeros, and Diagnostic omits the fields.
-func posicaoDoErro(err error) (linha, coluna int, motivo string) {
+func errorPosition(err error) (line, column int, reason string) {
 	msg := err.Error()
-	m := posicaoDeErro.FindStringSubmatch(msg)
+	m := errorPositionRe.FindStringSubmatch(msg)
 	if m == nil {
 		return 0, 0, msg
 	}
-	linha, _ = strconv.Atoi(m[1])
-	coluna, _ = strconv.Atoi(m[2])
-	return linha, coluna, m[3]
+	line, _ = strconv.Atoi(m[1])
+	column, _ = strconv.Atoi(m[2])
+	return line, column, m[3]
 }
 
-// expandirTil resolves "~/" against the user's home directory. A tilde that
+// expandTilde resolves "~/" against the user's home directory. A tilde that
 // cannot be resolved is left as it is: it is better to return the literal
 // path, which fails visibly on open, than to invent a directory.
-func expandirTil(caminho string) string {
-	if caminho != "~" && !strings.HasPrefix(caminho, "~/") && !strings.HasPrefix(caminho, `~\`) {
-		return caminho
+func expandTilde(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
+		return path
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return caminho
+		return path
 	}
-	if caminho == "~" {
+	if path == "~" {
 		return home
 	}
-	return filepath.Join(home, filepath.FromSlash(caminho[2:]))
+	return filepath.Join(home, filepath.FromSlash(path[2:]))
 }
 
-// usuarioCorrente returns the OS user. os/user.Current works without cgo (Go
+// currentUser returns the OS user. os/user.Current works without cgo (Go
 // falls back to a pure reader of /etc/passwd), but it can fail in a container
 // with no user entry; there the environment variables are the last attempt.
-func usuarioCorrente() string {
+func currentUser() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
-		return nomeSemDominio(u.Username)
+		return nameWithoutDomain(u.Username)
 	}
 	for _, env := range []string{"USER", "USERNAME", "LOGNAME"} {
 		if v := os.Getenv(env); v != "" {
-			return nomeSemDominio(v)
+			return nameWithoutDomain(v)
 		}
 	}
 	return ""
 }
 
-// nomeSemDominio strips the domain prefix Windows puts in Username
+// nameWithoutDomain strips the domain prefix Windows puts in Username
 // ("DOMAIN\user"): SSH wants only the name.
-func nomeSemDominio(nome string) string {
-	if i := strings.LastIndex(nome, `\`); i >= 0 {
-		return nome[i+1:]
+func nameWithoutDomain(name string) string {
+	if i := strings.LastIndex(name, `\`); i >= 0 {
+		return name[i+1:]
 	}
-	return nome
+	return name
 }

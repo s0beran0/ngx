@@ -64,11 +64,11 @@ const (
 	EnvSocketSSHAgent = "SSH_AUTH_SOCK"
 )
 
-// errSSHAgentAusente marks the ssh-agent connection failures that are not an
+// errNoSSHAgent marks the ssh-agent connection failures that are not an
 // ngx error: there is no agent, or it does not answer. Having it as a sentinel
 // makes it explicit, in agent_unix.go and agent_windows.go, that the failure
 // path there is expected.
-var errSSHAgentAusente = errors.New("ssh-agent unavailable")
+var errNoSSHAgent = errors.New("ssh-agent unavailable")
 
 // Autenticacao is the list of methods ngx offers the server, in DR2 order:
 // ssh-agent, key file, password.
@@ -84,7 +84,7 @@ type Autenticacao struct {
 	Metodos []ssh.AuthMethod
 	Nomes   []string
 
-	fechar []func() error
+	closers []func() error
 }
 
 // Close releases the resources opened while assembling — today, the ssh-agent
@@ -94,26 +94,26 @@ func (a *Autenticacao) Close() error {
 	if a == nil {
 		return nil
 	}
-	var erros []error
-	for _, f := range a.fechar {
+	var errs []error
+	for _, f := range a.closers {
 		if err := f(); err != nil {
-			erros = append(erros, err)
+			errs = append(errs, err)
 		}
 	}
-	a.fechar = nil
-	return errors.Join(erros...)
+	a.closers = nil
+	return errors.Join(errs...)
 }
 
-// ambienteAuth gathers the system edges the assembly touches: the ssh-agent,
+// authEnv gathers the system edges the assembly touches: the ssh-agent,
 // the environment, and the terminal. They sit behind fields so that the tests
 // exercise the order of the methods with no socket, no real environment
 // variable and — what matters most — no path that could block waiting for
 // someone to type.
-type ambienteAuth struct {
-	conectarAgente  func() (net.Conn, error)
-	lerEnv          func(string) string
-	stdinEhTerminal func() bool
-	lerSegredo      func(prompt string) (string, error)
+type authEnv struct {
+	connectAgent    func() (net.Conn, error)
+	getenv          func(string) string
+	stdinIsTerminal func() bool
+	readSecret      func(prompt string) (string, error)
 	// home is injected so the test does not depend on the HOME of whoever
 	// runs the suite: the search for default keys reads ~/.ssh, and a test
 	// that could see the developer's real key would pass on their machine
@@ -121,12 +121,12 @@ type ambienteAuth struct {
 	home func() (string, error)
 }
 
-func ambienteAuthPadrao() ambienteAuth {
-	return ambienteAuth{
-		conectarAgente:  conectarSSHAgent,
-		lerEnv:          os.Getenv,
-		stdinEhTerminal: func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
-		lerSegredo:      lerSegredoDoTerminal,
+func defaultAuthEnv() authEnv {
+	return authEnv{
+		connectAgent:    connectSSHAgent,
+		getenv:          os.Getenv,
+		stdinIsTerminal: func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
+		readSecret:      readSecretFromTerminal,
 		home:            os.UserHomeDir,
 	}
 }
@@ -142,20 +142,20 @@ func ambienteAuthPadrao() ambienteAuth {
 //
 // The list of diagnostics is never nil.
 func MontarAutenticacao(opts SSHOptions) (*Autenticacao, []output.Diagnostic, error) {
-	return montarAutenticacao(opts, ambienteAuthPadrao())
+	return buildAuth(opts, defaultAuthEnv())
 }
 
-func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []output.Diagnostic, error) {
+func buildAuth(opts SSHOptions, env authEnv) (*Autenticacao, []output.Diagnostic, error) {
 	auth := &Autenticacao{Metodos: []ssh.AuthMethod{}, Nomes: []string{}}
 	diags := []output.Diagnostic{}
 
-	adicionar := func(nome string, metodo ssh.AuthMethod, diag *output.Diagnostic) {
+	add := func(name string, method ssh.AuthMethod, diag *output.Diagnostic) {
 		if diag != nil {
 			diags = append(diags, *diag)
 		}
-		if metodo != nil {
-			auth.Metodos = append(auth.Metodos, metodo)
-			auth.Nomes = append(auth.Nomes, nome)
+		if method != nil {
+			auth.Metodos = append(auth.Metodos, method)
+			auth.Nomes = append(auth.Nomes, name)
 		}
 	}
 
@@ -172,7 +172,7 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 	//
 	// Without --key the original order holds: the agent is preferable
 	// precisely because the private key is never read by ngx.
-	chaveExplicita := opts.KeyPath != ""
+	explicitKey := opts.KeyPath != ""
 
 	// ALL keys go into a SINGLE public key method, and the order inside it
 	// is what decides preference.
@@ -188,71 +188,71 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 	// then the ssh-agent, preferable because the private key is never read
 	// by us; and finally the default keys in ~/.ssh, which are what makes
 	// `ngx --host web1` work for whoever already has `ssh web1`.
-	assinantes := []func() ([]ssh.Signer, error){}
+	signerSources := []func() ([]ssh.Signer, error){}
 
-	if chaveExplicita {
-		metodo, diag := metodoChave(opts, amb)
+	if explicitKey {
+		method, diag := keyMethod(opts, env)
 		if diag != nil {
 			diags = append(diags, *diag)
 		}
-		if metodo != nil {
-			assinantes = append(assinantes, metodo)
+		if method != nil {
+			signerSources = append(signerSources, method)
 			auth.Nomes = append(auth.Nomes, MetodoChave)
 		}
 	}
 
-	if fonte, fechar, diag := assinantesDoAgente(amb); diag != nil || fonte != nil {
+	if source, closeFn, diag := agentSigners(env); diag != nil || source != nil {
 		if diag != nil {
 			diags = append(diags, *diag)
 		}
-		if fechar != nil {
-			auth.fechar = append(auth.fechar, fechar)
+		if closeFn != nil {
+			auth.closers = append(auth.closers, closeFn)
 		}
-		if fonte != nil {
-			assinantes = append(assinantes, fonte)
+		if source != nil {
+			signerSources = append(signerSources, source)
 			auth.Nomes = append(auth.Nomes, MetodoSSHAgent)
 		}
 	}
 
-	if !chaveExplicita {
-		metodo, diag := metodoChave(opts, amb)
+	if !explicitKey {
+		method, diag := keyMethod(opts, env)
 		if diag != nil {
 			diags = append(diags, *diag)
 		}
-		if metodo != nil {
-			assinantes = append(assinantes, metodo)
+		if method != nil {
+			signerSources = append(signerSources, method)
 			auth.Nomes = append(auth.Nomes, MetodoChave)
 		}
 	}
 
-	if len(assinantes) > 0 {
+	if len(signerSources) > 0 {
 		auth.Metodos = append(auth.Metodos, ssh.PublicKeysCallback(func() ([]ssh.Signer, error) {
-			todos := []ssh.Signer{}
-			for _, fonte := range assinantes {
-				ss, err := fonte()
+			all := []ssh.Signer{}
+			for _, source := range signerSources {
+				ss, err := source()
 				if err != nil {
 					// One source failing does not bring the others
 					// down: an ssh-agent that died halfway cannot
 					// keep the on-disk key from being offered.
 					continue
 				}
-				todos = append(todos, ss...)
+				all = append(all, ss...)
 			}
-			return todos, nil
+			return all, nil
 		}))
 	}
 
-	adicionar(MetodoSenha, metodoSenha(opts, amb), nil)
+	add(MetodoSenha, passwordMethod(opts, env), nil)
 
 	if len(auth.Metodos) == 0 {
 		_ = auth.Close()
-		return nil, diags, erroSemMetodoAuth(opts)
+		return nil, diags, noAuthMethodError(opts)
 	}
 
 	return auth, diags, nil
 }
 
-// assinantesDoAgente connects to the system ssh-agent and turns the client
+// agentSigners connects to the system ssh-agent and turns the client
 // into an authentication method.
 //
 // It uses PublicKeysCallback, not PublicKeys: with the callback the key list
@@ -262,17 +262,17 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 // Not reaching the ssh-agent returns (nil, nil, warning). That is the most
 // common case on a machine with no agent running and there is nothing wrong
 // with it.
-func assinantesDoAgente(amb ambienteAuth) (fonteAssinantes, func() error, *output.Diagnostic) {
-	conn, err := amb.conectarAgente()
+func agentSigners(env authEnv) (signerSource, func() error, *output.Diagnostic) {
+	conn, err := env.connectAgent()
 	if err != nil {
-		d := avisoSSHAgentAusente(err)
+		d := warnNoSSHAgent(err)
 		return nil, nil, &d
 	}
-	cliente := agent.NewClient(conn)
-	return cliente.Signers, conn.Close, nil
+	client := agent.NewClient(conn)
+	return client.Signers, conn.Close, nil
 }
 
-// metodoChave reads the private key pointed at by opts.KeyPath.
+// keyMethod reads the private key pointed at by opts.KeyPath.
 //
 // An encrypted key has three outcomes, in this order: the passphrase is in the
 // environment, and the key is unlocked right away; standard input is a
@@ -296,41 +296,41 @@ func assinantesDoAgente(amb ambienteAuth) (fonteAssinantes, func() error, *outpu
 // server refuses only spends one of the few MaxAuthTries attempts.
 var ChavesPadrao = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
 
-func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
+func keyMethod(opts SSHOptions, env authEnv) (signerSource, *output.Diagnostic) {
 	if opts.KeyPath == "" {
-		return metodoChavesPadrao(amb)
+		return defaultKeysMethod(env)
 	}
 
 	pem, err := os.ReadFile(opts.KeyPath)
 	if err != nil {
-		d := avisoChaveIndisponivel(opts.KeyPath, fmt.Sprintf("the file could not be read (%v)", err))
+		d := warnKeyUnavailable(opts.KeyPath, fmt.Sprintf("the file could not be read (%v)", err))
 		return nil, &d
 	}
 
 	signer, err := ssh.ParsePrivateKey(pem)
 	if err == nil {
-		return assinantesFixos(signer), nil
+		return fixedSigners(signer), nil
 	}
 
-	var faltaPassphrase *ssh.PassphraseMissingError
-	if !errors.As(err, &faltaPassphrase) {
-		d := avisoChaveIndisponivel(opts.KeyPath,
+	var missingPassphrase *ssh.PassphraseMissingError
+	if !errors.As(err, &missingPassphrase) {
+		d := warnKeyUnavailable(opts.KeyPath,
 			fmt.Sprintf("the file is not a valid private key (%v)", err))
 		return nil, &d
 	}
 
-	if passphrase := amb.lerEnv(EnvPassphraseChaveSSH); passphrase != "" {
+	if passphrase := env.getenv(EnvPassphraseChaveSSH); passphrase != "" {
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(pem, []byte(passphrase))
 		if err != nil {
-			d := avisoChaveIndisponivel(opts.KeyPath,
+			d := warnKeyUnavailable(opts.KeyPath,
 				fmt.Sprintf("the passphrase in %s does not unlock the key (%v)", EnvPassphraseChaveSSH, err))
 			return nil, &d
 		}
-		return assinantesFixos(signer), nil
+		return fixedSigners(signer), nil
 	}
 
-	if !amb.stdinEhTerminal() {
-		d := avisoChaveIndisponivel(opts.KeyPath, fmt.Sprintf(
+	if !env.stdinIsTerminal() {
+		d := warnKeyUnavailable(opts.KeyPath, fmt.Sprintf(
 			"the key is protected by a passphrase and standard input is not a terminal, "+
 				"so there is no way to ask; set %s in the environment to use this key",
 			EnvPassphraseChaveSSH))
@@ -338,7 +338,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 	}
 
 	return func() ([]ssh.Signer, error) {
-		passphrase, err := amb.lerSegredo(fmt.Sprintf("passphrase for key %s: ", opts.KeyPath))
+		passphrase, err := env.readSecret(fmt.Sprintf("passphrase for key %s: ", opts.KeyPath))
 		if err != nil {
 			return nil, fmt.Errorf("could not read the passphrase for %s: %w", opts.KeyPath, err)
 		}
@@ -350,7 +350,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 	}, nil
 }
 
-// metodoSenha is the last resort in the order.
+// passwordMethod is the last resort in the order.
 //
 // The password comes from opts.Password — filled in from the environment by
 // whoever assembled the options, never from a flag —, from the environment, or
@@ -360,45 +360,45 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 //
 // With no terminal and no secret in the environment the method simply does not
 // exist. There is never a block waiting for typing.
-func metodoSenha(opts SSHOptions, amb ambienteAuth) ssh.AuthMethod {
+func passwordMethod(opts SSHOptions, env authEnv) ssh.AuthMethod {
 	if opts.Password != "" {
 		return ssh.Password(opts.Password)
 	}
-	if senha := amb.lerEnv(EnvSenhaSSH); senha != "" {
-		return ssh.Password(senha)
+	if password := env.getenv(EnvSenhaSSH); password != "" {
+		return ssh.Password(password)
 	}
-	if !amb.stdinEhTerminal() {
+	if !env.stdinIsTerminal() {
 		return nil
 	}
 	return ssh.PasswordCallback(func() (string, error) {
-		return amb.lerSegredo(fmt.Sprintf("password for %s: ", destinoLegivel(opts)))
+		return env.readSecret(fmt.Sprintf("password for %s: ", readableTarget(opts)))
 	})
 }
 
-// lerSegredoDoTerminal asks for a secret with echo turned off.
+// readSecretFromTerminal asks for a secret with echo turned off.
 //
 // The prompt goes to stderr because stdout carries the JSON envelope: writing
 // the prompt text there would corrupt the output another program is parsing.
-func lerSegredoDoTerminal(prompt string) (string, error) {
+func readSecretFromTerminal(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		return "", fmt.Errorf("standard input is not a terminal; set %s in the environment", EnvSenhaSSH)
 	}
 	fmt.Fprint(os.Stderr, prompt)
-	segredo, err := term.ReadPassword(fd)
+	secret, err := term.ReadPassword(fd)
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return "", err
 	}
-	return string(segredo), nil
+	return string(secret), nil
 }
 
-// avisoSSHAgentAusente reports that the ssh-agent was left out.
+// warnNoSSHAgent reports that the ssh-agent was left out.
 //
 // Info severity, not warning: there is nothing to fix. The diagnostic exists
 // because the list of offered methods changed, and whoever reads the output
 // needs to be able to explain a refusal by the server without guessing.
-func avisoSSHAgentAusente(causa error) output.Diagnostic {
+func warnNoSSHAgent(cause error) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityInfo,
 		Code:     CodigoAvisoSSHAgentAusente,
@@ -406,27 +406,27 @@ func avisoSSHAgentAusente(causa error) output.Diagnostic {
 			"ssh-agent is not available (%v); ssh-agent authentication will not be tried. "+
 				"This is not an error: if you want to use it, start the ssh-agent and register "+
 				"the key with `ssh-add`",
-			causa),
+			cause),
 	}
 }
 
-// avisoChaveIndisponivel reports that the key pointed at did not enter the
+// warnKeyUnavailable reports that the key pointed at did not enter the
 // list.
 //
 // Warning severity, not info: someone pointed at a key — through --key or
 // through IdentityFile in ~/.ssh/config — and it is not being used. Falling
 // back to the password silently would make a wrong path look right.
-func avisoChaveIndisponivel(caminho, motivo string) output.Diagnostic {
+func warnKeyUnavailable(path, reason string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
 		Code:     CodigoAvisoChaveIndisponivel,
 		Message: fmt.Sprintf(
-			"the key %s will not be used for authentication: %s", caminho, motivo),
-		File: caminho,
+			"the key %s will not be used for authentication: %s", path, reason),
+		File: path,
 	}
 }
 
-// erroSemMetodoAuth is the only error of this stage: nothing was left to offer
+// noAuthMethodError is the only error of this stage: nothing was left to offer
 // the server.
 //
 // Getting here implies that standard input is not a terminal — with a terminal
@@ -434,7 +434,7 @@ func avisoChaveIndisponivel(caminho, motivo string) output.Diagnostic {
 // environment variable. This is exactly the case of an AI agent running ngx
 // under a pipe: instead of blocking on a keystroke that never comes, it gets
 // the instruction of what to set.
-func erroSemMetodoAuth(opts SSHOptions) error {
+func noAuthMethodError(opts SSHOptions) error {
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -448,14 +448,14 @@ func erroSemMetodoAuth(opts SSHOptions) error {
 					"using --key (or set %s); or put the password in %s. The password is never "+
 					"accepted by flag, because a flag shows up in `ps`, in the shell history "+
 					"and in the CI log",
-				destinoLegivel(opts), EnvPassphraseChaveSSH, EnvSenhaSSH),
+				readableTarget(opts), EnvPassphraseChaveSSH, EnvSenhaSSH),
 		},
 	}
 }
 
-// destinoLegivel describes the target the way the user recognizes it,
+// readableTarget describes the target the way the user recognizes it,
 // "user@host".
-func destinoLegivel(opts SSHOptions) string {
+func readableTarget(opts SSHOptions) string {
 	switch {
 	case opts.User != "" && opts.Host != "":
 		return opts.User + "@" + opts.Host
@@ -466,7 +466,7 @@ func destinoLegivel(opts SSHOptions) string {
 	}
 }
 
-// metodoChavesPadrao assembles a method with the default keys that exist on
+// defaultKeysMethod assembles a method with the default keys that exist on
 // disk and open without a passphrase.
 //
 // Without a passphrase on purpose: here the user did not ask for any key, so
@@ -474,18 +474,18 @@ func destinoLegivel(opts SSHOptions) string {
 // intrusive, and under a pipe — which is how an AI agent runs this — there is
 // nobody to ask. A key protected by a passphrase remains reachable through the
 // ssh-agent, which is the recommended path, or through an explicit --key.
-func metodoChavesPadrao(amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
-	if amb.home == nil {
+func defaultKeysMethod(env authEnv) (signerSource, *output.Diagnostic) {
+	if env.home == nil {
 		return nil, nil
 	}
-	home, err := amb.home()
+	home, err := env.home()
 	if err != nil {
 		return nil, nil
 	}
 
 	signers := []ssh.Signer{}
-	for _, nome := range ChavesPadrao {
-		pem, err := os.ReadFile(filepath.Join(home, ".ssh", nome))
+	for _, name := range ChavesPadrao {
+		pem, err := os.ReadFile(filepath.Join(home, ".ssh", name))
 		if err != nil {
 			continue
 		}
@@ -499,15 +499,15 @@ func metodoChavesPadrao(amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) 
 	if len(signers) == 0 {
 		return nil, nil
 	}
-	return assinantesFixos(signers...), nil
+	return fixedSigners(signers...), nil
 }
 
-// fonteAssinantes hands keys to the handshake. It is a function, and not a
+// signerSource hands keys to the handshake. It is a function, and not a
 // ready-made list, because the ssh-agent may gain keys after ngx started and
 // because a key with a passphrase should only ask for it if its turn actually
 // comes.
-type fonteAssinantes func() ([]ssh.Signer, error)
+type signerSource func() ([]ssh.Signer, error)
 
-func assinantesFixos(ss ...ssh.Signer) fonteAssinantes {
+func fixedSigners(ss ...ssh.Signer) signerSource {
 	return func() ([]ssh.Signer, error) { return ss, nil }
 }

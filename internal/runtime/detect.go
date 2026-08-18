@@ -52,9 +52,9 @@ type Info struct {
 }
 
 var (
-	reVersao    = regexp.MustCompile(`(?m)^nginx version:\s*(\S+)`)
+	reVersion   = regexp.MustCompile(`(?m)^nginx version:\s*(\S+)`)
 	reConfigure = regexp.MustCompile(`(?m)^configure arguments:\s*(.*)$`)
-	reModulo    = regexp.MustCompile(`^--with-([A-Za-z0-9_]+_module)(?:=(\S+))?$`)
+	reModule    = regexp.MustCompile(`^--with-([A-Za-z0-9_]+_module)(?:=(\S+))?$`)
 )
 
 // Detect runs `nginx -V` on the target and extracts what the binary says
@@ -64,34 +64,34 @@ var (
 // more than one integration. Here both channels are taken into account, so a
 // transport that merges the channels also works.
 func (r *Runtime) Detect(ctx context.Context) (*Info, error) {
-	e, err := r.executar(ctx, "-V")
+	e, err := r.run(ctx, "-V")
 	if err != nil {
 		return nil, err
 	}
 
-	texto := e.saida()
-	m := reVersao.FindStringSubmatch(texto)
+	text := e.combinedOutput()
+	m := reVersion.FindStringSubmatch(text)
 	if m == nil {
-		return nil, erroSaidaNaoReconhecida(r, e, "there is no \"nginx version:\" line")
+		return nil, unrecognizedOutputError(r, e, "there is no \"nginx version:\" line")
 	}
 
 	info := &Info{
-		Binary:           r.binario,
+		Binary:           r.binary,
 		Modules:          []string{},
 		DynamicAvailable: []string{},
 	}
 
-	produto, versao, achou := strings.Cut(m[1], "/")
-	if achou {
-		info.Version = versao
-		if produto != "nginx" {
-			info.Flavor = produto
+	product, version, found := strings.Cut(m[1], "/")
+	if found {
+		info.Version = version
+		if product != "nginx" {
+			info.Flavor = product
 		}
 	} else {
 		info.Version = m[1]
 	}
 
-	c := reConfigure.FindStringSubmatch(texto)
+	c := reConfigure.FindStringSubmatch(text)
 	if c == nil {
 		// A `-V` with no configure arguments is uncommon but not
 		// impossible (slim builds, wrappers). The version is already
@@ -100,8 +100,8 @@ func (r *Runtime) Detect(ctx context.Context) (*Info, error) {
 	}
 	info.ConfigureArgs = strings.TrimSpace(c[1])
 
-	for _, arg := range dividirArgumentos(info.ConfigureArgs) {
-		if mod := reModulo.FindStringSubmatch(arg); mod != nil {
+	for _, arg := range splitArguments(info.ConfigureArgs) {
+		if mod := reModule.FindStringSubmatch(arg); mod != nil {
 			if mod[2] == "dynamic" {
 				info.DynamicAvailable = append(info.DynamicAvailable, mod[1])
 			} else {
@@ -109,19 +109,19 @@ func (r *Runtime) Detect(ctx context.Context) (*Info, error) {
 			}
 			continue
 		}
-		chave, valor, temValor := strings.Cut(arg, "=")
-		if !temValor {
+		key, value, hasValue := strings.Cut(arg, "=")
+		if !hasValue {
 			continue
 		}
-		switch chave {
+		switch key {
 		case "--prefix":
-			info.Prefix = valor
+			info.Prefix = value
 		case "--conf-path":
-			info.MainConfig = valor
+			info.MainConfig = value
 		case "--pid-path":
-			info.PIDPath = valor
+			info.PIDPath = value
 		case "--modules-path":
-			info.ModulesPath = valor
+			info.ModulesPath = value
 		}
 	}
 
@@ -131,53 +131,53 @@ func (r *Runtime) Detect(ctx context.Context) (*Info, error) {
 	//
 	// The join uses path, not filepath: the path belongs to the target, and
 	// the target's separator has no relation to the system where ngx runs.
-	info.MainConfig = absolutoNoAlvo(info.Prefix, info.MainConfig)
-	info.PIDPath = absolutoNoAlvo(info.Prefix, info.PIDPath)
-	info.ModulesPath = absolutoNoAlvo(info.Prefix, info.ModulesPath)
+	info.MainConfig = absoluteOnTarget(info.Prefix, info.MainConfig)
+	info.PIDPath = absoluteOnTarget(info.Prefix, info.PIDPath)
+	info.ModulesPath = absoluteOnTarget(info.Prefix, info.ModulesPath)
 
 	return info, nil
 }
 
-func absolutoNoAlvo(prefixo, caminho string) string {
-	if caminho == "" || strings.HasPrefix(caminho, "/") || prefixo == "" {
-		return caminho
+func absoluteOnTarget(prefix, p string) string {
+	if p == "" || strings.HasPrefix(p, "/") || prefix == "" {
+		return p
 	}
-	return path.Join(prefixo, caminho)
+	return path.Join(prefix, p)
 }
 
-// dividirArgumentos splits the configure line into arguments while respecting
+// splitArguments splits the configure line into arguments while respecting
 // quotes. That is necessary: --with-cc-opt='-O2 -flto=auto' is a single
 // argument, and a naive split on spaces would produce junk like "-flto=auto'"
 // and would make the next --with-*_module be read out of context.
-func dividirArgumentos(linha string) []string {
+func splitArguments(line string) []string {
 	var args []string
-	var atual strings.Builder
-	var aspas rune
+	var current strings.Builder
+	var quote rune
 
-	descarrega := func() {
-		if atual.Len() > 0 {
-			args = append(args, atual.String())
-			atual.Reset()
+	flush := func() {
+		if current.Len() > 0 {
+			args = append(args, current.String())
+			current.Reset()
 		}
 	}
 
-	for _, r := range linha {
+	for _, r := range line {
 		switch {
-		case aspas != 0:
-			if r == aspas {
-				aspas = 0
+		case quote != 0:
+			if r == quote {
+				quote = 0
 			} else {
-				atual.WriteRune(r)
+				current.WriteRune(r)
 			}
 		case r == '\'' || r == '"':
-			aspas = r
+			quote = r
 		case r == ' ' || r == '\t':
-			descarrega()
+			flush()
 		default:
-			atual.WriteRune(r)
+			current.WriteRune(r)
 		}
 	}
-	descarrega()
+	flush()
 
 	if args == nil {
 		return []string{}

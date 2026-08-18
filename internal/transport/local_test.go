@@ -45,7 +45,7 @@ func helperArgv(t *testing.T, exitCode int, stdout, stderr string) []string {
 	return []string{self, "-test.run=^TestHelperProcess$"}
 }
 
-func TestLocalOpenArquivoExistente(t *testing.T) {
+func TestLocalOpenExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nginx.conf")
 	require.NoError(t, os.WriteFile(path, []byte("worker_processes 1;\n"), 0o600))
@@ -57,12 +57,12 @@ func TestLocalOpenArquivoExistente(t *testing.T) {
 	require.NoError(t, err)
 	defer f.Close()
 
-	conteudo, err := io.ReadAll(f)
+	content, err := io.ReadAll(f)
 	require.NoError(t, err)
-	assert.Equal(t, "worker_processes 1;\n", string(conteudo))
+	assert.Equal(t, "worker_processes 1;\n", string(content))
 }
 
-func TestLocalOpenArquivoInexistente(t *testing.T) {
+func TestLocalOpenMissingFile(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
@@ -72,7 +72,7 @@ func TestLocalOpenArquivoInexistente(t *testing.T) {
 	assert.Nil(t, f)
 }
 
-func TestLocalGlobCasando(t *testing.T) {
+func TestLocalGlobMatches(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.conf"), nil, 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.conf"), nil, 0o600))
@@ -89,7 +89,7 @@ func TestLocalGlobCasando(t *testing.T) {
 	}, matches)
 }
 
-func TestLocalGlobSemCorrespondencia(t *testing.T) {
+func TestLocalGlobNoMatches(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
@@ -100,7 +100,7 @@ func TestLocalGlobSemCorrespondencia(t *testing.T) {
 	assert.Empty(t, matches)
 }
 
-func TestLocalRunSaidaZero(t *testing.T) {
+func TestLocalRunExitZero(t *testing.T) {
 	argv := helperArgv(t, 0, "all good", "")
 
 	tr := Local()
@@ -113,10 +113,10 @@ func TestLocalRunSaidaZero(t *testing.T) {
 	assert.Empty(t, string(stderr))
 }
 
-// TestLocalRunSaidaDiferenteDeZero is the test that prevents the inversion: a
+// TestLocalRunNonZeroExit is the test that prevents the inversion: a
 // non-zero exit code is the command's result, with a nil err. If somebody
 // turns that into an error, this test fails.
-func TestLocalRunSaidaDiferenteDeZero(t *testing.T) {
+func TestLocalRunNonZeroExit(t *testing.T) {
 	argv := helperArgv(t, 3, "", "nginx: configuration file test failed")
 
 	tr := Local()
@@ -129,10 +129,10 @@ func TestLocalRunSaidaDiferenteDeZero(t *testing.T) {
 	assert.Equal(t, "nginx: configuration file test failed", string(stderr))
 }
 
-// TestLocalRunBinarioInexistente is the other half of the distinction: here
+// TestLocalRunMissingBinary is the other half of the distinction: here
 // there was no command at all, so err has to be non-nil. If somebody turns a
 // transport error into an exitCode, this test fails.
-func TestLocalRunBinarioInexistente(t *testing.T) {
+func TestLocalRunMissingBinary(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
@@ -141,7 +141,7 @@ func TestLocalRunBinarioInexistente(t *testing.T) {
 	require.Error(t, err, "a missing binary is a transport error, not the command's verdict")
 }
 
-func TestLocalRunArgvVazio(t *testing.T) {
+func TestLocalRunEmptyArgv(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
@@ -149,10 +149,10 @@ func TestLocalRunArgvVazio(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestLocalRunContextoCancelado makes sure cancellation becomes a transport
+// TestLocalRunCanceledContext makes sure cancellation becomes a transport
 // error, and not just any exit code: a process killed by a signal also returns
 // an ExitError.
-func TestLocalRunContextoCancelado(t *testing.T) {
+func TestLocalRunCanceledContext(t *testing.T) {
 	argv := helperArgv(t, 0, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,7 +170,7 @@ func TestLocalDescribe(t *testing.T) {
 	assert.Equal(t, "local", Local().Describe())
 }
 
-func TestLocalCloseIdempotente(t *testing.T) {
+func TestLocalCloseIsIdempotent(t *testing.T) {
 	tr := Local()
 	require.NoError(t, tr.Close())
 	require.NoError(t, tr.Close())

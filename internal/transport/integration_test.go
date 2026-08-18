@@ -38,21 +38,21 @@ import (
 )
 
 const (
-	hostBancada    = "127.0.0.1"
-	usuarioBancada = "ngxtest"
+	benchHost = "127.0.0.1"
+	benchUser = "ngxtest"
 	// The port is fixed in the Makefile so the test knows where to connect;
 	// whoever brought the bench up with another BANCADA_PORTA says so
 	// through the variable.
-	portaBancadaPadrao = 2222
-	envPortaBancada    = "NGX_BANCADA_PORTA"
+	defaultBenchPort = 2222
+	envBenchPort     = "NGX_BANCADA_PORTA"
 
 	// The effective configuration of the container has 130 files, checked
 	// during the image build itself. The tolerance matches the one in
 	// smoke.sh: the number of dynamic modules changes if an nginx-mod-*
 	// package comes in or goes out, and what the test proves is the order
 	// of magnitude, not the inventory.
-	arquivosDaBancada  = 130
-	toleranciaArquivos = 5
+	benchFileCount = 130
+	fileTolerance  = 5
 
 	// marcadorArmadilha exists only in the same-named file on the LOCAL
 	// disk (test/bancada/armadilha-local). Seeing it means the file from
@@ -61,59 +61,59 @@ const (
 	arquivoArmadilha  = "zz-armadilha-local.conf"
 
 	// The three secrets of the bench, in the three shapes it reproduces.
-	tokenDaBancada    = "Bearer ngx-bancada-token-4f3c9a1b2e"
-	htpasswdDaBancada = "/etc/nginx/secrets/htpasswd"
-	chaveTLSDaBancada = "/etc/nginx/secrets/tls.key"
+	benchToken    = "Bearer ngx-bancada-token-4f3c9a1b2e"
+	benchHtpasswd = "/etc/nginx/secrets/htpasswd"
+	benchTLSKey   = "/etc/nginx/secrets/tls.key"
 
 	// The remote fixture, written into the HOME of the bench user.
-	arquivoTopoRemoto  = "ngx-remoto.conf"
-	dirConfDRemoto     = "etc/nginx/conf.d"
-	arquivoDoContainer = "10-do-container.conf"
-	padraoConfD        = dirConfDRemoto + "/*.conf"
-	padraoModulos      = "/usr/share/nginx/modules/*.conf"
+	remoteTopFile  = "ngx-remoto.conf"
+	remoteConfDDir = "etc/nginx/conf.d"
+	containerFile  = "10-do-container.conf"
+	confDPattern   = remoteConfDDir + "/*.conf"
+	modulesPattern = "/usr/share/nginx/modules/*.conf"
 )
 
 // ---------------------------------------------------------------------------
 // Bancada
 // ---------------------------------------------------------------------------
 
-func raizDoRepo(t *testing.T) string {
+func repoRoot(t *testing.T) string {
 	t.Helper()
-	raiz, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
-	return raiz
+	return root
 }
 
-func portaDaBancada(t *testing.T) int {
+func benchPort(t *testing.T) int {
 	t.Helper()
-	valor := os.Getenv(envPortaBancada)
-	if valor == "" {
-		return portaBancadaPadrao
+	value := os.Getenv(envBenchPort)
+	if value == "" {
+		return defaultBenchPort
 	}
-	porta, err := strconv.Atoi(valor)
-	require.NoErrorf(t, err, "%s=%q is not a port number", envPortaBancada, valor)
-	return porta
+	port, err := strconv.Atoi(value)
+	require.NoErrorf(t, err, "%s=%q is not a port number", envBenchPort, value)
+	return port
 }
 
-// exigirBancada skips the test, instead of failing it, when the bench is not
+// requireBench skips the test, instead of failing it, when the bench is not
 // running: with no Docker the remote path cannot be exercised, and a failure
 // there would say nothing about ngx.
-func exigirBancada(t *testing.T) (chave string, porta int) {
+func requireBench(t *testing.T) (key string, port int) {
 	t.Helper()
 
-	chave = filepath.Join(raizDoRepo(t), "test", "bancada", ".chave", "id_ed25519")
-	porta = portaDaBancada(t)
+	key = filepath.Join(repoRoot(t), "test", "bancada", ".chave", "id_ed25519")
+	port = benchPort(t)
 
-	if _, err := os.Stat(chave); err != nil {
+	if _, err := os.Stat(key); err != nil {
 		t.Skipf("bench not running: the test key %s does not exist. "+
-			"Run `make bancada-up` (needs Docker).", chave)
+			"Run `make bancada-up` (needs Docker).", key)
 	}
 
-	endereco := net.JoinHostPort(hostBancada, strconv.Itoa(porta))
-	conn, err := net.DialTimeout("tcp", endereco, 2*time.Second)
+	address := net.JoinHostPort(benchHost, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
 		t.Skipf("bench not running: nothing listens on %s (%v). "+
-			"Run `make bancada-up` (needs Docker).", endereco, err)
+			"Run `make bancada-up` (needs Docker).", address, err)
 	}
 	_ = conn.Close()
 
@@ -124,63 +124,63 @@ func exigirBancada(t *testing.T) (chave string, porta int) {
 	// exercise is the key one.
 	t.Setenv(transport.EnvSocketSSHAgent, "")
 
-	return chave, porta
+	return key, port
 }
 
-func opcoesDaBancada(chave string, porta int, knownHosts string) transport.SSHOptions {
+func benchOptions(key string, port int, knownHosts string) transport.SSHOptions {
 	return transport.SSHOptions{
-		Host:           hostBancada,
-		Port:           porta,
-		User:           usuarioBancada,
-		KeyPath:        chave,
+		Host:           benchHost,
+		Port:           port,
+		User:           benchUser,
+		KeyPath:        key,
 		KnownHostsPath: knownHosts,
 		Timeout:        20 * time.Second,
 	}
 }
 
-// prefixoDaLinhaKnownHosts is what the unknown-host message writes right
+// knownHostsLinePrefix is what the unknown-host message writes right
 // before the line that is ready for known_hosts.
-const prefixoDaLinhaKnownHosts = "append the line to the file: "
+const knownHostsLinePrefix = "append the line to the file: "
 
-func linhaDoKnownHosts(t *testing.T, err error) string {
+func knownHostsLine(t *testing.T, err error) string {
 	t.Helper()
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
 
-	_, linha, achou := strings.Cut(e.Diag.Message, prefixoDaLinhaKnownHosts)
-	require.Truef(t, achou,
+	_, line, found := strings.Cut(e.Diag.Message, knownHostsLinePrefix)
+	require.Truef(t, found,
 		"the unknown-host message did not carry the known_hosts line: %s", e.Diag.Message)
-	return strings.TrimSpace(linha)
+	return strings.TrimSpace(line)
 }
 
-// knownHostsAprendido records the bench host key in a temporary known_hosts,
+// learnedKnownHosts records the bench host key in a temporary known_hosts,
 // learning it from the first-access refusal itself.
 //
 // No test here uses --insecure-host-key: they all connect with real host key
 // verification, which is how ngx runs in production.
-func knownHostsAprendido(t *testing.T, chave string, porta int) string {
+func learnedKnownHosts(t *testing.T, key string, port int) string {
 	t.Helper()
 
-	caminho := filepath.Join(t.TempDir(), "known_hosts")
-	require.NoError(t, os.WriteFile(caminho, nil, 0o600))
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
 
-	tr, _, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, caminho))
+	tr, _, err := transport.SSHComDiagnosticos(benchOptions(key, port, path))
 	if err == nil {
 		_ = tr.Close()
 		t.Fatal("the connection was accepted with an empty known_hosts: an unknown host has to be refused")
 	}
 
-	require.NoError(t, os.WriteFile(caminho, []byte(linhaDoKnownHosts(t, err)+"\n"), 0o600))
-	return caminho
+	require.NoError(t, os.WriteFile(path, []byte(knownHostsLine(t, err)+"\n"), 0o600))
+	return path
 }
 
-func conectarNaBancada(t *testing.T) transport.Transport {
+func connectToBench(t *testing.T) transport.Transport {
 	t.Helper()
 
-	chave, porta := exigirBancada(t)
+	key, port := requireBench(t)
 	tr, diags, err := transport.SSHComDiagnosticos(
-		opcoesDaBancada(chave, porta, knownHostsAprendido(t, chave, porta)))
+		benchOptions(key, port, learnedKnownHosts(t, key, port)))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tr.Close() })
 
@@ -202,11 +202,11 @@ func conectarNaBancada(t *testing.T) transport.Transport {
 // directory of the top file, and is therefore the one the local-disk trap
 // competes for), an absolute wildcard over real container files, and the three
 // secret shapes of the bench.
-const topoRemoto = `# Fixture of the ngx integration test.
+const remoteTop = `# Fixture of the ngx integration test.
 
 # Absolute wildcard: four real container files, from the nginx-mod-* packages.
 # They do not exist on the disk of whoever runs the test.
-include ` + padraoModulos + `;
+include ` + modulesPattern + `;
 
 events {
     worker_connections 1024;
@@ -215,11 +215,11 @@ events {
 http {
     # Relative wildcard, resolved against the directory of the top file (the
     # remote HOME). On the local disk, the same pattern hits the trap.
-    include ` + padraoConfD + `;
+    include ` + confDPattern + `;
 }
 `
 
-const confDoContainer = `# MARCADOR-DO-CONTAINER
+const containerConf = `# MARCADOR-DO-CONTAINER
 #
 # The three secret shapes are the same as in the real bench configuration
 # (test/bancada/gerar-config.sh).
@@ -229,9 +229,9 @@ server {
 
     location / {
         auth_basic "area restrita da bancada";
-        auth_basic_user_file ` + htpasswdDaBancada + `;
+        auth_basic_user_file ` + benchHtpasswd + `;
 
-        proxy_set_header Authorization "` + tokenDaBancada + `";
+        proxy_set_header Authorization "` + benchToken + `";
         proxy_pass http://127.0.0.1:9000;
     }
 }
@@ -241,7 +241,7 @@ server {
     server_name tls.bancada.local;
 
     ssl_certificate     /etc/nginx/secrets/tls.crt;
-    ssl_certificate_key ` + chaveTLSDaBancada + `;
+    ssl_certificate_key ` + benchTLSKey + `;
 
     location / {
         return 200 "tls da bancada\n";
@@ -249,11 +249,11 @@ server {
 }
 `
 
-// montarFixtureRemota writes the fixture into the container HOME and removes
+// setupRemoteFixture writes the fixture into the container HOME and removes
 // it at the end. The `sh -c` is here, in the test, and not in ngx: ngx never
 // assembles a shell line, and what it runs on the target is still explicit
 // argv.
-func montarFixtureRemota(t *testing.T, tr transport.Transport) {
+func setupRemoteFixture(t *testing.T, tr transport.Transport) {
 	t.Helper()
 
 	script := fmt.Sprintf(`set -e
@@ -265,31 +265,31 @@ FIM
 cat > "$HOME/%[2]s/%[4]s" <<'FIM'
 %[5]s
 FIM
-`, arquivoTopoRemoto, dirConfDRemoto, topoRemoto, arquivoDoContainer, confDoContainer)
+`, remoteTopFile, remoteConfDDir, remoteTop, containerFile, containerConf)
 
-	rodar(t, tr, script)
+	run(t, tr, script)
 	t.Cleanup(func() {
 		_, _, _, _ = tr.Run(context.Background(),
-			[]string{"sh", "-c", fmt.Sprintf(`rm -rf "$HOME/etc" "$HOME/%s"`, arquivoTopoRemoto)})
+			[]string{"sh", "-c", fmt.Sprintf(`rm -rf "$HOME/etc" "$HOME/%s"`, remoteTopFile)})
 	})
 }
 
-func rodar(t *testing.T, tr transport.Transport, script string) {
+func run(t *testing.T, tr transport.Transport, script string) {
 	t.Helper()
-	ctx, cancelar := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelar()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	stdout, stderr, saida, err := tr.Run(ctx, []string{"sh", "-c", script})
+	stdout, stderr, exitCode, err := tr.Run(ctx, []string{"sh", "-c", script})
 	require.NoError(t, err)
-	require.Zerof(t, saida, "setting up the remote fixture failed: %s %s", stdout, stderr)
+	require.Zerof(t, exitCode, "setting up the remote fixture failed: %s %s", stdout, stderr)
 }
 
-func caminhosDaArvore(t *config.Tree) []string {
-	caminhos := make([]string, 0, len(t.Files))
+func treePaths(t *config.Tree) []string {
+	paths := make([]string, 0, len(t.Files))
 	for _, f := range t.Files {
-		caminhos = append(caminhos, f.Path)
+		paths = append(paths, f.Path)
 	}
-	return caminhos
+	return paths
 }
 
 // ---------------------------------------------------------------------------
@@ -306,43 +306,43 @@ func caminhosDaArvore(t *config.Tree) []string {
 // pattern does match the trap locally (otherwise the test would pass
 // vacuously), and that the tree read from the bench has the container file and
 // no trace of the trap.
-func TestGlobResolveOsArquivosDoContainerENaoOsDoDiscoLocal(t *testing.T) {
-	armadilha := filepath.Join(raizDoRepo(t), "test", "bancada", "armadilha-local")
+func TestGlobResolvesContainerFilesNotLocalDiskFiles(t *testing.T) {
+	armadilha := filepath.Join(repoRoot(t), "test", "bancada", "armadilha-local")
 
-	tr := conectarNaBancada(t)
-	montarFixtureRemota(t, tr)
+	tr := connectToBench(t)
+	setupRemoteFixture(t, tr)
 
 	t.Chdir(armadilha)
 
-	locais, err := transport.Local().Glob(padraoConfD)
+	localMatches, err := transport.Local().Glob(confDPattern)
 	require.NoError(t, err)
-	require.Containsf(t, locais, filepath.Join(dirConfDRemoto, arquivoArmadilha),
+	require.Containsf(t, localMatches, filepath.Join(remoteConfDDir, arquivoArmadilha),
 		"the local trap is not in place: %s should match %s from %s",
-		padraoConfD, arquivoArmadilha, armadilha)
+		confDPattern, arquivoArmadilha, armadilha)
 
-	arvore, err := config.Parse(config.ParseOptions{
-		Path: arquivoTopoRemoto,
+	tree, err := config.Parse(config.ParseOptions{
+		Path: remoteTopFile,
 		Open: tr.Open,
 		Glob: tr.Glob,
 	})
 	require.NoError(t, err)
 
-	caminhos := caminhosDaArvore(arvore)
-	require.Contains(t, caminhos, dirConfDRemoto+"/"+arquivoDoContainer,
+	paths := treePaths(tree)
+	require.Contains(t, paths, remoteConfDDir+"/"+containerFile,
 		"the relative wildcard did not bring in the container file")
 
-	modulos := 0
-	for _, f := range arvore.Files {
+	modules := 0
+	for _, f := range tree.Files {
 		require.NotContainsf(t, f.Path, "armadilha",
 			"a file from the local disk got into the tree read from the bench: %s", f.Path)
 		require.NotContainsf(t, string(f.Source), marcadorArmadilha,
 			"the local trap marker leaked into the tree, coming from %s", f.Path)
 		if strings.HasPrefix(f.Path, "/usr/share/nginx/modules/") {
-			modulos++
+			modules++
 		}
 	}
-	require.Positive(t, modulos, "the absolute wildcard brought in no container module")
-	require.Contains(t, caminhos, arquivoTopoRemoto)
+	require.Positive(t, modules, "the absolute wildcard brought in no container module")
+	require.Contains(t, paths, remoteTopFile)
 }
 
 // ---------------------------------------------------------------------------
@@ -353,39 +353,39 @@ func TestGlobResolveOsArquivosDoContainerENaoOsDoDiscoLocal(t *testing.T) {
 // /etc/nginx is 0700 root:root, so the SFTP read (the inspect path) stops at
 // the first file. This test is therefore the other half of the pair with the
 // privilege one below: with --sudo the dump exists and it is the container's.
-func TestDumpRemotoComSudoDevolveAConfiguracaoEfetivaDoContainer(t *testing.T) {
-	tr := conectarNaBancada(t)
+func TestRemoteDumpWithSudoReturnsContainerEffectiveConfig(t *testing.T) {
+	tr := connectToBench(t)
 
-	ctx, cancelar := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancelar()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	dump, err := runtime.New(tr, runtime.ComSudo(true)).DumpConfig(ctx)
 	require.NoError(t, err)
 	require.True(t, dump.OK)
 	require.Contains(t, dump.ConfigFile, "/etc/nginx/nginx.conf")
-	require.InDeltaf(t, arquivosDaBancada, len(dump.Files), toleranciaArquivos,
+	require.InDeltaf(t, benchFileCount, len(dump.Files), fileTolerance,
 		"the effective configuration of the container has %d files; the dump brought %d",
-		arquivosDaBancada, len(dump.Files))
+		benchFileCount, len(dump.Files))
 
 	// The three bench wildcards resolved inside the container.
-	porPrefixo := map[string]int{
+	byPrefix := map[string]int{
 		"/etc/nginx/conf.d/":        0,
 		"/etc/nginx/default.d/":     0,
 		"/usr/share/nginx/modules/": 0,
 	}
 	for _, f := range dump.Files {
-		for prefixo := range porPrefixo {
-			if strings.HasPrefix(f.Path, prefixo) {
-				porPrefixo[prefixo]++
+		for prefix := range byPrefix {
+			if strings.HasPrefix(f.Path, prefix) {
+				byPrefix[prefix]++
 			}
 		}
 		require.NotContainsf(t, f.Content, marcadorArmadilha,
 			"the local trap marker showed up in the container dump, in %s", f.Path)
 	}
-	for prefixo, n := range porPrefixo {
-		require.Positivef(t, n, "no file came from %s", prefixo)
+	for prefix, n := range byPrefix {
+		require.Positivef(t, n, "no file came from %s", prefix)
 	}
-	require.Greater(t, porPrefixo["/etc/nginx/conf.d/"], 100,
+	require.Greater(t, byPrefix["/etc/nginx/conf.d/"], 100,
 		"conf.d is the big directory of the bench")
 }
 
@@ -397,20 +397,20 @@ func TestDumpRemotoComSudoDevolveAConfiguracaoEfetivaDoContainer(t *testing.T) {
 // changed key is a possible attack. Mixing them up is the dangerous defect —
 // whoever reads "the key changed" on a first access learns to ignore the
 // warning that will one day matter for real.
-func TestHostDesconhecidoEhRecusadoAntesDeEntrarNoKnownHosts(t *testing.T) {
-	chave, porta := exigirBancada(t)
+func TestUnknownHostIsRefusedBeforeEnteringKnownHosts(t *testing.T) {
+	key, port := requireBench(t)
 
-	caminho := filepath.Join(t.TempDir(), "known_hosts")
-	require.NoError(t, os.WriteFile(caminho, nil, 0o600))
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
 
-	tr, _, erroPrimeiroAcesso := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, caminho))
-	if erroPrimeiroAcesso == nil {
+	tr, _, firstAccessErr := transport.SSHComDiagnosticos(benchOptions(key, port, path))
+	if firstAccessErr == nil {
 		_ = tr.Close()
 		t.Fatal("the connection was accepted with an empty known_hosts")
 	}
 
 	var e *output.Error
-	require.ErrorAs(t, erroPrimeiroAcesso, &e)
+	require.ErrorAs(t, firstAccessErr, &e)
 	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
 	require.NotEqual(t, transport.CodigoHostKeyAlterada, e.Diag.Code)
 
@@ -419,23 +419,23 @@ func TestHostDesconhecidoEhRecusadoAntesDeEntrarNoKnownHosts(t *testing.T) {
 	require.Contains(t, msg, "first access")
 	require.NotContains(t, msg, "CHANGED")
 	require.NotContains(t, msg, "attack")
-	require.Equal(t, caminho, e.Diag.File)
+	require.Equal(t, path, e.Diag.File)
 
 	// ngx does not learn the key on its own: the operator is who records it.
-	conteudo, err := os.ReadFile(caminho)
+	content, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Empty(t, conteudo, "known_hosts was written by ngx")
+	require.Empty(t, content, "known_hosts was written by ngx")
 
 	// And with the key recorded the same connection goes through — the
 	// refusal came from the verification, not from the credential.
-	linha := linhaDoKnownHosts(t, erroPrimeiroAcesso)
-	require.NoError(t, os.WriteFile(caminho, []byte(linha+"\n"), 0o600))
+	line := knownHostsLine(t, firstAccessErr)
+	require.NoError(t, os.WriteFile(path, []byte(line+"\n"), 0o600))
 
-	tr, diags, err := transport.SSHComDiagnosticos(opcoesDaBancada(chave, porta, caminho))
+	tr, diags, err := transport.SSHComDiagnosticos(benchOptions(key, port, path))
 	require.NoError(t, err)
 	defer func() { _ = tr.Close() }()
 
-	require.Equal(t, fmt.Sprintf("ssh://%s@%s:%d", usuarioBancada, hostBancada, porta), tr.Describe())
+	require.Equal(t, fmt.Sprintf("ssh://%s@%s:%d", benchUser, benchHost, port), tr.Describe())
 	for _, d := range diags {
 		require.NotEqual(t, transport.CodigoAvisoHostKeyInsegura, d.Code)
 	}
@@ -448,11 +448,11 @@ func TestHostDesconhecidoEhRecusadoAntesDeEntrarNoKnownHosts(t *testing.T) {
 // The bench was built with this trap: `nginx -T` fails for the ordinary user
 // and passwordless sudo does exist, restricted to the nginx binary. The path
 // that "just works" would be to escalate silently; ngx reports and stops.
-func TestSemSudoONgxReportaAExigenciaDePrivilegioENaoEscalaSozinho(t *testing.T) {
-	tr := conectarNaBancada(t)
+func TestWithoutSudoNgxReportsPrivilegeRequirementAndDoesNotEscalate(t *testing.T) {
+	tr := connectToBench(t)
 
-	ctx, cancelar := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancelar()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	dump, err := runtime.New(tr).DumpConfig(ctx)
 	require.Nil(t, dump, "with no privilege there is no dump: an unavailable field is omitted")
@@ -466,7 +466,7 @@ func TestSemSudoONgxReportaAExigenciaDePrivilegioENaoEscalaSozinho(t *testing.T)
 	require.Contains(t, msg, "`nginx -T`", "the command that ran carried no sudo")
 	require.Contains(t, msg, "--sudo")
 	require.Contains(t, msg, "sudo -n nginx -T", "the message has to say what the privileged command is")
-	require.NotContains(t, msg, tokenDaBancada)
+	require.NotContains(t, msg, benchToken)
 
 	// The same call, with --sudo, works: the bench allows passwordless sudo
 	// for nginx. That is, the refusal above was a decision by ngx, not a
@@ -484,23 +484,23 @@ func TestSemSudoONgxReportaAExigenciaDePrivilegioENaoEscalaSozinho(t *testing.T)
 // What is proved here is that the secret IS in the configuration read from the
 // container — which is what makes the CLI redaction test (internal/cli) a real
 // proof, and not a proof over an empty configuration.
-func TestOsTresSegredosEstaoNaConfiguracaoLidaDaBancada(t *testing.T) {
-	tr := conectarNaBancada(t)
-	montarFixtureRemota(t, tr)
+func TestTheThreeSecretsAreInTheConfigReadFromTheBench(t *testing.T) {
+	tr := connectToBench(t)
+	setupRemoteFixture(t, tr)
 
-	arvore, err := config.Parse(config.ParseOptions{
-		Path: arquivoTopoRemoto,
+	tree, err := config.Parse(config.ParseOptions{
+		Path: remoteTopFile,
 		Open: tr.Open,
 		Glob: tr.Glob,
 	})
 	require.NoError(t, err)
 
-	var texto strings.Builder
-	for _, f := range arvore.Files {
-		texto.Write(f.Source)
+	var text strings.Builder
+	for _, f := range tree.Files {
+		text.Write(f.Source)
 	}
-	for _, segredo := range []string{tokenDaBancada, htpasswdDaBancada, chaveTLSDaBancada} {
-		require.Containsf(t, texto.String(), segredo,
-			"the configuration read from the bench does not have the secret %q", segredo)
+	for _, secret := range []string{benchToken, benchHtpasswd, benchTLSKey} {
+		require.Containsf(t, text.String(), secret,
+			"the configuration read from the bench does not have the secret %q", secret)
 	}
 }

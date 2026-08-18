@@ -148,13 +148,13 @@ type Resultado struct {
 // function the `ngx update` command calls; it prints nothing and picks no
 // exit code.
 func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
-	canal := opts.Canal
-	if canal == "" {
-		canal = ChannelStable
+	channel := opts.Canal
+	if channel == "" {
+		channel = ChannelStable
 	}
-	if canal != ChannelStable && canal != ChannelBeta {
+	if channel != ChannelStable && channel != ChannelBeta {
 		return nil, output.Usage(
-			"unknown channel %q: the valid channels are \"stable\" and \"beta\"", canal)
+			"unknown channel %q: the valid channels are \"stable\" and \"beta\"", channel)
 	}
 
 	cli := opts.Cliente
@@ -162,20 +162,20 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		cli = NovoCliente(0)
 	}
 
-	chave := opts.ChavePublicaOverride
-	if chave == "" {
-		chave = ChavePublica
+	key := opts.ChavePublicaOverride
+	if key == "" {
+		key = ChavePublica
 	}
 	// The key is checked BEFORE any download: a binary that cannot verify
 	// anything should not even start downloading. Only --check escapes,
 	// because it swaps no binary at all.
 	if !opts.SomenteVerificar {
-		if err := validarChave(chave); err != nil {
+		if err := validateKey(key); err != nil {
 			return nil, err
 		}
 	}
 
-	rel, err := resolverRelease(ctx, cli, canal, opts.Versao)
+	rel, err := resolveRelease(ctx, cli, channel, opts.Versao)
 	if err != nil {
 		return nil, err
 	}
@@ -183,85 +183,85 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	res := &Resultado{
 		VersaoAtual:  opts.VersaoAtual,
 		VersaoRemota: rel.Version,
-		Canal:        canal,
+		Canal:        channel,
 	}
 
-	explicita := opts.Versao != ""
-	res.Disponivel = maisNova(rel.Version, opts.VersaoAtual)
+	explicit := opts.Versao != ""
+	res.Disponivel = newerThan(rel.Version, opts.VersaoAtual)
 
 	if opts.SomenteVerificar {
 		return res, nil
 	}
 
-	if !explicita {
+	if !explicit {
 		// Without --version, it only moves forward. Never go back a
 		// version by accident: if the channel's release is older (or
 		// equal), the update is a no-op.
 		if !res.Disponivel {
 			return res, nil
 		}
-	} else if mesmaVersao(rel.Version, opts.VersaoAtual) {
+	} else if sameVersion(rel.Version, opts.VersaoAtual) {
 		// --version pointing at the already installed version: nothing to
 		// do, and it is not an error.
 		return res, nil
 	}
 
-	caminho := opts.CaminhoBinario
-	if caminho == "" {
-		caminho, err = os.Executable()
+	path := opts.CaminhoBinario
+	if path == "" {
+		path, err = os.Executable()
 		if err != nil {
 			return nil, output.Internal(err,
 				"could not find the path of our own binary in order to replace it")
 		}
-		if resolvido, errLink := filepath.EvalSymlinks(caminho); errLink == nil {
-			caminho = resolvido
+		if resolved, errLink := filepath.EvalSymlinks(path); errLink == nil {
+			path = resolved
 		}
 	}
 
-	so, arch := opts.SO, opts.Arch
-	if so == "" {
-		so = runtime.GOOS
+	goos, goarch := opts.SO, opts.Arch
+	if goos == "" {
+		goos = runtime.GOOS
 	}
-	if arch == "" {
-		arch = runtime.GOARCH
-	}
-
-	artefato, err := rel.AssetDaPlataforma(so, arch)
-	if err != nil {
-		return nil, err
-	}
-	somas, err := rel.AssetPorNome(NomeChecksums)
-	if err != nil {
-		return nil, err
-	}
-	assinatura, err := rel.AssetPorNome(NomeAssinatura)
-	if err != nil {
-		return nil, err
+	if goarch == "" {
+		goarch = runtime.GOARCH
 	}
 
-	dadosArtefato, err := cli.Baixar(ctx, artefato.URL)
+	artifact, err := rel.AssetDaPlataforma(goos, goarch)
 	if err != nil {
 		return nil, err
 	}
-	dadosSomas, err := cli.Baixar(ctx, somas.URL)
+	checksums, err := rel.AssetPorNome(NomeChecksums)
 	if err != nil {
 		return nil, err
 	}
-	dadosAssinatura, err := cli.Baixar(ctx, assinatura.URL)
+	signature, err := rel.AssetPorNome(NomeAssinatura)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := Verify(dadosArtefato, dadosSomas, dadosAssinatura, chave, artefato.Name); err != nil {
+	artifactData, err := cli.Baixar(ctx, artifact.URL)
+	if err != nil {
 		return nil, err
 	}
-
-	novo, err := ExtrairBinario(artefato.Name, dadosArtefato, so)
+	checksumsData, err := cli.Baixar(ctx, checksums.URL)
+	if err != nil {
+		return nil, err
+	}
+	signatureData, err := cli.Baixar(ctx, signature.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := Apply(caminho, novo); err != nil {
+	if err := Verify(artifactData, checksumsData, signatureData, key, artifact.Name); err != nil {
+		return nil, err
+	}
+
+	newBinary, err := ExtrairBinario(artifact.Name, artifactData, goos)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := Apply(path, newBinary); err != nil {
 		return nil, err
 	}
 
@@ -269,12 +269,12 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	return res, nil
 }
 
-// validarChave explicitly refuses a binary with no key. There is no bypass
+// validateKey explicitly refuses a binary with no key. There is no bypass
 // path: no environment variable, flag or "no verification" mode.
-func validarChave(chave string) error {
-	c := strings.TrimSpace(chave)
+func validateKey(key string) error {
+	c := strings.TrimSpace(key)
 	if c == "" {
-		return erro(CodigoSemChavePublica,
+		return newError(CodigoSemChavePublica,
 			"this binary was built without an embedded public verification key and "+
 				"therefore cannot update itself: there is no way to prove the downloaded "+
 				"release came from the project. Download the new version manually from "+
@@ -282,7 +282,7 @@ func validarChave(chave string) error {
 				"official binary, which already ships with the key embedded")
 	}
 	if c == PlaceholderChavePublica {
-		return erro(CodigoChavePlaceholder,
+		return newError(CodigoChavePlaceholder,
 			"the embedded public key is still the placeholder %q: no minisign key pair "+
 				"has been generated for the project. Updating without real verification "+
 				"is not an option", PlaceholderChavePublica)
@@ -290,16 +290,16 @@ func validarChave(chave string) error {
 	return nil
 }
 
-func resolverRelease(ctx context.Context, cli *Cliente, canal Channel, versao string) (*Release, error) {
-	if versao != "" {
-		return cli.PorVersao(ctx, versao)
+func resolveRelease(ctx context.Context, cli *Cliente, channel Channel, version string) (*Release, error) {
+	if version != "" {
+		return cli.PorVersao(ctx, version)
 	}
-	return cli.Latest(ctx, canal)
+	return cli.Latest(ctx, channel)
 }
 
-// normalizarVersao returns the version in the format golang.org/x/mod/semver
+// normalizeVersion returns the version in the format golang.org/x/mod/semver
 // expects (with "v"), or "" if it is not valid semver.
-func normalizarVersao(v string) string {
+func normalizeVersion(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return ""
@@ -313,43 +313,43 @@ func normalizarVersao(v string) string {
 	return v
 }
 
-// maisNova reports whether remota is newer than atual. An unreadable current
+// newerThan reports whether remota is newer than current. An unreadable current
 // version (a local build without -ldflags, for example) counts as "any
 // release is newer": the opposite would lock the update away from whoever
 // needs it most.
-func maisNova(remota, atual string) bool {
-	r := normalizarVersao(remota)
+func newerThan(remota, current string) bool {
+	r := normalizeVersion(remota)
 	if r == "" {
 		return false
 	}
-	a := normalizarVersao(atual)
+	a := normalizeVersion(current)
 	if a == "" {
 		return true
 	}
 	return semver.Compare(r, a) > 0
 }
 
-func mesmaVersao(a, b string) bool {
-	na, nb := normalizarVersao(a), normalizarVersao(b)
+func sameVersion(a, b string) bool {
+	na, nb := normalizeVersion(a), normalizeVersion(b)
 	if na == "" || nb == "" {
 		return false
 	}
 	return semver.Compare(na, nb) == 0
 }
 
-func erro(codigo, format string, args ...any) *output.Error {
+func newError(code, format string, args ...any) *output.Error {
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
-			Code:     codigo,
+			Code:     code,
 			Message:  fmt.Sprintf(format, args...),
 		},
 	}
 }
 
-func erroCausa(causa error, codigo, format string, args ...any) *output.Error {
-	e := erro(codigo, format, args...)
-	e.Err = causa
+func wrapError(cause error, code, format string, args ...any) *output.Error {
+	e := newError(code, format, args...)
+	e.Err = cause
 	return e
 }

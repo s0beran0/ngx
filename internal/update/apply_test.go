@@ -12,84 +12,84 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func binarioDeTeste(t *testing.T, conteudo string, perm os.FileMode) string {
+func testBinary(t *testing.T, content string, perm os.FileMode) string {
 	t.Helper()
-	caminho := filepath.Join(t.TempDir(), "ngx")
-	require.NoError(t, os.WriteFile(caminho, []byte(conteudo), perm))
-	return caminho
+	path := filepath.Join(t.TempDir(), "ngx")
+	require.NoError(t, os.WriteFile(path, []byte(content), perm))
+	return path
 }
 
-func conteudo(t *testing.T, caminho string) string {
+func contentOf(t *testing.T, path string) string {
 	t.Helper()
-	b, err := os.ReadFile(caminho)
+	b, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(b)
 }
 
-func TestApplyTrocaOConteudo(t *testing.T) {
-	caminho := binarioDeTeste(t, "old version", 0o755)
+func TestApplyReplacesTheContent(t *testing.T) {
+	path := testBinary(t, "old version", 0o755)
 
-	require.NoError(t, Apply(caminho, []byte("new version")))
+	require.NoError(t, Apply(path, []byte("new version")))
 
-	assert.Equal(t, "new version", conteudo(t, caminho))
+	assert.Equal(t, "new version", contentOf(t, path))
 }
 
-func TestApplyPreservaAPermissaoDoOriginal(t *testing.T) {
+func TestApplyPreservesOriginalPermission(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the Windows file mode does not map onto unix permissions")
 	}
-	caminho := binarioDeTeste(t, "old", 0o700)
+	path := testBinary(t, "old", 0o700)
 
-	require.NoError(t, Apply(caminho, []byte("new")))
+	require.NoError(t, Apply(path, []byte("new")))
 
-	info, err := os.Stat(caminho)
+	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }
 
-func TestApplyNaoDeixaTemporarioParaTras(t *testing.T) {
-	caminho := binarioDeTeste(t, "old", 0o755)
+func TestApplyLeavesNoTemporaryBehind(t *testing.T) {
+	path := testBinary(t, "old", 0o755)
 
-	require.NoError(t, Apply(caminho, []byte("new")))
+	require.NoError(t, Apply(path, []byte("new")))
 
-	entradas, err := os.ReadDir(filepath.Dir(caminho))
+	entries, err := os.ReadDir(filepath.Dir(path))
 	require.NoError(t, err)
-	assert.Len(t, entradas, 1, "a file was left behind in the binary directory")
+	assert.Len(t, entries, 1, "a file was left behind in the binary directory")
 }
 
-func TestApplyNaoQuebraOProcessoQueJaAbriuOBinario(t *testing.T) {
+func TestApplyDoesNotBreakProcessThatAlreadyOpenedTheBinary(t *testing.T) {
 	// On Unix, renaming over an executable in use works because the old
 	// inode survives while a descriptor stays open -- it is writing over it
 	// that would fail with ETXTBSY. The open descriptor here plays the part
 	// of the running process.
 	if runtime.GOOS == "windows" {
-		t.Skip("on Windows the executable in use is locked; see trocaComRenomeio")
+		t.Skip("on Windows the executable in use is locked; see swapByRename")
 	}
-	caminho := binarioDeTeste(t, "running process", 0o755)
-	f, err := os.Open(caminho)
+	path := testBinary(t, "running process", 0o755)
+	f, err := os.Open(path)
 	require.NoError(t, err)
 	defer f.Close()
 
-	require.NoError(t, Apply(caminho, []byte("new binary")))
+	require.NoError(t, Apply(path, []byte("new binary")))
 
-	antigo := make([]byte, len("running process"))
-	_, err = f.ReadAt(antigo, 0)
+	old := make([]byte, len("running process"))
+	_, err = f.ReadAt(old, 0)
 	require.NoError(t, err)
-	assert.Equal(t, "running process", string(antigo),
+	assert.Equal(t, "running process", string(old),
 		"the old inode has to survive for the running process")
-	assert.Equal(t, "new binary", conteudo(t, caminho))
+	assert.Equal(t, "new binary", contentOf(t, path))
 }
 
-func TestApplyRecusaBinarioVazio(t *testing.T) {
-	caminho := binarioDeTeste(t, "old", 0o755)
+func TestApplyRejectsEmptyBinary(t *testing.T) {
+	path := testBinary(t, "old", 0o755)
 
-	err := Apply(caminho, nil)
+	err := Apply(path, nil)
 
-	assert.Equal(t, CodigoArtefatoInvalido, codigoDe(t, err))
-	assert.Equal(t, "old", conteudo(t, caminho))
+	assert.Equal(t, CodigoArtefatoInvalido, codeOf(t, err))
+	assert.Equal(t, "old", contentOf(t, path))
 }
 
-func TestApplySemPermissaoNoDiretorioExplicaOQueFalta(t *testing.T) {
+func TestApplyWithoutDirectoryPermissionExplainsWhatIsMissing(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory permission on Windows does not follow the unix mode")
 	}
@@ -97,164 +97,164 @@ func TestApplySemPermissaoNoDiretorioExplicaOQueFalta(t *testing.T) {
 		t.Skip("root ignores the directory permission")
 	}
 	dir := t.TempDir()
-	caminho := filepath.Join(dir, "ngx")
-	require.NoError(t, os.WriteFile(caminho, []byte("old"), 0o755))
+	path := filepath.Join(dir, "ngx")
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o755))
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	err := Apply(caminho, []byte("new"))
+	err := Apply(path, []byte("new"))
 
-	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
+	assert.Equal(t, CodigoPermissao, codeOf(t, err))
 	assert.Contains(t, err.Error(), dir)
 	assert.Contains(t, err.Error(), "privilege")
-	assert.Equal(t, "old", conteudo(t, caminho), "the current binary has to stay intact")
+	assert.Equal(t, "old", contentOf(t, path), "the current binary has to stay intact")
 }
 
 // --- the Windows sequence (DD5), exercised on any system ---
 
-// opsRegistradas wraps the real operations while recording the order of the
+// recordedOps wraps the real operations while recording the order of the
 // calls, and lets a failure be injected at any step. It is what makes the
 // Windows sequence testable on Linux and macOS.
-type opsRegistradas struct {
-	chamadas   []string
-	falharEm   string
-	restaurarK bool
-	erro       error
+type recordedOps struct {
+	calls     []string
+	failAt    string
+	restoreOK bool
+	err       error
 }
 
-func (o *opsRegistradas) ops() opsArquivo {
-	falhou := func(passo string) error {
-		if o.falharEm == passo {
-			if o.erro != nil {
-				return o.erro
+func (o *recordedOps) ops() fileOps {
+	failed := func(step string) error {
+		if o.failAt == step {
+			if o.err != nil {
+				return o.err
 			}
-			return errors.New("injected failure at " + passo)
+			return errors.New("injected failure at " + step)
 		}
 		return nil
 	}
-	return opsArquivo{
-		escrever: func(caminho string, dados []byte, perm os.FileMode) error {
-			o.chamadas = append(o.chamadas, "escrever "+filepath.Base(caminho))
-			if err := falhou("escrever"); err != nil {
+	return fileOps{
+		write: func(path string, data []byte, perm os.FileMode) error {
+			o.calls = append(o.calls, "write "+filepath.Base(path))
+			if err := failed("write"); err != nil {
 				return err
 			}
-			return escreverArquivo(caminho, dados, perm)
+			return writeFile(path, data, perm)
 		},
-		renomear: func(de, para string) error {
-			passo := "renomear " + filepath.Base(de) + "->" + filepath.Base(para)
-			o.chamadas = append(o.chamadas, passo)
-			if err := falhou(passo); err != nil {
+		rename: func(from, to string) error {
+			step := "rename " + filepath.Base(from) + "->" + filepath.Base(to)
+			o.calls = append(o.calls, step)
+			if err := failed(step); err != nil {
 				return err
 			}
-			return os.Rename(de, para)
+			return os.Rename(from, to)
 		},
-		remover: func(caminho string) error {
-			o.chamadas = append(o.chamadas, "remover "+filepath.Base(caminho))
-			if err := falhou("remover " + filepath.Base(caminho)); err != nil {
+		remove: func(path string) error {
+			o.calls = append(o.calls, "remove "+filepath.Base(path))
+			if err := failed("remove " + filepath.Base(path)); err != nil {
 				return err
 			}
-			return os.Remove(caminho)
+			return os.Remove(path)
 		},
 	}
 }
 
-func TestTrocaComRenomeioSegueASequenciaDeDD5(t *testing.T) {
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	reg := &opsRegistradas{}
+func TestSwapByRenameFollowsTheDD5Sequence(t *testing.T) {
+	path := testBinary(t, "old ngx", 0o755)
+	reg := &recordedOps{}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
+	require.NoError(t, swapByRename(reg.ops(), path, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "new ngx", conteudo(t, caminho))
+	assert.Equal(t, "new ngx", contentOf(t, path))
 	assert.Equal(t, []string{
-		"remover ngx.new",
-		"escrever ngx.new",
-		"renomear ngx->ngx.old",
-		"renomear ngx.new->ngx",
-		"remover ngx.old",
-	}, reg.chamadas)
-	assert.NoFileExists(t, caminho+".new")
+		"remove ngx.new",
+		"write ngx.new",
+		"rename ngx->ngx.old",
+		"rename ngx.new->ngx",
+		"remove ngx.old",
+	}, reg.calls)
+	assert.NoFileExists(t, path+".new")
 }
 
-func TestTrocaComRenomeioIgnoraFalhaAoRemoverOAntigo(t *testing.T) {
+func TestSwapByRenameIgnoresFailureRemovingTheOld(t *testing.T) {
 	// On Windows the removal of the .old fails because the file is still in
 	// use by the running process. That is expected and must not abort the
 	// update: the cleanup is left to LimparResiduo, on the next run.
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	reg := &opsRegistradas{falharEm: "remover ngx.old"}
+	path := testBinary(t, "old ngx", 0o755)
+	reg := &recordedOps{failAt: "remove ngx.old"}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
+	require.NoError(t, swapByRename(reg.ops(), path, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "new ngx", conteudo(t, caminho))
-	assert.FileExists(t, caminho+sufixoAntigo)
-	assert.Equal(t, "old ngx", conteudo(t, caminho+sufixoAntigo))
+	assert.Equal(t, "new ngx", contentOf(t, path))
+	assert.FileExists(t, path+oldSuffix)
+	assert.Equal(t, "old ngx", contentOf(t, path+oldSuffix))
 }
 
-func TestTrocaComRenomeioRestauraQuandoOTerceiroPassoFalha(t *testing.T) {
+func TestSwapByRenameRestoresWhenTheThirdStepFails(t *testing.T) {
 	// The worst possible outcome is the user being left without a binary. If
 	// the new one does not get into place after the current one has left,
 	// the current one comes back.
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	reg := &opsRegistradas{falharEm: "renomear ngx.new->ngx"}
+	path := testBinary(t, "old ngx", 0o755)
+	reg := &recordedOps{failAt: "rename ngx.new->ngx"}
 
-	err := trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755)
+	err := swapByRename(reg.ops(), path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
+	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
 	assert.Contains(t, err.Error(), "restored")
-	require.FileExists(t, caminho)
-	assert.Equal(t, "old ngx", conteudo(t, caminho))
-	assert.NoFileExists(t, caminho+".new")
-	assert.NoFileExists(t, caminho+sufixoAntigo)
+	require.FileExists(t, path)
+	assert.Equal(t, "old ngx", contentOf(t, path))
+	assert.NoFileExists(t, path+".new")
+	assert.NoFileExists(t, path+oldSuffix)
 }
 
-func TestTrocaComRenomeioNaoTocaNoBinarioQuandoOSegundoPassoFalha(t *testing.T) {
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	reg := &opsRegistradas{falharEm: "renomear ngx->ngx.old"}
+func TestSwapByRenameDoesNotTouchTheBinaryWhenTheSecondStepFails(t *testing.T) {
+	path := testBinary(t, "old ngx", 0o755)
+	reg := &recordedOps{failAt: "rename ngx->ngx.old"}
 
-	err := trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755)
+	err := swapByRename(reg.ops(), path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
-	assert.Equal(t, "old ngx", conteudo(t, caminho))
-	assert.NoFileExists(t, caminho+".new")
+	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Equal(t, "old ngx", contentOf(t, path))
+	assert.NoFileExists(t, path+".new")
 }
 
-func TestTrocaComRenomeioDizOndeEstaOBinarioQuandoNemARestauracaoFunciona(t *testing.T) {
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	reg := &opsRegistradas{}
+func TestSwapByRenameSaysWhereTheBinaryIsWhenEvenTheRestoreFails(t *testing.T) {
+	path := testBinary(t, "old ngx", 0o755)
+	reg := &recordedOps{}
 	base := reg.ops()
 	// A failure at step 3 and also at the restore: the only path in which the
 	// user is left with no ngx in place. The message has to say where the
 	// binary is and what to do.
-	ops := opsArquivo{
-		escrever: base.escrever,
-		remover:  base.remover,
-		renomear: func(de, para string) error {
-			if filepath.Base(de) == "ngx.new" || filepath.Base(de) == "ngx.old" {
+	ops := fileOps{
+		write:  base.write,
+		remove: base.remove,
+		rename: func(from, to string) error {
+			if filepath.Base(from) == "ngx.new" || filepath.Base(from) == "ngx.old" {
 				return errors.New("injected failure")
 			}
-			return base.renomear(de, para)
+			return base.rename(from, to)
 		},
 	}
 
-	err := trocaComRenomeio(ops, caminho, []byte("new ngx"), 0o755)
+	err := swapByRename(ops, path, []byte("new ngx"), 0o755)
 
-	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
-	assert.Contains(t, err.Error(), caminho+sufixoAntigo)
+	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
+	assert.Contains(t, err.Error(), path+oldSuffix)
 	assert.Contains(t, err.Error(), "by hand")
 	// The old content still exists, even if under another name.
-	assert.Equal(t, "old ngx", conteudo(t, caminho+sufixoAntigo))
+	assert.Equal(t, "old ngx", contentOf(t, path+oldSuffix))
 }
 
-func TestTrocaComRenomeioLimpaNewDeTentativaAnterior(t *testing.T) {
-	caminho := binarioDeTeste(t, "old ngx", 0o755)
-	require.NoError(t, os.WriteFile(caminho+".new", []byte("junk from before"), 0o755))
-	reg := &opsRegistradas{}
+func TestSwapByRenameCleansNewFromPreviousAttempt(t *testing.T) {
+	path := testBinary(t, "old ngx", 0o755)
+	require.NoError(t, os.WriteFile(path+".new", []byte("junk from before"), 0o755))
+	reg := &recordedOps{}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
+	require.NoError(t, swapByRename(reg.ops(), path, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "new ngx", conteudo(t, caminho))
+	assert.Equal(t, "new ngx", contentOf(t, path))
 }
 
-func TestTrocaComRenomeioSemPermissaoExplicaODiretorio(t *testing.T) {
+func TestSwapByRenameWithoutPermissionExplainsTheDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory permission on Windows does not follow the unix mode")
 	}
@@ -262,37 +262,37 @@ func TestTrocaComRenomeioSemPermissaoExplicaODiretorio(t *testing.T) {
 		t.Skip("root ignores the directory permission")
 	}
 	dir := t.TempDir()
-	caminho := filepath.Join(dir, "ngx")
-	require.NoError(t, os.WriteFile(caminho, []byte("old"), 0o755))
+	path := filepath.Join(dir, "ngx")
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o755))
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	err := trocaComRenomeio(opsReais(), caminho, []byte("new"), 0o755)
+	err := swapByRename(realOps(), path, []byte("new"), 0o755)
 
-	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
-	assert.Equal(t, "old", conteudo(t, caminho))
+	assert.Equal(t, CodigoPermissao, codeOf(t, err))
+	assert.Equal(t, "old", contentOf(t, path))
 }
 
-func TestErroDeEscritaSeparaPermissaoDeOutrasFalhas(t *testing.T) {
-	err := erroDeEscrita(fs.ErrPermission, "/opt/ngx/bin/ngx")
-	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
+func TestWriteErrorSeparatesPermissionFromOtherFailures(t *testing.T) {
+	err := writeError(fs.ErrPermission, "/opt/ngx/bin/ngx")
+	assert.Equal(t, CodigoPermissao, codeOf(t, err))
 	assert.Contains(t, err.Error(), filepath.FromSlash("/opt/ngx/bin"))
 
-	err = erroDeEscrita(errors.New("disk full"), "/opt/ngx/bin/ngx")
-	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
+	err = writeError(errors.New("disk full"), "/opt/ngx/bin/ngx")
+	assert.Equal(t, CodigoTrocaFalhou, codeOf(t, err))
 }
 
-func TestLimparResiduoRemoveOAntigo(t *testing.T) {
-	caminho := binarioDeTeste(t, "ngx", 0o755)
-	require.NoError(t, os.WriteFile(caminho+sufixoAntigo, []byte("orphan"), 0o755))
+func TestLimparResiduoRemovesTheOld(t *testing.T) {
+	path := testBinary(t, "ngx", 0o755)
+	require.NoError(t, os.WriteFile(path+oldSuffix, []byte("orphan"), 0o755))
 
-	LimparResiduo(caminho)
+	LimparResiduo(path)
 
-	assert.NoFileExists(t, caminho+sufixoAntigo)
-	assert.FileExists(t, caminho)
+	assert.NoFileExists(t, path+oldSuffix)
+	assert.FileExists(t, path)
 }
 
-func TestLimparResiduoEhSilenciosaQuandoNaoHaNada(t *testing.T) {
+func TestLimparResiduoIsSilentWhenThereIsNothing(t *testing.T) {
 	// It returns no error and does not panic: an orphan that does not exist,
 	// or an empty path at startup, are not the user's problem.
 	LimparResiduo(filepath.Join(t.TempDir(), "ngx"))

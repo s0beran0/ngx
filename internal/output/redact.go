@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// nomeDeDiretivaValido matches the real alphabet of nginx directive names:
+// validDirectiveName matches the real alphabet of nginx directive names:
 // letters, digits and underscore. Anything outside that (a semicolon copied
 // from the .conf, "*", ".", "/") means the rule was typed wrong, and it is
 // better to fail loudly at parse time than to leave a dead rule that silently
 // never matches anything.
-var nomeDeDiretivaValido = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+var validDirectiveName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 // RedactedValue replaces the value of a sensitive directive. The directive,
 // the id and the line stay visible: making the whole node disappear would
@@ -49,40 +49,40 @@ type RedactRule struct {
 func ParseRedactRule(s string) (RedactRule, error) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "**.")
 
-	brutos := strings.Fields(s)
-	if len(brutos) == 0 {
+	raw := strings.Fields(s)
+	if len(raw) == 0 {
 		return RedactRule{}, fmt.Errorf("empty redaction rule")
 	}
 
-	campos := make([]string, len(brutos))
-	for i, c := range brutos {
-		campos[i] = semAspasCircundantes(c)
+	fields := make([]string, len(raw))
+	for i, c := range raw {
+		fields[i] = stripSurroundingQuotes(c)
 	}
 
-	if !nomeDeDiretivaValido.MatchString(campos[0]) {
-		return RedactRule{}, fmt.Errorf("invalid directive name: %q", campos[0])
+	if !validDirectiveName.MatchString(fields[0]) {
+		return RedactRule{}, fmt.Errorf("invalid directive name: %q", fields[0])
 	}
 
-	r := RedactRule{Directive: campos[0]}
-	if len(campos) > 1 {
-		r.ArgPrefix = campos[1:]
+	r := RedactRule{Directive: fields[0]}
+	if len(fields) > 1 {
+		r.ArgPrefix = fields[1:]
 	}
 	return r, nil
 }
 
-// semAspasCircundantes strips a single pair of single or double quotes
+// stripSurroundingQuotes strips a single pair of single or double quotes
 // wrapping the whole field. strings.Fields does not understand quotes, so a
 // field like "X-Api-Key" would arrive here with the literal quotes and would
 // never match a real argument.
-func semAspasCircundantes(campo string) string {
-	if len(campo) < 2 {
-		return campo
+func stripSurroundingQuotes(field string) string {
+	if len(field) < 2 {
+		return field
 	}
-	primeiro, ultimo := campo[0], campo[len(campo)-1]
-	if (primeiro == '"' && ultimo == '"') || (primeiro == '\'' && ultimo == '\'') {
-		return campo[1 : len(campo)-1]
+	first, last := field[0], field[len(field)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return field[1 : len(field)-1]
 	}
-	return campo
+	return field
 }
 
 // Matches reports whether the given directive should have its value redacted.
@@ -119,9 +119,9 @@ type RedactSet struct {
 // redaction -- not partial redaction of the rules that were valid up to that
 // point. A consumer that merely logs the error and carries on ends up running
 // with no protection at all against secret leakage.
-func NewRedactSet(entradas []string) (RedactSet, error) {
+func NewRedactSet(entries []string) (RedactSet, error) {
 	var set RedactSet
-	for _, e := range entradas {
+	for _, e := range entries {
 		r, err := ParseRedactRule(e)
 		if err != nil {
 			return RedactSet{}, fmt.Errorf("redaction rule %q: %w", e, err)

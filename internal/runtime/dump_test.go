@@ -12,8 +12,8 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-func TestDumpSeparaArquivos(t *testing.T) {
-	f := novoFake("local").responde("nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
+func TestDumpSplitsFiles(t *testing.T) {
+	f := newFake("local").respond("nginx -T", response{stdout: outputDump, stderr: outputTestOK})
 
 	d, err := New(f).DumpConfig(context.Background())
 	require.NoError(t, err)
@@ -32,13 +32,13 @@ func TestDumpSeparaArquivos(t *testing.T) {
 	assert.True(t, strings.HasSuffix(d.Files[1].Content, "}\n"))
 }
 
-func TestDumpIdenticoLocalERemoto(t *testing.T) {
-	local := novoFake("local").responde("nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
-	remoto := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
+func TestDumpIdenticalLocalAndRemote(t *testing.T) {
+	local := newFake("local").respond("nginx -T", response{stdout: outputDump, stderr: outputTestOK})
+	remote := newFake("ssh://opc@10.0.0.7:22").respond("nginx -T", response{stdout: outputDump, stderr: outputTestOK})
 
 	a, err := New(local).DumpConfig(context.Background())
 	require.NoError(t, err)
-	b, err := New(remoto).DumpConfig(context.Background())
+	b, err := New(remote).DumpConfig(context.Background())
 	require.NoError(t, err)
 
 	assert.Equal(t, a, b)
@@ -46,8 +46,8 @@ func TestDumpIdenticoLocalERemoto(t *testing.T) {
 
 // An invalid configuration makes `-T` exit non-zero and dump nothing. It is
 // still a result.
-func TestDumpConfiguracaoInvalidaNaoEErro(t *testing.T) {
-	f := novoFake("local").responde("nginx -T", resposta{stderr: saidaTesteFalhou, exit: 1})
+func TestDumpInvalidConfigIsNotAnError(t *testing.T) {
+	f := newFake("local").respond("nginx -T", response{stderr: outputTestFailed, exit: 1})
 
 	d, err := New(f).DumpConfig(context.Background())
 	require.NoError(t, err)
@@ -57,17 +57,17 @@ func TestDumpConfiguracaoInvalidaNaoEErro(t *testing.T) {
 	require.Len(t, d.Diagnostics, 1)
 	assert.Equal(t, output.SeverityError, d.Diagnostics[0].Severity)
 
-	bruto, err := json.Marshal(d)
+	raw, err := json.Marshal(d)
 	require.NoError(t, err)
-	assert.Contains(t, string(bruto), `"files":[]`)
+	assert.Contains(t, string(raw), `"files":[]`)
 }
 
 // DR5, the case measured on the real host: `nginx -T` fails for an ordinary
 // user. Without --sudo ngx reports the requirement and says what the command
 // is -- and does not try again.
-func TestDumpSemPrivilegioReportaENaoEscala(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -T", resposta{
-		stderr: saidaSemPrivilegio,
+func TestDumpWithoutPrivilegeReportsAndDoesNotEscalate(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("nginx -T", response{
+		stderr: outputNoPrivilege,
 		exit:   1,
 	})
 
@@ -82,17 +82,17 @@ func TestDumpSemPrivilegioReportaENaoEscala(t *testing.T) {
 
 	// The point of DR5: a single call, with no sudo. Escalating in silence
 	// is the defect the decision exists to prevent.
-	chamadas := f.chamadas()
-	require.Len(t, chamadas, 1)
-	assert.Equal(t, []string{"nginx", "-T"}, chamadas[0])
+	calls := f.calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, []string{"nginx", "-T"}, calls[0])
 }
 
 // The other path: with an explicit --sudo, the command runs escalated and
 // returns the configuration.
-func TestDumpComSudoExecutaEscalado(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("sudo -n nginx -T", resposta{
-		stdout: saidaDump,
-		stderr: saidaTesteOK,
+func TestDumpWithSudoRunsEscalated(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("sudo -n nginx -T", response{
+		stdout: outputDump,
+		stderr: outputTestOK,
 	})
 
 	d, err := New(f, ComSudo(true)).DumpConfig(context.Background())
@@ -100,21 +100,21 @@ func TestDumpComSudoExecutaEscalado(t *testing.T) {
 	assert.True(t, d.OK)
 	assert.Len(t, d.Files, 2)
 
-	chamadas := f.chamadas()
-	require.Len(t, chamadas, 1)
-	assert.Equal(t, []string{"sudo", "-n", "nginx", "-T"}, chamadas[0])
+	calls := f.calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, []string{"sudo", "-n", "nginx", "-T"}, calls[0])
 }
 
 // Same recording, same files: the result with --sudo and the result without
 // any privilege requirement must not differ in anything beyond how they were
 // obtained.
-func TestDumpComSudoIgualAoSemSudo(t *testing.T) {
-	semSudo := novoFake("local").responde("nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
-	comSudo := novoFake("local").responde("sudo -n nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
+func TestDumpWithSudoEqualsWithoutSudo(t *testing.T) {
+	withoutSudo := newFake("local").respond("nginx -T", response{stdout: outputDump, stderr: outputTestOK})
+	withSudo := newFake("local").respond("sudo -n nginx -T", response{stdout: outputDump, stderr: outputTestOK})
 
-	a, err := New(semSudo).DumpConfig(context.Background())
+	a, err := New(withoutSudo).DumpConfig(context.Background())
 	require.NoError(t, err)
-	b, err := New(comSudo, ComSudo(true)).DumpConfig(context.Background())
+	b, err := New(withSudo, ComSudo(true)).DumpConfig(context.Background())
 	require.NoError(t, err)
 
 	assert.Equal(t, a, b)
@@ -123,8 +123,8 @@ func TestDumpComSudoIgualAoSemSudo(t *testing.T) {
 // --sudo requested on a target whose sudo wants a password: ngx has no TTY
 // and nowhere to send the password, so this is an outcome of its own, not a
 // generic "needs privilege".
-func TestDumpSudoExigeSenha(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("sudo -n nginx -T", resposta{
+func TestDumpSudoRequiresPassword(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("sudo -n nginx -T", response{
 		stderr: "sudo: a password is required\n",
 		exit:   1,
 	})
@@ -138,9 +138,9 @@ func TestDumpSudoExigeSenha(t *testing.T) {
 
 // With --sudo and still no permission, the message must not tell the user to
 // use --sudo again.
-func TestDumpComSudoAindaSemPermissao(t *testing.T) {
-	f := novoFake("local").responde("sudo -n nginx -T", resposta{
-		stderr: saidaSemPrivilegio,
+func TestDumpWithSudoStillWithoutPermission(t *testing.T) {
+	f := newFake("local").respond("sudo -n nginx -T", response{
+		stderr: outputNoPrivilege,
 		exit:   1,
 	})
 
@@ -154,32 +154,32 @@ func TestDumpComSudoAindaSemPermissao(t *testing.T) {
 
 // A syntax error must not be confused with a missing privilege: the detection
 // is conservative on purpose.
-func TestTestConfigErroDeSintaxeNaoViraPrivilegio(t *testing.T) {
-	f := novoFake("local").responde("nginx -t", resposta{stderr: saidaTesteFalhou, exit: 1})
+func TestTestConfigSyntaxErrorDoesNotBecomePrivilege(t *testing.T) {
+	f := newFake("local").respond("nginx -t", response{stderr: outputTestFailed, exit: 1})
 
 	res, err := New(f).TestConfig(context.Background())
 	require.NoError(t, err)
 	assert.False(t, res.OK)
 }
 
-func TestDividirDumpIgnoraConteudoAntesDoPrimeiroMarcador(t *testing.T) {
-	arquivos := DividirDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
-	require.Len(t, arquivos, 1)
-	assert.Equal(t, "/a.conf", arquivos[0].Path)
-	assert.Equal(t, "foo;\n", arquivos[0].Content)
+func TestDividirDumpIgnoresContentBeforeFirstMarker(t *testing.T) {
+	files := DividirDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
+	require.Len(t, files, 1)
+	assert.Equal(t, "/a.conf", files[0].Path)
+	assert.Equal(t, "foo;\n", files[0].Content)
 }
 
 // A comment inside a configuration must not split the file in two: the marker
 // only counts at the start of the line and with the trailing colon.
-func TestDividirDumpNaoConfundeComentario(t *testing.T) {
-	texto := "# configuration file /a.conf:\n    # configuration file /fake.conf:\nfoo;\n"
-	arquivos := DividirDump(texto)
-	require.Len(t, arquivos, 1)
-	assert.Contains(t, arquivos[0].Content, "/fake.conf")
+func TestDividirDumpDoesNotConfuseComment(t *testing.T) {
+	text := "# configuration file /a.conf:\n    # configuration file /fake.conf:\nfoo;\n"
+	files := DividirDump(text)
+	require.Len(t, files, 1)
+	assert.Contains(t, files[0].Content, "/fake.conf")
 }
 
-func TestDividirDumpVazio(t *testing.T) {
-	arquivos := DividirDump("")
-	require.NotNil(t, arquivos)
-	assert.Empty(t, arquivos)
+func TestDividirDumpEmpty(t *testing.T) {
+	files := DividirDump("")
+	require.NotNil(t, files)
+	assert.Empty(t, files)
 }

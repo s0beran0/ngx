@@ -70,9 +70,9 @@ func Drift(format string, args ...any) *Error {
 // HashMismatch signals that an ID was presented against a version of the
 // configuration different from the one it was generated in. The previous IDs
 // are invalid and the agent needs to read again before acting.
-func HashMismatch(esperado, atual string) *Error {
+func HashMismatch(expected, current string) *Error {
 	return newError(ExitHashMismatch, "NGX-0009",
-		"the configuration changed since the read: expected %s, current %s", esperado, atual)
+		"the configuration changed since the read: expected %s, current %s", expected, current)
 }
 
 // Internal wraps an IO failure or a defect of ngx itself. The original cause

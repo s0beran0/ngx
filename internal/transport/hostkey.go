@@ -73,15 +73,15 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 	diags := []output.Diagnostic{}
 
 	if opts.InsecureHostKey {
-		diags = append(diags, avisoHostKeyInsegura(opts.Host))
+		diags = append(diags, warnInsecureHostKey(opts.Host))
 		// Accepts any key. The escape hatch exists (DR1), but never in
 		// silence: the warning above is the price of using it.
 		return func(string, net.Addr, ssh.PublicKey) error { return nil }, diags, nil
 	}
 
-	caminho := opts.KnownHostsPath
-	if caminho == "" {
-		padrao, err := CaminhoKnownHostsPadrao()
+	path := opts.KnownHostsPath
+	if path == "" {
+		defaultPath, err := CaminhoKnownHostsPadrao()
 		if err != nil {
 			return nil, diags, &output.Error{
 				Code: output.ExitInternal,
@@ -94,17 +94,17 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 				Err: err,
 			}
 		}
-		caminho = padrao
+		path = defaultPath
 	}
 
-	verificar, err := knownhosts.New(caminho)
+	verify, err := knownhosts.New(path)
 	if err != nil {
-		return nil, diags, erroAoAbrirKnownHosts(caminho, opts.Host, err)
+		return nil, diags, openKnownHostsError(path, opts.Host, err)
 	}
 
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		if err := verificar(hostname, remote, key); err != nil {
-			return classificarErroHostKey(caminho, enderecoLegivel(hostname, remote), key, err)
+		if err := verify(hostname, remote, key); err != nil {
+			return classifyHostKeyError(path, readableAddress(hostname, remote), key, err)
 		}
 		return nil
 	}, diags, nil
@@ -121,7 +121,7 @@ func CaminhoKnownHostsPadrao() (string, error) {
 	return filepath.Join(home, ".ssh", "known_hosts"), nil
 }
 
-// classificarErroHostKey translates the knownhosts error into one of the DR1
+// classifyHostKeyError translates the knownhosts error into one of the DR1
 // outcomes.
 //
 // The distinction between unknown host and changed key is not in two error
@@ -129,9 +129,9 @@ func CaminhoKnownHostsPadrao() (string, error) {
 // Want means "I have never seen this host"; a filled Want means "I have seen
 // it, and the key was another one". The second case is the only one that
 // describes an attack, and that is why it cannot look like the first.
-func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err error) error {
-	var revogada *knownhosts.RevokedError
-	if errors.As(err, &revogada) {
+func classifyHostKeyError(path, address string, key ssh.PublicKey, err error) error {
+	var revoked *knownhosts.RevokedError
+	if errors.As(err, &revoked) {
 		return &output.Error{
 			Code: output.ExitInternal,
 			Diag: output.Diagnostic{
@@ -142,17 +142,17 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 						"this key is known to be compromised. ngx refuses the connection. "+
 						"Do not remove the mark without knowing why it was put there; the "+
 						"key presented was %s",
-					endereco, revogada.Revoked.Filename, revogada.Revoked.Line, serializarChave(key)),
-				File: revogada.Revoked.Filename,
-				Line: revogada.Revoked.Line,
+					address, revoked.Revoked.Filename, revoked.Revoked.Line, serializeKey(key)),
+				File: revoked.Revoked.Filename,
+				Line: revoked.Revoked.Line,
 			},
 			Err: err,
 		}
 	}
 
-	var chave *knownhosts.KeyError
-	if errors.As(err, &chave) {
-		if len(chave.Want) > 0 {
+	var keyErr *knownhosts.KeyError
+	if errors.As(err, &keyErr) {
+		if len(keyErr.Want) > 0 {
 			// A filled Want does not, on its own, mean the key changed.
 			//
 			// A server usually offers several host key types (ed25519,
@@ -168,12 +168,12 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 			// type of the presented one, what happened was algorithm
 			// choice, not a key swap. If there is a record of the same
 			// type and the bytes differ, then it really did change.
-			if !registraTipo(chave.Want, key.Type()) {
-				return erroAlgoritmoNaoRegistrado(caminho, endereco, key, chave, err)
+			if !recordsType(keyErr.Want, key.Type()) {
+				return unregisteredAlgorithmError(path, address, key, keyErr, err)
 			}
-			return erroChaveAlterada(caminho, endereco, key, chave, err)
+			return changedKeyError(path, address, key, keyErr, err)
 		}
-		return erroHostDesconhecido(caminho, endereco, key, err)
+		return unknownHostError(path, address, key, err)
 	}
 
 	// Any other failure of the verifier — a malformed address, for example.
@@ -186,19 +186,19 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 			Code:     "NGX-0001",
 			Message: fmt.Sprintf(
 				"could not verify the host key of %s against %s: %v",
-				endereco, caminho, err),
-			File: caminho,
+				address, path, err),
+			File: path,
 		},
 		Err: err,
 	}
 }
 
-// erroHostDesconhecido builds the first-access outcome. The message hands over
+// unknownHostError builds the first-access outcome. The message hands over
 // the ready-made known_hosts line because that is the action that resolves it,
 // and says unambiguously that the host has never been seen — the opposite of
 // the changed key case, where it was already known.
-func erroHostDesconhecido(caminho, endereco string, key ssh.PublicKey, causa error) error {
-	linha := knownhosts.Line([]string{knownhosts.Normalize(endereco)}, key)
+func unknownHostError(path, address string, key ssh.PublicKey, cause error) error {
+	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, key)
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -209,26 +209,26 @@ func erroHostDesconhecido(caminho, endereco string, key ssh.PublicKey, causa err
 					"the presented key against and refuses the connection. This is the "+
 					"normal friction of a first access. If you trust this key, append the "+
 					"line to the file: %s",
-				endereco, caminho, linha),
-			File: caminho,
+				address, path, line),
+			File: path,
 		},
-		Err: causa,
+		Err: cause,
 	}
 }
 
-// erroChaveAlterada builds the possible-interception outcome. The message says
+// changedKeyError builds the possible-interception outcome. The message says
 // "this may be an attack" in so many words, shows the presented key next to
 // the recorded ones, and points at the file and line of the record that
 // diverges.
-func erroChaveAlterada(
-	caminho, endereco string,
+func changedKeyError(
+	path, address string,
 	key ssh.PublicKey,
-	chave *knownhosts.KeyError,
-	causa error,
+	keyErr *knownhosts.KeyError,
+	cause error,
 ) error {
-	registradas := make([]string, 0, len(chave.Want))
-	for i := range chave.Want {
-		registradas = append(registradas, chave.Want[i].String())
+	recorded := make([]string, 0, len(keyErr.Want))
+	for i := range keyErr.Want {
+		recorded = append(recorded, keyErr.Want[i].String())
 	}
 
 	return &output.Error{
@@ -244,23 +244,23 @@ func erroChaveAlterada(
 					"connection. If the change is legitimate (a reinstalled server, for "+
 					"example), confirm the new key through a channel other than this one, "+
 					"remove the old one with `ssh-keygen -R %s` and record the new one",
-				endereco, serializarChave(key), caminho,
-				strings.Join(registradas, "; "), endereco),
-			File: chave.Want[0].Filename,
-			Line: chave.Want[0].Line,
+				address, serializeKey(key), path,
+				strings.Join(recorded, "; "), address),
+			File: keyErr.Want[0].Filename,
+			Line: keyErr.Want[0].Line,
 		},
-		Err: causa,
+		Err: cause,
 	}
 }
 
-// erroAoAbrirKnownHosts separates "the file does not exist" from "the file
+// openKnownHostsError separates "the file does not exist" from "the file
 // exists but cannot be read". They are different problems with different
 // solutions, and the second one cannot disguise itself as a first access.
-func erroAoAbrirKnownHosts(caminho, host string, err error) error {
+func openKnownHostsError(path, host string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
-		alvo := host
-		if alvo == "" {
-			alvo = "the target"
+		target := host
+		if target == "" {
+			target = "the target"
 		}
 		return &output.Error{
 			Code: output.ExitInternal,
@@ -272,8 +272,8 @@ func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 						"from %s. Run `ssh %s` once to record the host, point at another "+
 						"file with --known-hosts, or accept any key with "+
 						"--insecure-host-key (insecure)",
-					caminho, alvo, alvo),
-				File: caminho,
+					path, target, target),
+				File: path,
 			},
 			Err: err,
 		}
@@ -287,20 +287,20 @@ func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 			Message: fmt.Sprintf(
 				"%s exists but cannot be used (%v); ngx does not verify host keys without "+
 					"it and refuses the connection",
-				caminho, err),
-			File: caminho,
+				path, err),
+			File: path,
 		},
 		Err: err,
 	}
 }
 
-// avisoHostKeyInsegura is the counterpart of --insecure-host-key. The text
+// warnInsecureHostKey is the counterpart of --insecure-host-key. The text
 // says what was lost, not merely that a flag was used: whoever reads the
 // output needs to know the connection stopped being protected.
-func avisoHostKeyInsegura(host string) output.Diagnostic {
-	alvo := host
-	if alvo == "" {
-		alvo = "the target"
+func warnInsecureHostKey(host string) output.Diagnostic {
+	target := host
+	if target == "" {
+		target = "the target"
 	}
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
@@ -309,14 +309,14 @@ func avisoHostKeyInsegura(host string) output.Diagnostic {
 			"--insecure-host-key: the host key of %s will be accepted with no verification "+
 				"at all. The connection is not protected against interception "+
 				"(man-in-the-middle) and any machine on the route can impersonate the server",
-			alvo),
+			target),
 	}
 }
 
-// enderecoLegivel chooses how the host appears in the messages. The hostname
+// readableAddress chooses how the host appears in the messages. The hostname
 // is the target the user asked for and is what they recognize; the network
 // address only shows up when there is no hostname.
-func enderecoLegivel(hostname string, remote net.Addr) string {
+func readableAddress(hostname string, remote net.Addr) string {
 	if hostname != "" {
 		return hostname
 	}
@@ -326,45 +326,45 @@ func enderecoLegivel(hostname string, remote net.Addr) string {
 	return "the target"
 }
 
-// serializarChave returns the key in the format of a known_hosts line,
+// serializeKey returns the key in the format of a known_hosts line,
 // "ssh-ed25519 AAAA...", without the newline MarshalAuthorizedKey appends.
-func serializarChave(key ssh.PublicKey) string {
+func serializeKey(key ssh.PublicKey) string {
 	if key == nil {
 		return "(none)"
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 }
 
-// registraTipo tells whether any of the known keys for the host uses the same
+// recordsType tells whether any of the known keys for the host uses the same
 // algorithm as the presented one. It is what separates "the key changed" from
 // "we negotiated an algorithm you never recorded".
-func registraTipo(want []knownhosts.KnownKey, tipo string) bool {
+func recordsType(want []knownhosts.KnownKey, keyType string) bool {
 	for i := range want {
-		if want[i].Key.Type() == tipo {
+		if want[i].Key.Type() == keyType {
 			return true
 		}
 	}
 	return false
 }
 
-// erroAlgoritmoNaoRegistrado covers the known host whose presented key is of a
+// unregisteredAlgorithmError covers the known host whose presented key is of a
 // type known_hosts does not record. Refusing is still right -- there is no way
 // to verify what is not known --, but saying "this may be an attack" would be
 // a lie, and a lie in a security warning spends the credibility of the warning
 // that matters.
-func erroAlgoritmoNaoRegistrado(
-	caminho, endereco string,
-	apresentada ssh.PublicKey,
-	chave *knownhosts.KeyError,
+func unregisteredAlgorithmError(
+	path, address string,
+	presented ssh.PublicKey,
+	keyErr *knownhosts.KeyError,
 	err error,
 ) error {
-	tipos := make([]string, 0, len(chave.Want))
-	vistos := map[string]bool{}
-	for i := range chave.Want {
-		t := chave.Want[i].Key.Type()
-		if !vistos[t] {
-			vistos[t] = true
-			tipos = append(tipos, t)
+	types := make([]string, 0, len(keyErr.Want))
+	seen := map[string]bool{}
+	for i := range keyErr.Want {
+		t := keyErr.Want[i].Key.Type()
+		if !seen[t] {
+			seen[t] = true
+			types = append(types, t)
 		}
 	}
 
@@ -378,20 +378,20 @@ func erroAlgoritmoNaoRegistrado(
 					"one of type %s. This does NOT indicate an attack: the server offers "+
 					"several key types and the negotiated type is not in your known_hosts. "+
 					"Record it with: ssh-keyscan -t %s %s >> %s",
-				endereco, strings.Join(tipos, ", "), apresentada.Type(),
-				apresentada.Type(), hostDe(endereco), caminho),
-			File: chave.Want[0].Filename,
-			Line: chave.Want[0].Line,
+				address, strings.Join(types, ", "), presented.Type(),
+				presented.Type(), hostOf(address), path),
+			File: keyErr.Want[0].Filename,
+			Line: keyErr.Want[0].Line,
 		},
 		Err: err,
 	}
 }
 
-// hostDe returns only the host part of a "host:port", to build the ssh-keyscan
+// hostOf returns only the host part of a "host:port", to build the ssh-keyscan
 // line the message suggests.
-func hostDe(endereco string) string {
-	if h, _, err := net.SplitHostPort(endereco); err == nil {
+func hostOf(address string) string {
+	if h, _, err := net.SplitHostPort(address); err == nil {
 		return h
 	}
-	return endereco
+	return address
 }

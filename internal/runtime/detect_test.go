@@ -13,8 +13,8 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-func TestDetectExtraiCamposDoV(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{stderr: saidaVMenosMaiusculo})
+func TestDetectExtractsFieldsFromDashV(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{stderr: outputDashV})
 
 	info, err := New(f).Detect(context.Background())
 	require.NoError(t, err)
@@ -42,32 +42,32 @@ func TestDetectExtraiCamposDoV(t *testing.T) {
 
 // The central guarantee of the task: the parser does not know where the bytes
 // came from. Same recording through different transports, same result.
-func TestDetectIdenticoLocalERemoto(t *testing.T) {
-	local := novoFake("local").responde("nginx -V", resposta{stderr: saidaVMenosMaiusculo})
-	remoto := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -V", resposta{stderr: saidaVMenosMaiusculo})
+func TestDetectIdenticalLocalAndRemote(t *testing.T) {
+	local := newFake("local").respond("nginx -V", response{stderr: outputDashV})
+	remote := newFake("ssh://opc@10.0.0.7:22").respond("nginx -V", response{stderr: outputDashV})
 
 	infoLocal, err := New(local).Detect(context.Background())
 	require.NoError(t, err)
-	infoRemoto, err := New(remoto).Detect(context.Background())
+	infoRemote, err := New(remote).Detect(context.Background())
 	require.NoError(t, err)
 
-	assert.Equal(t, infoLocal, infoRemoto)
+	assert.Equal(t, infoLocal, infoRemote)
 	assert.Equal(t, "local", New(local).Alvo())
-	assert.Equal(t, "ssh://opc@10.0.0.7:22", New(remoto).Alvo())
+	assert.Equal(t, "ssh://opc@10.0.0.7:22", New(remote).Alvo())
 }
 
 // Some transports merge stdout and stderr. `-V` writes to stderr, but the
 // parser has to work in both cases.
-func TestDetectAceitaSaidaEmStdout(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{stdout: saidaVMenosMaiusculo})
+func TestDetectAcceptsOutputOnStdout(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{stdout: outputDashV})
 
 	info, err := New(f).Detect(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "1.20.1", info.Version)
 }
 
-func TestDetectResolveCaminhoRelativoAoPrefixo(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{stderr: saidaVCaminhoRelativo})
+func TestDetectResolvesPathRelativeToPrefix(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{stderr: outputDashVRelativePaths})
 
 	info, err := New(f).Detect(context.Background())
 	require.NoError(t, err)
@@ -77,8 +77,8 @@ func TestDetectResolveCaminhoRelativoAoPrefixo(t *testing.T) {
 
 // An unavailable field is omitted, never estimated: a build that does not
 // declare --pid-path does not get a guessed /run/nginx.pid.
-func TestDetectOmiteCampoQueOVNaoInforma(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{
+func TestDetectOmitsFieldDashVDoesNotReport(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{
 		stderr: "nginx version: nginx/1.27.0\nconfigure arguments: --prefix=/etc/nginx\n",
 	})
 
@@ -88,18 +88,18 @@ func TestDetectOmiteCampoQueOVNaoInforma(t *testing.T) {
 	assert.Empty(t, info.MainConfig)
 	assert.Empty(t, info.ModulesPath)
 
-	bruto, err := json.Marshal(info)
+	raw, err := json.Marshal(info)
 	require.NoError(t, err)
-	assert.NotContains(t, string(bruto), "pid_path")
-	assert.NotContains(t, string(bruto), "main_config")
+	assert.NotContains(t, string(raw), "pid_path")
+	assert.NotContains(t, string(raw), "main_config")
 
 	// An empty list serializes as [], never as null.
-	assert.Contains(t, string(bruto), `"modules":[]`)
-	assert.Contains(t, string(bruto), `"dynamic_available":[]`)
+	assert.Contains(t, string(raw), `"modules":[]`)
+	assert.Contains(t, string(raw), `"dynamic_available":[]`)
 }
 
-func TestDetectVariante(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{
+func TestDetectFlavor(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{
 		stderr: "nginx version: openresty/1.21.4.1\n",
 	})
 
@@ -111,9 +111,9 @@ func TestDetectVariante(t *testing.T) {
 
 // A missing binary is a transport error in the local case: exec returns
 // ErrNotFound without ever running anything.
-func TestDetectNginxAusenteLocalmente(t *testing.T) {
-	f := novoFake("local")
-	f.padrao = &resposta{err: &exec.Error{Name: "nginx", Err: exec.ErrNotFound}}
+func TestDetectNginxMissingLocally(t *testing.T) {
+	f := newFake("local")
+	f.fallback = &response{err: &exec.Error{Name: "nginx", Err: exec.ErrNotFound}}
 
 	_, err := New(f).Detect(context.Background())
 
@@ -126,8 +126,8 @@ func TestDetectNginxAusenteLocalmente(t *testing.T) {
 // In the remote case the same outcome arrives as exit code 127 from the
 // target's shell, with no transport error at all. Both have to become the same
 // diagnostic.
-func TestDetectNginxAusenteRemotamente(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -V", resposta{
+func TestDetectNginxMissingRemotely(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("nginx -V", response{
 		stderr: "bash: nginx: command not found\n",
 		exit:   127,
 	})
@@ -140,8 +140,8 @@ func TestDetectNginxAusenteRemotamente(t *testing.T) {
 	assert.Contains(t, e.Diag.Message, "ssh://opc@10.0.0.7:22")
 }
 
-func TestDetectSaidaNaoReconhecida(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{stderr: "something else entirely\n"})
+func TestDetectUnrecognizedOutput(t *testing.T) {
+	f := newFake("local").respond("nginx -V", response{stderr: "something else entirely\n"})
 
 	_, err := New(f).Detect(context.Background())
 
@@ -150,16 +150,16 @@ func TestDetectSaidaNaoReconhecida(t *testing.T) {
 	assert.Equal(t, CodigoSaidaNaoReconhecida, e.Diag.Code)
 }
 
-func TestDetectUsaBinarioInformado(t *testing.T) {
-	f := novoFake("local").responde("/opt/nginx/sbin/nginx -V", resposta{stderr: saidaVMenosMaiusculo})
+func TestDetectUsesGivenBinary(t *testing.T) {
+	f := newFake("local").respond("/opt/nginx/sbin/nginx -V", response{stderr: outputDashV})
 
 	info, err := New(f, ComBinario("/opt/nginx/sbin/nginx")).Detect(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/nginx/sbin/nginx", info.Binary)
 }
 
-func TestDividirArgumentosRespeitaAspas(t *testing.T) {
-	args := dividirArgumentos(`--prefix=/etc --with-cc-opt='-O2 -g' --with-http_ssl_module`)
+func TestSplitArgumentsRespectsQuotes(t *testing.T) {
+	args := splitArguments(`--prefix=/etc --with-cc-opt='-O2 -g' --with-http_ssl_module`)
 	assert.Equal(t, []string{"--prefix=/etc", "--with-cc-opt=-O2 -g", "--with-http_ssl_module"}, args)
-	assert.Equal(t, []string{}, dividirArgumentos(""))
+	assert.Equal(t, []string{}, splitArguments(""))
 }

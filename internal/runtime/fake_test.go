@@ -8,9 +8,9 @@ import (
 	"sync"
 )
 
-// resposta is a recorded output of a command: what a real nginx wrote, frozen
+// response is a recorded output of a command: what a real nginx wrote, frozen
 // into a test.
-type resposta struct {
+type response struct {
 	stdout string
 	stderr string
 	exit   int
@@ -23,40 +23,40 @@ type resposta struct {
 // came from, and a test that depended on an installed nginx would prove the
 // opposite.
 type fakeTransport struct {
-	descricao string
+	description string
 
-	// respostas is indexed by the whole argv, joined by spaces.
-	respostas map[string]resposta
+	// responses is indexed by the whole argv, joined by spaces.
+	responses map[string]response
 
-	// padrao answers any argv that is not mapped.
-	padrao *resposta
+	// fallback answers any argv that is not mapped.
+	fallback *response
 
-	arquivos   map[string]string
-	errosOpen  map[string]error
+	files      map[string]string
+	openErrors map[string]error
 	mu         sync.Mutex
-	executados [][]string
+	executed   [][]string
 }
 
-func novoFake(descricao string) *fakeTransport {
+func newFake(description string) *fakeTransport {
 	return &fakeTransport{
-		descricao: descricao,
-		respostas: map[string]resposta{},
-		arquivos:  map[string]string{},
-		errosOpen: map[string]error{},
+		description: description,
+		responses:   map[string]response{},
+		files:       map[string]string{},
+		openErrors:  map[string]error{},
 	}
 }
 
-func (f *fakeTransport) responde(argv string, r resposta) *fakeTransport {
-	f.respostas[argv] = r
+func (f *fakeTransport) respond(argv string, r response) *fakeTransport {
+	f.responses[argv] = r
 	return f
 }
 
 func (f *fakeTransport) Open(path string) (io.ReadCloser, error) {
-	if err, ok := f.errosOpen[path]; ok {
+	if err, ok := f.openErrors[path]; ok {
 		return nil, err
 	}
-	if conteudo, ok := f.arquivos[path]; ok {
-		return io.NopCloser(strings.NewReader(conteudo)), nil
+	if content, ok := f.files[path]; ok {
+		return io.NopCloser(strings.NewReader(content)), nil
 	}
 	return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
 }
@@ -67,29 +67,29 @@ func (f *fakeTransport) Glob(pattern string) ([]string, error) {
 
 func (f *fakeTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, int, error) {
 	f.mu.Lock()
-	copia := append([]string(nil), argv...)
-	f.executados = append(f.executados, copia)
+	cloned := append([]string(nil), argv...)
+	f.executed = append(f.executed, cloned)
 	f.mu.Unlock()
 
-	chave := strings.Join(argv, " ")
-	r, ok := f.respostas[chave]
+	key := strings.Join(argv, " ")
+	r, ok := f.responses[key]
 	if !ok {
-		if f.padrao == nil {
-			return nil, []byte("fake: unrecorded argv: " + chave), 127, nil
+		if f.fallback == nil {
+			return nil, []byte("fake: unrecorded argv: " + key), 127, nil
 		}
-		r = *f.padrao
+		r = *f.fallback
 	}
 	return []byte(r.stdout), []byte(r.stderr), r.exit, r.err
 }
 
 func (f *fakeTransport) Close() error { return nil }
 
-func (f *fakeTransport) Describe() string { return f.descricao }
+func (f *fakeTransport) Describe() string { return f.description }
 
-// chamadas returns the argv of each execution, in order. It is what allows
+// calls returns the argv of each execution, in order. It is what allows
 // asserting that ngx did not retry a command with sudo on its own.
-func (f *fakeTransport) chamadas() [][]string {
+func (f *fakeTransport) calls() [][]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([][]string(nil), f.executados...)
+	return append([][]string(nil), f.executed...)
 }

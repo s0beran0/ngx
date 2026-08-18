@@ -62,7 +62,7 @@ func (r *Renderer) Render(env *Envelope) error {
 	// and swallowing it would turn the escape silent, which is exactly what
 	// DR1 forbids. Whoever asks for --quiet wants less noise, not fewer
 	// alerts.
-	if r.Quiet && env.OK && !temAvisoOuPior(env.Diagnostics) {
+	if r.Quiet && env.OK && !hasWarningOrWorse(env.Diagnostics) {
 		return nil
 	}
 
@@ -168,10 +168,10 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 	return nil
 }
 
-// temAvisoOuPior reports whether there is a diagnostic that --quiet must not
+// hasWarningOrWorse reports whether there is a diagnostic that --quiet must not
 // suppress. Info severity is informational and falls into silence; warning
 // and error are signal, and suppressed signal is nonexistent signal.
-func temAvisoOuPior(diags []Diagnostic) bool {
+func hasWarningOrWorse(diags []Diagnostic) bool {
 	for _, d := range diags {
 		if d.Severity == SeverityWarning || d.Severity == SeverityError {
 			return true

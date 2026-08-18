@@ -79,9 +79,9 @@ const BinarioPadrao = "nginx"
 
 // Runtime executes the nginx of a target through a Transport.
 type Runtime struct {
-	tr      transport.Transport
-	binario string
-	sudo    bool
+	tr     transport.Transport
+	binary string
+	sudo   bool
 }
 
 // Opcao configures a Runtime at construction time.
@@ -89,24 +89,24 @@ type Opcao func(*Runtime)
 
 // ComBinario swaps the invoked binary. Useful when nginx is not on the
 // target's PATH or when there is more than one installation.
-func ComBinario(caminho string) Opcao {
+func ComBinario(path string) Opcao {
 	return func(r *Runtime) {
-		if caminho != "" {
-			r.binario = caminho
+		if path != "" {
+			r.binary = path
 		}
 	}
 }
 
 // ComSudo turns on the explicit privilege escalation (DR5). Without it, a
 // command that needs privilege is reported, never retried with sudo.
-func ComSudo(ativo bool) Opcao {
-	return func(r *Runtime) { r.sudo = ativo }
+func ComSudo(enabled bool) Opcao {
+	return func(r *Runtime) { r.sudo = enabled }
 }
 
 // New assembles the runtime on top of a transport.
-func New(tr transport.Transport, opcoes ...Opcao) *Runtime {
-	r := &Runtime{tr: tr, binario: BinarioPadrao}
-	for _, o := range opcoes {
+func New(tr transport.Transport, opts ...Opcao) *Runtime {
+	r := &Runtime{tr: tr, binary: BinarioPadrao}
+	for _, o := range opts {
 		o(r)
 	}
 	return r
@@ -128,22 +128,22 @@ func (r *Runtime) argv(args ...string) []string {
 	if r.sudo {
 		out = append(out, "sudo", "-n")
 	}
-	out = append(out, r.binario)
+	out = append(out, r.binary)
 	return append(out, args...)
 }
 
-// execucao is the raw result of an nginx invocation that ran to completion.
-type execucao struct {
+// execution is the raw result of an nginx invocation that ran to completion.
+type execution struct {
 	argv   []string
 	stdout string
 	stderr string
 	exit   int
 }
 
-// saida returns stderr concatenated with stdout. nginx writes diagnostics to
-// stderr, but transports that merge both channels exist, and a parser that
-// only looked at one of them would fail silently in those cases.
-func (e *execucao) saida() string {
+// combinedOutput returns stderr concatenated with stdout. nginx writes
+// diagnostics to stderr, but transports that merge both channels exist, and a
+// parser that only looked at one of them would fail silently in those cases.
+func (e *execution) combinedOutput() string {
 	if e.stderr == "" {
 		return e.stdout
 	}
@@ -153,15 +153,15 @@ func (e *execucao) saida() string {
 	return e.stderr + "\n" + e.stdout
 }
 
-// executar runs nginx with the given arguments and classifies what prevents a
+// run runs nginx with the given arguments and classifies what prevents a
 // result from existing: missing binary, sudo unavailable, missing privilege
 // and transport failure. A non-zero exit code for any other reason comes back
-// as an execucao, with a nil err -- it is a result.
-func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, error) {
+// as an execution, with a nil err -- it is a result.
+func (r *Runtime) run(ctx context.Context, args ...string) (*execution, error) {
 	argv := r.argv(args...)
 	stdout, stderr, exit, err := r.tr.Run(ctx, argv)
 
-	e := &execucao{
+	e := &execution{
 		argv:   argv,
 		stdout: string(stdout),
 		stderr: string(stderr),
@@ -169,8 +169,8 @@ func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, erro
 	}
 
 	if err != nil {
-		if binarioAusente(err) {
-			return nil, erroNginxAusente(r, e, err)
+		if missingBinary(err) {
+			return nil, nginxMissingError(r, e, err)
 		}
 		return nil, output.Internal(err,
 			"failed to execute %s on %s", strings.Join(argv, " "), r.tr.Describe())
@@ -180,42 +180,42 @@ func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, erro
 		return e, nil
 	}
 
-	texto := e.saida()
+	text := e.combinedOutput()
 
-	if r.sudo && sudoIndisponivel(texto) {
-		return nil, erroSudoIndisponivel(r, e)
+	if r.sudo && sudoUnavailable(text) {
+		return nil, sudoUnavailableError(r, e)
 	}
-	if naoEncontradoNaSaida(exit, texto) {
-		return nil, erroNginxAusente(r, e, nil)
+	if notFoundInOutput(exit, text) {
+		return nil, nginxMissingError(r, e, nil)
 	}
-	if exigePrivilegio(texto) {
-		return nil, erroPrivilegio(r, e)
+	if requiresPrivilege(text) {
+		return nil, privilegeError(r, e)
 	}
 
 	return e, nil
 }
 
-// binarioAusente recognizes the transport failure meaning "that program does
+// missingBinary recognizes the transport failure meaning "that program does
 // not exist". The local transport returns exec.ErrNotFound for a PATH name
 // and an fs.ErrNotExist for an absolute path.
-func binarioAusente(err error) bool {
+func missingBinary(err error) bool {
 	return errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist)
 }
 
-// naoEncontradoNaSaida recognizes the same case coming from a remote shell,
+// notFoundInOutput recognizes the same case coming from a remote shell,
 // where a missing binary is not a transport error: ssh executes, the target's
 // shell answers 127 and writes the complaint to stderr.
-func naoEncontradoNaSaida(exit int, texto string) bool {
+func notFoundInOutput(exit int, text string) bool {
 	if exit != 127 {
 		return false
 	}
-	t := strings.ToLower(texto)
+	t := strings.ToLower(text)
 	return strings.Contains(t, "command not found") ||
 		strings.Contains(t, "no such file or directory") ||
 		strings.Contains(t, "not found")
 }
 
-var padroesPrivilegio = []string{
+var privilegePatterns = []string{
 	"permission denied",
 	"operation not permitted",
 	"must be run as root",
@@ -223,13 +223,13 @@ var padroesPrivilegio = []string{
 	"are you root",
 }
 
-// exigePrivilegio decides whether the output says "permission was missing".
+// requiresPrivilege decides whether the output says "permission was missing".
 // It is deliberately conservative: recognizing too little makes the user see
 // the raw nginx message, which is still the truth; recognizing too much would
 // turn a syntax error into a privilege request, which is a lie.
-func exigePrivilegio(texto string) bool {
-	t := strings.ToLower(texto)
-	for _, p := range padroesPrivilegio {
+func requiresPrivilege(text string) bool {
+	t := strings.ToLower(text)
+	for _, p := range privilegePatterns {
 		if strings.Contains(t, p) {
 			return true
 		}
@@ -237,7 +237,7 @@ func exigePrivilegio(texto string) bool {
 	return false
 }
 
-var padroesSudo = []string{
+var sudoPatterns = []string{
 	"sudo: a password is required",
 	"a terminal is required",
 	"no tty present",
@@ -246,9 +246,9 @@ var padroesSudo = []string{
 	"sudo: not found",
 }
 
-func sudoIndisponivel(texto string) bool {
-	t := strings.ToLower(texto)
-	for _, p := range padroesSudo {
+func sudoUnavailable(text string) bool {
+	t := strings.ToLower(text)
+	for _, p := range sudoPatterns {
 		if strings.Contains(t, p) {
 			return true
 		}
@@ -256,30 +256,30 @@ func sudoIndisponivel(texto string) bool {
 	return false
 }
 
-// comandoPrivilegiado returns the exact line the operator would have to
+// privilegedCommand returns the exact line the operator would have to
 // authorize. DR5 requires saying what the command is: "needs privilege"
 // without the command forces the reader to guess, and guessing in production
 // is how privilege gets escalated by mistake.
-func comandoPrivilegiado(argv []string) string {
+func privilegedCommand(argv []string) string {
 	if len(argv) > 0 && argv[0] == "sudo" {
 		return strings.Join(argv, " ")
 	}
 	return "sudo -n " + strings.Join(argv, " ")
 }
 
-func erroPrivilegio(r *Runtime, e *execucao) error {
+func privilegeError(r *Runtime, e *execution) error {
 	var msg string
 	if r.sudo {
 		msg = fmt.Sprintf(
 			"the command `%s` ran with --sudo on %s and still did not have "+
 				"permission to read the configuration. nginx output: %s",
-			strings.Join(e.argv, " "), r.tr.Describe(), resumo(e.saida()))
+			strings.Join(e.argv, " "), r.tr.Describe(), summarize(e.combinedOutput()))
 	} else {
 		msg = fmt.Sprintf(
 			"the command `%s` requires privilege on %s and ngx does not escalate on "+
 				"its own: retry with --sudo, which runs `%s`. nginx output: %s",
 			strings.Join(e.argv, " "), r.tr.Describe(),
-			comandoPrivilegiado(e.argv), resumo(e.saida()))
+			privilegedCommand(e.argv), summarize(e.combinedOutput()))
 	}
 	return &output.Error{
 		Code: output.ExitInternal,
@@ -291,7 +291,7 @@ func erroPrivilegio(r *Runtime, e *execucao) error {
 	}
 }
 
-func erroSudoIndisponivel(r *Runtime, e *execucao) error {
+func sudoUnavailableError(r *Runtime, e *execution) error {
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -302,12 +302,12 @@ func erroSudoIndisponivel(r *Runtime, e *execucao) error {
 					"ngx runs with no shell and no terminal, so there is nowhere to type a password; "+
 					"allow the command in sudoers or run ngx as a user that already has "+
 					"read access to the configuration",
-				r.tr.Describe(), resumo(e.saida())),
+				r.tr.Describe(), summarize(e.combinedOutput())),
 		},
 	}
 }
 
-func erroNginxAusente(r *Runtime, e *execucao, causa error) error {
+func nginxMissingError(r *Runtime, e *execution, cause error) error {
 	err := &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -318,12 +318,12 @@ func erroNginxAusente(r *Runtime, e *execucao, causa error) error {
 					"If the binary exists under another name or outside the PATH, give the path",
 				r.tr.Describe(), strings.Join(e.argv, " ")),
 		},
-		Err: causa,
+		Err: cause,
 	}
 	return err
 }
 
-func erroSaidaNaoReconhecida(r *Runtime, e *execucao, oQue string) error {
+func unrecognizedOutputError(r *Runtime, e *execution, what string) error {
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
@@ -331,23 +331,23 @@ func erroSaidaNaoReconhecida(r *Runtime, e *execucao, oQue string) error {
 			Code:     CodigoSaidaNaoReconhecida,
 			Message: fmt.Sprintf(
 				"the output of `%s` on %s does not have the expected format (%s): %s",
-				strings.Join(e.argv, " "), r.tr.Describe(), oQue, resumo(e.saida())),
+				strings.Join(e.argv, " "), r.tr.Describe(), what, summarize(e.combinedOutput())),
 		},
 	}
 }
 
-var espacos = regexp.MustCompile(`\s+`)
+var whitespace = regexp.MustCompile(`\s+`)
 
-// resumo condenses a multi-line output into a short single line, so it fits
+// summarize condenses a multi-line output into a short single line, so it fits
 // in a diagnostic message without destroying the readability of the JSON.
-func resumo(texto string) string {
-	t := strings.TrimSpace(espacos.ReplaceAllString(texto, " "))
+func summarize(text string) string {
+	t := strings.TrimSpace(whitespace.ReplaceAllString(text, " "))
 	if t == "" {
 		return "(no output)"
 	}
-	const limite = 300
-	if len(t) > limite {
-		return t[:limite] + "..."
+	const limit = 300
+	if len(t) > limit {
+		return t[:limit] + "..."
 	}
 	return t
 }

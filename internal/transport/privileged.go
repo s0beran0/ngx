@@ -34,7 +34,7 @@ const CodigoLeituraPeloDump = "NGX-0232"
 // and news involving sudo deserves to be seen.
 const CodigoElevacaoForaDaArvore = "NGX-0233"
 
-// privilegiado wraps a Transport and, when a plain read runs into permissions,
+// privilegedTransport wraps a Transport and, when a plain read runs into permissions,
 // repeats the read of that file with privilege.
 //
 // Why a decorator and not a branch inside the SSH transport: the rule holds
@@ -47,7 +47,7 @@ const CodigoElevacaoForaDaArvore = "NGX-0233"
 // refused. In a configuration of 132 files where one is restricted, 131 keep
 // being read as the ordinary user, and the diagnostic names the only one that
 // demanded more.
-type privilegiado struct {
+type privilegedTransport struct {
 	Transport
 	ctx context.Context
 
@@ -63,31 +63,31 @@ type privilegiado struct {
 	// when it broke, and then the dump does not answer. Reading file by
 	// file always answers.
 	dump      func(context.Context) (map[string][]byte, error)
-	dumpFeito bool
+	dumpDone  bool
 	dumpCache map[string][]byte
-	dumpErro  error
+	dumpErr   error
 
 	mu sync.Mutex
 
-	// arvore holds the directories the configuration reached WITHOUT
+	// knownTree holds the directories the configuration reached WITHOUT
 	// privilege, plus the one of the top-level file. It is not a fixed list
 	// of paths: a fixed list would break a non-standard installation, and
 	// the very server we measured includes from /etc/letsencrypt, outside
 	// /etc/nginx. The tree is derived from what the configuration actually
 	// references.
-	arvore       map[string]bool
-	elevados     []string
-	foraDaArvore []string
-	viaDump      []string
-	recusados    map[string]string
+	knownTree        map[string]bool
+	elevated         []string
+	outsideKnownTree []string
+	fromDump         []string
+	refused          map[string]string
 }
 
 // ComLeituraPrivilegiada returns a Transport that repeats with privilege the
-// read that was refused for permissions. Passing ativo=false returns the
+// read that was refused for permissions. Passing enabled=false returns the
 // original transport untouched: the decision to escalate belongs to the
 // caller, and DR5 requires it to be explicit.
-func ComLeituraPrivilegiada(ctx context.Context, tr Transport, ativo bool) Transport {
-	return ComLeituraPrivilegiadaEDump(ctx, tr, ativo, nil)
+func ComLeituraPrivilegiada(ctx context.Context, tr Transport, enabled bool) Transport {
+	return ComLeituraPrivilegiadaEDump(ctx, tr, enabled, nil)
 }
 
 // ComLeituraPrivilegiadaEDump adds the last resort: a function that returns
@@ -96,54 +96,54 @@ func ComLeituraPrivilegiada(ctx context.Context, tr Transport, ativo bool) Trans
 func ComLeituraPrivilegiadaEDump(
 	ctx context.Context,
 	tr Transport,
-	ativo bool,
+	enabled bool,
 	dump func(context.Context) (map[string][]byte, error),
 ) Transport {
-	if !ativo {
+	if !enabled {
 		return tr
 	}
-	return &privilegiado{
+	return &privilegedTransport{
 		Transport: tr, ctx: ctx, dump: dump,
-		arvore: map[string]bool{}, recusados: map[string]string{},
+		knownTree: map[string]bool{}, refused: map[string]string{},
 	}
 }
 
-// conteudoDoDump returns the content of a path according to the dump, running
+// dumpContent returns the content of a path according to the dump, running
 // it at most once per transport. One `nginx -T` per refused file would be
 // absurd in a configuration of 132 files.
-func (p *privilegiado) conteudoDoDump(caminho string) ([]byte, bool) {
+func (p *privilegedTransport) dumpContent(filePath string) ([]byte, bool) {
 	if p.dump == nil {
 		return nil, false
 	}
 	p.mu.Lock()
-	if !p.dumpFeito {
-		p.dumpFeito = true
-		p.dumpCache, p.dumpErro = p.dump(p.ctx)
+	if !p.dumpDone {
+		p.dumpDone = true
+		p.dumpCache, p.dumpErr = p.dump(p.ctx)
 	}
-	cache, err := p.dumpCache, p.dumpErro
+	cache, err := p.dumpCache, p.dumpErr
 	p.mu.Unlock()
 
 	if err != nil {
 		return nil, false
 	}
-	conteudo, ok := cache[caminho]
-	return conteudo, ok
+	content, ok := cache[filePath]
+	return content, ok
 }
 
-func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
+func (p *privilegedTransport) Open(filePath string) (io.ReadCloser, error) {
 	// The directory of the FIRST requested path enters the tree before
 	// anything else: it is the configuration the operator named, so there
 	// is nothing new about it, even if it needs privilege.
-	p.semearArvore(caminho)
+	p.seedKnownTree(filePath)
 
-	rc, err := p.Transport.Open(caminho)
+	rc, err := p.Transport.Open(filePath)
 	if err == nil {
 		// Reached without privilege: its directory becomes known, and an
 		// elevated sibling inside it stops being news.
-		p.registrarNaArvore(caminho)
+		p.recordInKnownTree(filePath)
 		return rc, nil
 	}
-	if !ehPermissao(err) {
+	if !isPermissionDenied(err) {
 		return rc, err
 	}
 
@@ -162,16 +162,16 @@ func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
 	//
 	// The -n in sudo avoids hanging waiting for a password in a process
 	// with no terminal.
-	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "cat", "--", caminho})
+	stdout, stderr, exitCode, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "cat", "--", filePath})
 	if errRun != nil {
 		return nil, errRun
 	}
-	if saida != 0 {
-		if conteudo, ok := p.conteudoDoDump(caminho); ok {
-			p.registrarViaDump(caminho)
-			return io.NopCloser(bytes.NewReader(conteudo)), nil
+	if exitCode != 0 {
+		if content, ok := p.dumpContent(filePath); ok {
+			p.recordFromDump(filePath)
+			return io.NopCloser(bytes.NewReader(content)), nil
 		}
-		p.registrarRecusa(caminho, primeiraLinha(string(stderr)))
+		p.recordRefusal(filePath, firstLine(string(stderr)))
 		// Returns the ORIGINAL permission error: for the caller, the file
 		// is still unreadable, and the cause is still permissions. The
 		// detail of what sudo answered goes in the diagnostic, not in the
@@ -179,161 +179,161 @@ func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
 		return nil, err
 	}
 
-	p.registrarElevado(caminho)
+	p.recordElevated(filePath)
 	return io.NopCloser(bytes.NewReader(stdout)), nil
 }
 
-func (p *privilegiado) Glob(padrao string) ([]string, error) {
-	achados, err := p.Transport.Glob(padrao)
-	if err == nil || !ehPermissao(err) {
-		return achados, err
+func (p *privilegedTransport) Glob(pattern string) ([]string, error) {
+	matches, err := p.Transport.Glob(pattern)
+	if err == nil || !isPermissionDenied(err) {
+		return matches, err
 	}
 
 	// A directory the ordinary user cannot list. `ls -1` on a single
 	// directory, without recursion, is the minimum that answers the
 	// question.
-	dir, arquivo := path.Split(padrao)
+	dir, base := path.Split(pattern)
 	dir = path.Clean(dir)
 	// `--` for the same reason as with cat: without it a directory whose
 	// name starts with `-` would become an ls option.
-	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "ls", "-1", "--", dir})
+	stdout, stderr, exitCode, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "ls", "-1", "--", dir})
 	if errRun != nil {
 		return nil, errRun
 	}
-	if saida != 0 {
+	if exitCode != 0 {
 		// The dump already knows ALL the files of the effective
 		// configuration, so it answers the pattern without listing any
 		// directory. This is the hardened server case: sudoers allows
 		// nginx and refuses both `cat` and `ls`.
-		if casados, ok := p.globPeloDump(padrao); ok {
-			p.registrarViaDump(dir)
-			return casados, nil
+		if matched, ok := p.globFromDump(pattern); ok {
+			p.recordFromDump(dir)
+			return matched, nil
 		}
-		p.registrarRecusa(dir, primeiraLinha(string(stderr)))
+		p.recordRefusal(dir, firstLine(string(stderr)))
 		return nil, err
 	}
 
-	casados := []string{}
-	for _, nome := range strings.Split(string(stdout), "\n") {
-		nome = strings.TrimSpace(nome)
-		if nome == "" {
+	matched := []string{}
+	for _, name := range strings.Split(string(stdout), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
 		// path.Match, never filepath.Match: the remote target uses the
 		// POSIX separator even when ngx runs on Windows.
-		if ok, _ := path.Match(arquivo, nome); ok {
-			casados = append(casados, path.Join(dir, nome))
+		if ok, _ := path.Match(base, name); ok {
+			matched = append(matched, path.Join(dir, name))
 		}
 	}
-	sort.Strings(casados)
-	p.registrarElevado(dir)
-	return casados, nil
+	sort.Strings(matched)
+	p.recordElevated(dir)
+	return matched, nil
 }
 
-// globPeloDump matches the pattern against the paths the dump knows. It
+// globFromDump matches the pattern against the paths the dump knows. It
 // returns ok=false when there is no dump: an empty list with ok=true would be
 // indistinguishable from "the pattern matched nothing", and presenting an
 // incomplete configuration as complete is the defect DR6 exists to prevent.
-func (p *privilegiado) globPeloDump(padrao string) ([]string, bool) {
+func (p *privilegedTransport) globFromDump(pattern string) ([]string, bool) {
 	if p.dump == nil {
 		return nil, false
 	}
 	p.mu.Lock()
-	if !p.dumpFeito {
-		p.dumpFeito = true
-		p.dumpCache, p.dumpErro = p.dump(p.ctx)
+	if !p.dumpDone {
+		p.dumpDone = true
+		p.dumpCache, p.dumpErr = p.dump(p.ctx)
 	}
-	cache, err := p.dumpCache, p.dumpErro
+	cache, err := p.dumpCache, p.dumpErr
 	p.mu.Unlock()
 
 	if err != nil {
 		return nil, false
 	}
 
-	casados := []string{}
-	for caminho := range cache {
-		if ok, _ := path.Match(padrao, caminho); ok {
-			casados = append(casados, caminho)
+	matched := []string{}
+	for filePath := range cache {
+		if ok, _ := path.Match(pattern, filePath); ok {
+			matched = append(matched, filePath)
 		}
 	}
-	sort.Strings(casados)
-	return casados, true
+	sort.Strings(matched)
+	return matched, true
 }
 
-func (p *privilegiado) registrarElevado(caminho string) {
-	dentro := p.dentroDaArvore(caminho)
+func (p *privilegedTransport) recordElevated(filePath string) {
+	inside := p.insideKnownTree(filePath)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if dentro {
-		p.elevados = append(p.elevados, caminho)
+	if inside {
+		p.elevated = append(p.elevated, filePath)
 		return
 	}
-	p.foraDaArvore = append(p.foraDaArvore, caminho)
+	p.outsideKnownTree = append(p.outsideKnownTree, filePath)
 }
 
-// semearArvore records the directory of the top-level file, exactly once.
-func (p *privilegiado) semearArvore(caminho string) {
+// seedKnownTree records the directory of the top-level file, exactly once.
+func (p *privilegedTransport) seedKnownTree(filePath string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.arvore) == 0 {
-		p.arvore[path.Dir(caminho)] = true
+	if len(p.knownTree) == 0 {
+		p.knownTree[path.Dir(filePath)] = true
 	}
 }
 
-func (p *privilegiado) registrarNaArvore(caminho string) {
+func (p *privilegedTransport) recordInKnownTree(filePath string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.arvore[path.Dir(caminho)] = true
+	p.knownTree[path.Dir(filePath)] = true
 }
 
-// dentroDaArvore tells whether the path is in some directory the configuration
+// insideKnownTree tells whether the path is in some directory the configuration
 // already reached without privilege, or below it.
-func (p *privilegiado) dentroDaArvore(caminho string) bool {
+func (p *privilegedTransport) insideKnownTree(filePath string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	dir := path.Dir(caminho)
-	for conhecido := range p.arvore {
-		if dir == conhecido || strings.HasPrefix(dir, conhecido+"/") {
+	dir := path.Dir(filePath)
+	for known := range p.knownTree {
+		if dir == known || strings.HasPrefix(dir, known+"/") {
 			return true
 		}
 	}
 	return false
 }
 
-func (p *privilegiado) registrarViaDump(caminho string) {
+func (p *privilegedTransport) recordFromDump(filePath string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.viaDump = append(p.viaDump, caminho)
+	p.fromDump = append(p.fromDump, filePath)
 }
 
-func (p *privilegiado) registrarRecusa(caminho, motivo string) {
+func (p *privilegedTransport) recordRefusal(filePath, reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.recusados[caminho] = motivo
+	p.refused[filePath] = reason
 }
 
 // Diagnosticos reports what required privilege and what did not work even with
 // it. Escalating in silence would hide from the operator that reading their
 // server configuration went through sudo.
-func (p *privilegiado) Diagnosticos() []output.Diagnostic {
+func (p *privilegedTransport) Diagnosticos() []output.Diagnostic {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	diags := []output.Diagnostic{}
-	if len(p.elevados) > 0 {
-		lista := append([]string(nil), p.elevados...)
-		sort.Strings(lista)
+	if len(p.elevated) > 0 {
+		list := append([]string(nil), p.elevated...)
+		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityInfo,
 			Code:     CodigoLeituraPrivilegiada,
 			Message: fmt.Sprintf(
 				"%d path(s) could only be read with privilege, because --sudo was "+
-					"requested: %s", len(lista), resumirCaminhos(lista)),
+					"requested: %s", len(list), summarizePaths(list)),
 		})
 	}
-	if len(p.foraDaArvore) > 0 {
-		lista := append([]string(nil), p.foraDaArvore...)
-		sort.Strings(lista)
+	if len(p.outsideKnownTree) > 0 {
+		list := append([]string(nil), p.outsideKnownTree...)
+		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityWarning,
 			Code:     CodigoElevacaoForaDaArvore,
@@ -341,65 +341,65 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 				"%d path(s) were read with privilege OUTSIDE any directory the "+
 					"configuration already reached without it: %s. Check whether the "+
 					"include that led there is expected",
-				len(lista), resumirCaminhos(lista)),
+				len(list), summarizePaths(list)),
 		})
 	}
 
-	if len(p.viaDump) > 0 {
-		lista := append([]string(nil), p.viaDump...)
-		sort.Strings(lista)
+	if len(p.fromDump) > 0 {
+		list := append([]string(nil), p.fromDump...)
+		sort.Strings(list)
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityInfo,
 			Code:     CodigoLeituraPeloDump,
 			Message: fmt.Sprintf(
 				"%d path(s) came from `nginx -T` with privilege, because sudo on the "+
 					"target does not allow reading the file directly: %s",
-				len(lista), resumirCaminhos(lista)),
+				len(list), summarizePaths(list)),
 		})
 	}
 
-	for caminho, motivo := range p.recusados {
+	for filePath, reason := range p.refused {
 		diags = append(diags, output.Diagnostic{
 			Severity: output.SeverityError,
 			Code:     CodigoPrivilegioNegado,
-			File:     caminho,
+			File:     filePath,
 			Message: fmt.Sprintf(
 				"not even with privilege was it possible to read this path (%s); check "+
 					"whether sudo on the target allows `cat` without a password for the "+
-					"user running ngx", motivo),
+					"user running ngx", reason),
 		})
 	}
 	return diags
 }
 
-// ehPermissao recognizes a permission refusal coming from any target. The SFTP
+// isPermissionDenied recognizes a permission refusal coming from any target. The SFTP
 // error matches fs.ErrPermission -- verified against a real server --, so the
 // same check serves both local and remote.
-func ehPermissao(err error) bool {
+func isPermissionDenied(err error) bool {
 	return errors.Is(err, fs.ErrPermission)
 }
 
-func primeiraLinha(texto string) string {
-	texto = strings.TrimSpace(texto)
-	if i := strings.IndexByte(texto, '\n'); i >= 0 {
-		return texto[:i]
+func firstLine(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		return text[:i]
 	}
-	if texto == "" {
+	if text == "" {
 		return "no detail from sudo"
 	}
-	return texto
+	return text
 }
 
-// resumirCaminhos avoids dumping a list of hundreds of paths into a single
+// summarizePaths avoids dumping a list of hundreds of paths into a single
 // diagnostic line. The exact count already appears before it; here a few
 // examples are enough for the operator to recognize what it is about.
-func resumirCaminhos(lista []string) string {
-	const mostrar = 3
-	if len(lista) <= mostrar {
-		return strings.Join(lista, ", ")
+func summarizePaths(list []string) string {
+	const maxShown = 3
+	if len(list) <= maxShown {
+		return strings.Join(list, ", ")
 	}
 	return fmt.Sprintf("%s and %d more",
-		strings.Join(lista[:mostrar], ", "), len(lista)-mostrar)
+		strings.Join(list[:maxShown], ", "), len(list)-maxShown)
 }
 
 // Diagnosticos collects what a transport observed, when it has something to

@@ -9,15 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func escreve(t *testing.T, dir, nome, conteudo string) string {
+func write(t *testing.T, dir, name, content string) string {
 	t.Helper()
-	p := filepath.Join(dir, nome)
-	require.NoError(t, os.WriteFile(p, []byte(conteudo), 0o644))
+	p := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
 	return p
 }
 
 // With no file at all, the defaults need to be usable on their own.
-func TestLoadSemArquivosUsaDefaults(t *testing.T) {
+func TestLoadWithNoFilesUsesDefaults(t *testing.T) {
 	dir := t.TempDir()
 
 	s, err := settings.Load(filepath.Join(dir, "global.yaml"), filepath.Join(dir, "local.yaml"))
@@ -28,9 +28,9 @@ func TestLoadSemArquivosUsaDefaults(t *testing.T) {
 	require.Contains(t, s.Output.Redact, "ssl_certificate_key")
 }
 
-func TestLoadLeArquivoGlobal(t *testing.T) {
+func TestLoadReadsGlobalFile(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 nginx:
   binary: /usr/sbin/nginx
   config: /etc/nginx/nginx.conf
@@ -46,16 +46,16 @@ output:
 }
 
 // The rule from the spec: the local file overrides the global one, key by key.
-func TestLocalSobrescreveGlobal(t *testing.T) {
+func TestLocalOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 nginx:
   binary: /usr/sbin/nginx
   config: /etc/nginx/nginx.conf
 output:
   format: json
 `)
-	local := escreve(t, dir, "local.yaml", `
+	local := write(t, dir, "local.yaml", `
 nginx:
   config: /tmp/teste/nginx.conf
 `)
@@ -70,9 +70,9 @@ nginx:
 
 // A file written from the complete spec contains keys from future versions.
 // They need to be ignored, not turned into an error.
-func TestChavesDeVersoesFuturasSaoIgnoradas(t *testing.T) {
+func TestKeysFromFutureVersionsAreIgnored(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 nginx:
   binary: /usr/sbin/nginx
 apply:
@@ -93,20 +93,20 @@ mcp:
 	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary)
 }
 
-func TestYAMLInvalidoVirarErro(t *testing.T) {
+func TestInvalidYAMLBecomesError(t *testing.T) {
 	dir := t.TempDir()
-	ruim := escreve(t, dir, "ruim.yaml", "nginx: [isto: nao: fecha")
+	bad := write(t, dir, "bad.yaml", "nginx: [isto: nao: fecha")
 
-	_, err := settings.Load(ruim, filepath.Join(dir, "ausente.yaml"))
+	_, err := settings.Load(bad, filepath.Join(dir, "ausente.yaml"))
 
 	require.Error(t, err)
 }
 
 // If the user declares redact, their list replaces the default one instead of
 // adding to it -- otherwise they cannot remove a default rule.
-func TestRedactDeclaradoSubstituiODefault(t *testing.T) {
+func TestDeclaredRedactReplacesTheDefault(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 output:
   redact:
     - my_secret_directive
@@ -120,9 +120,9 @@ output:
 
 // redact: [] is an empty list declared on purpose: the user decided to turn
 // redaction off, and that must be respected.
-func TestRedactListaVaziaDesligaARedacao(t *testing.T) {
+func TestEmptyRedactListTurnsRedactionOff(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 output:
   redact: []
 `)
@@ -137,9 +137,9 @@ output:
 // commented out every item of the list. That cannot be confused with a
 // declared empty list: the defaults need to survive, otherwise redaction turns
 // off silently on a security feature.
-func TestRedactNuloPreservaOsDefaults(t *testing.T) {
+func TestNullRedactPreservesTheDefaults(t *testing.T) {
 	dir := t.TempDir()
-	global := escreve(t, dir, "global.yaml", `
+	global := write(t, dir, "global.yaml", `
 output:
   redact:
 `)

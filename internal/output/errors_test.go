@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodeOfNilEhSucesso(t *testing.T) {
+func TestCodeOfNilIsSuccess(t *testing.T) {
 	require.Equal(t, output.ExitOK, output.CodeOf(nil))
 }
 
 // An error that carries no code is an internal error, not a success.
-func TestCodeOfErroDesconhecidoEhInterno(t *testing.T) {
+func TestCodeOfUnknownErrorIsInternal(t *testing.T) {
 	require.Equal(t, output.ExitInternal, output.CodeOf(errors.New("boom")))
 }
 
@@ -22,7 +22,7 @@ func TestCodeOfErroDesconhecidoEhInterno(t *testing.T) {
 // Comparing a symbolic constant against a symbolic constant does not catch an
 // accidental value swap (e.g. ExitDrift going from 7 to 8); here we pin the
 // numbers.
-func TestValoresDosExitCodesSaoContrato(t *testing.T) {
+func TestExitCodeValuesAreContract(t *testing.T) {
 	require.Equal(t, 0, int(output.ExitOK))
 	require.Equal(t, 1, int(output.ExitInternal))
 	require.Equal(t, 2, int(output.ExitUsage))
@@ -31,9 +31,9 @@ func TestValoresDosExitCodesSaoContrato(t *testing.T) {
 	require.Equal(t, 9, int(output.ExitHashMismatch))
 }
 
-func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
-	casos := []struct {
-		nome     string
+func TestConstructorsCarryTheirCode(t *testing.T) {
+	cases := []struct {
+		name     string
 		err      error
 		want     output.ExitCode
 		wantDiag string
@@ -45,8 +45,8 @@ func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 		{"internal", output.Internal(errors.New("io"), "read failed"), output.ExitInternal, "NGX-0001"},
 	}
 
-	for _, c := range casos {
-		t.Run(c.nome, func(t *testing.T) {
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			require.Equal(t, c.want, output.CodeOf(c.err))
 
 			var e *output.Error
@@ -59,7 +59,7 @@ func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 
 // The code needs to survive wrapping, otherwise an error wrapped by an
 // intermediate layer silently becomes exit 1.
-func TestCodeOfAtravessaWrapping(t *testing.T) {
+func TestCodeOfTraversesWrapping(t *testing.T) {
 	err := fmt.Errorf("while loading the configuration: %w", output.Usage("invalid flag"))
 
 	require.Equal(t, output.ExitUsage, output.CodeOf(err))
@@ -67,7 +67,7 @@ func TestCodeOfAtravessaWrapping(t *testing.T) {
 
 // Every typed error needs to yield a diagnostic that can be shown to the
 // agent.
-func TestErroExpoeDiagnostico(t *testing.T) {
+func TestErrorExposesDiagnostic(t *testing.T) {
 	err := output.Usage("malformed selector: %q", "http..server")
 
 	var e *output.Error
@@ -79,7 +79,7 @@ func TestErroExpoeDiagnostico(t *testing.T) {
 
 // HashMismatch is the error that stops the agent from acting on a stale ID.
 // The message needs to show both hashes so it knows what happened.
-func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
+func TestHashMismatchShowsBothHashes(t *testing.T) {
 	err := output.HashMismatch("sha256:expected", "sha256:current")
 
 	require.Contains(t, err.Error(), "sha256:expected")
@@ -89,7 +89,7 @@ func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
 // Internal needs to preserve the original cause via Unwrap, even if it does
 // not show up in the displayed message. Without that, whoever calls
 // errors.Is/errors.As against the cause never finds it.
-func TestInternalPreservaACausa(t *testing.T) {
-	causa := errors.New("io: disk full")
-	require.ErrorIs(t, output.Internal(causa, "read failed"), causa)
+func TestInternalPreservesTheCause(t *testing.T) {
+	cause := errors.New("io: disk full")
+	require.ErrorIs(t, output.Internal(cause, "read failed"), cause)
 }

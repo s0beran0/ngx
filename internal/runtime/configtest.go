@@ -34,36 +34,36 @@ type TestResult struct {
 // TestConfig runs `nginx -t` on the target and translates the output into
 // diagnostics.
 func (r *Runtime) TestConfig(ctx context.Context) (*TestResult, error) {
-	e, err := r.executar(ctx, "-t")
+	e, err := r.run(ctx, "-t")
 	if err != nil {
 		return nil, err
 	}
-	return montarTestResult(e), nil
+	return buildTestResult(e), nil
 }
 
-func montarTestResult(e *execucao) *TestResult {
-	texto := e.saida()
+func buildTestResult(e *execution) *TestResult {
+	text := e.combinedOutput()
 	res := &TestResult{
 		OK:          e.exit == 0,
-		Diagnostics: ParseDiagnosticos(texto),
-		Raw:         strings.TrimRight(texto, "\n"),
+		Diagnostics: ParseDiagnosticos(text),
+		Raw:         strings.TrimRight(text, "\n"),
 	}
-	res.ConfigFile = arquivoTestado(texto)
+	res.ConfigFile = testedFile(text)
 	return res
 }
 
 var (
 	// An nginx diagnostic line: "nginx: [emerg] message".
-	reDiagnostico = regexp.MustCompile(`^nginx: \[([a-z]+)\] (.*)$`)
+	reDiagnostic = regexp.MustCompile(`^nginx: \[([a-z]+)\] (.*)$`)
 
 	// Location suffix: "... in /etc/nginx/conf.d/a.conf:3".
 	// The "in" is greedy on purpose -- messages have "in" in the middle
 	// ("invalid number of arguments in \"listen\" directive in /f.conf:2")
 	// and the one that matters is always the last.
-	reLocalizacao = regexp.MustCompile(`^(.*) in (\S+):(\d+)$`)
+	reLocation = regexp.MustCompile(`^(.*) in (\S+):(\d+)$`)
 
 	// Summary lines, which name the top-level file that was tested.
-	reArquivoTestado = regexp.MustCompile(
+	reTestedFile = regexp.MustCompile(
 		`configuration file (\S+) (?:syntax is ok|test (?:is successful|failed))`)
 )
 
@@ -77,25 +77,25 @@ var (
 //
 // The nginx level becomes severity; the code is always the same, because
 // severity never goes into the code.
-func ParseDiagnosticos(texto string) []output.Diagnostic {
+func ParseDiagnosticos(text string) []output.Diagnostic {
 	diags := []output.Diagnostic{}
 
-	for _, linha := range strings.Split(texto, "\n") {
-		linha = strings.TrimRight(linha, "\r")
-		if strings.TrimSpace(linha) == "" {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		m := reDiagnostico.FindStringSubmatch(linha)
+		m := reDiagnostic.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 
 		d := output.Diagnostic{
-			Severity: severidadeDoNivel(m[1]),
+			Severity: severityFromLevel(m[1]),
 			Code:     CodigoTesteConfig,
 			Message:  m[2],
 		}
-		if loc := reLocalizacao.FindStringSubmatch(d.Message); loc != nil {
+		if loc := reLocation.FindStringSubmatch(d.Message); loc != nil {
 			if n, err := strconv.Atoi(loc[3]); err == nil {
 				d.Message = loc[1]
 				d.File = loc[2]
@@ -108,11 +108,11 @@ func ParseDiagnosticos(texto string) []output.Diagnostic {
 	return diags
 }
 
-// severidadeDoNivel maps the nginx level to the envelope severity. An unknown
+// severityFromLevel maps the nginx level to the envelope severity. An unknown
 // level becomes an error, not info: underrating a level that is not
 // recognized hides exactly the new case.
-func severidadeDoNivel(nivel string) output.Severity {
-	switch nivel {
+func severityFromLevel(level string) output.Severity {
+	switch level {
 	case "warn":
 		return output.SeverityWarning
 	case "notice", "info", "debug":
@@ -122,8 +122,8 @@ func severidadeDoNivel(nivel string) output.Severity {
 	}
 }
 
-func arquivoTestado(texto string) string {
-	if m := reArquivoTestado.FindStringSubmatch(texto); m != nil {
+func testedFile(text string) string {
+	if m := reTestedFile.FindStringSubmatch(text); m != nil {
 		return m[1]
 	}
 	return ""

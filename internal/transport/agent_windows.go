@@ -21,12 +21,12 @@ import (
 // CreateNamedPipeW right below it.
 const PipeSSHAgentWindows = `\\.\pipe\openssh-ssh-agent`
 
-// tempoLimiteSSHAgentWindows caps the wait on a busy pipe. ERROR_PIPE_BUSY is
+// sshAgentPipeTimeout caps the wait on a busy pipe. ERROR_PIPE_BUSY is
 // transient and go-winio does the retry for us, but without a ceiling a stuck
 // agent would hold the command indefinitely.
-const tempoLimiteSSHAgentWindows = 2 * time.Second
+const sshAgentPipeTimeout = 2 * time.Second
 
-// conectarSSHAgent opens the connection to the system ssh-agent.
+// connectSSHAgent opens the connection to the system ssh-agent.
 //
 // The rule mirrors OpenSSH on Windows: honor SSH_AUTH_SOCK when it is set and,
 // only when empty, fall back to the default pipe. That is literally what
@@ -38,22 +38,22 @@ const tempoLimiteSSHAgentWindows = 2 * time.Second
 // (1Password, gpg-agent, a WSL relay).
 //
 // Not reaching the agent is not an ngx error: it comes wrapped in
-// errSSHAgentAusente and amounts to one less method in the list.
+// errNoSSHAgent and amounts to one less method in the list.
 //
 // The signature is identical to the one in agent_unix.go: the build tags pick
 // which of the two goes into the binary and the rest of the package does not
 // know the difference.
-func conectarSSHAgent() (net.Conn, error) {
-	caminho := os.Getenv(EnvSocketSSHAgent)
-	if caminho == "" {
-		caminho = PipeSSHAgentWindows
+func connectSSHAgent() (net.Conn, error) {
+	pipePath := os.Getenv(EnvSocketSSHAgent)
+	if pipePath == "" {
+		pipePath = PipeSSHAgentWindows
 	}
 
-	limite := tempoLimiteSSHAgentWindows
-	conn, err := winio.DialPipe(caminho, &limite)
+	timeout := sshAgentPipeTimeout
+	conn, err := winio.DialPipe(pipePath, &timeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: could not talk to the named pipe %s: %w",
-			errSSHAgentAusente, caminho, err)
+			errNoSSHAgent, pipePath, err)
 	}
 	return conn, nil
 }

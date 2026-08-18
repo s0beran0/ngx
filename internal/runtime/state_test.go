@@ -12,9 +12,9 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-func TestStateMasterVivo(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{})
-	f.arquivos["/run/nginx.pid"] = "4242\n"
+func TestStateMasterAlive(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("kill -0 4242", response{})
+	f.files["/run/nginx.pid"] = "4242\n"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -25,8 +25,8 @@ func TestStateMasterVivo(t *testing.T) {
 	assert.Empty(t, s.Diagnostics)
 }
 
-func TestStatePidfileAusenteSignificaParado(t *testing.T) {
-	f := novoFake("local")
+func TestStateMissingPidfileMeansStopped(t *testing.T) {
+	f := newFake("local")
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -41,9 +41,9 @@ func TestStatePidfileAusenteSignificaParado(t *testing.T) {
 // "I could not read it" is different from "it does not exist" (DR5). Without
 // permission, the field drops out of the JSON and a diagnostic says why --
 // never a silent false.
-func TestStatePidfileIlegivelOmiteRunning(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22")
-	f.errosOpen["/run/nginx.pid"] = &fs.PathError{
+func TestStateUnreadablePidfileOmitsRunning(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22")
+	f.openErrors["/run/nginx.pid"] = &fs.PathError{
 		Op: "open", Path: "/run/nginx.pid", Err: fs.ErrPermission,
 	}
 
@@ -54,18 +54,18 @@ func TestStatePidfileIlegivelOmiteRunning(t *testing.T) {
 	require.Len(t, s.Diagnostics, 1)
 	assert.Equal(t, CodigoPrivilegioNecessario, s.Diagnostics[0].Code)
 
-	bruto, err := json.Marshal(s)
+	raw, err := json.Marshal(s)
 	require.NoError(t, err)
-	assert.NotContains(t, string(bruto), "running")
-	assert.NotContains(t, string(bruto), "master_pid")
+	assert.NotContains(t, string(raw), "running")
+	assert.NotContains(t, string(raw), "master_pid")
 }
 
-func TestStatePidfileObsoleto(t *testing.T) {
-	f := novoFake("local").responde("kill -0 4242", resposta{
+func TestStateStalePidfile(t *testing.T) {
+	f := newFake("local").respond("kill -0 4242", response{
 		stderr: "kill: (4242): No such process\n",
 		exit:   1,
 	})
-	f.arquivos["/run/nginx.pid"] = "4242"
+	f.files["/run/nginx.pid"] = "4242"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -80,12 +80,12 @@ func TestStatePidfileObsoleto(t *testing.T) {
 // A process of another user: saying it is not running would be false, saying
 // it is running would be guessing. The field disappears and the reason shows
 // up.
-func TestStateProcessoDeOutroUsuario(t *testing.T) {
-	f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{
+func TestStateProcessOfAnotherUser(t *testing.T) {
+	f := newFake("ssh://opc@10.0.0.7:22").respond("kill -0 4242", response{
 		stderr: "kill: (4242): Operation not permitted\n",
 		exit:   1,
 	})
-	f.arquivos["/run/nginx.pid"] = "4242"
+	f.files["/run/nginx.pid"] = "4242"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -96,9 +96,9 @@ func TestStateProcessoDeOutroUsuario(t *testing.T) {
 	assert.Equal(t, CodigoPrivilegioNecessario, s.Diagnostics[0].Code)
 }
 
-func TestStatePidfileComLixo(t *testing.T) {
-	f := novoFake("local")
-	f.arquivos["/run/nginx.pid"] = "not a pid\n"
+func TestStatePidfileWithGarbage(t *testing.T) {
+	f := newFake("local")
+	f.files["/run/nginx.pid"] = "not a pid\n"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -109,8 +109,8 @@ func TestStatePidfileComLixo(t *testing.T) {
 	assert.Equal(t, CodigoEstadoProcesso, s.Diagnostics[0].Code)
 }
 
-func TestStateSemCaminhoDePidfile(t *testing.T) {
-	s, err := New(novoFake("local")).State(context.Background(), "")
+func TestStateWithoutPidfilePath(t *testing.T) {
+	s, err := New(newFake("local")).State(context.Background(), "")
 	require.NoError(t, err)
 
 	assert.Nil(t, s.Running)
@@ -121,33 +121,33 @@ func TestStateSemCaminhoDePidfile(t *testing.T) {
 // The state never carries workers nor the configuration load time: both
 // require process inspection and have no trustworthy source over SSH. This
 // test exists so that adding one of them without a source breaks something.
-func TestStateNaoInventaWorkersNemHorario(t *testing.T) {
-	f := novoFake("local").responde("kill -0 7", resposta{})
-	f.arquivos["/run/nginx.pid"] = "7"
+func TestStateDoesNotInventWorkersNorTimestamp(t *testing.T) {
+	f := newFake("local").respond("kill -0 7", response{})
+	f.files["/run/nginx.pid"] = "7"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
 
-	bruto, err := json.Marshal(s)
+	raw, err := json.Marshal(s)
 	require.NoError(t, err)
-	assert.NotContains(t, string(bruto), "workers")
-	assert.NotContains(t, string(bruto), "config_loaded_at")
-	assert.Contains(t, string(bruto), `"diagnostics":[]`)
+	assert.NotContains(t, string(raw), "workers")
+	assert.NotContains(t, string(raw), "config_loaded_at")
+	assert.Contains(t, string(raw), `"diagnostics":[]`)
 }
 
 // The state does not escalate privilege either: asking whether a pid exists
 // does not require sudo, and escalating here would go against DR5 with no gain
 // at all.
-func TestStateNaoUsaSudoNoKill(t *testing.T) {
-	f := novoFake("local").responde("kill -0 7", resposta{})
-	f.arquivos["/run/nginx.pid"] = "7"
+func TestStateDoesNotUseSudoOnKill(t *testing.T) {
+	f := newFake("local").respond("kill -0 7", response{})
+	f.files["/run/nginx.pid"] = "7"
 
 	_, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
 
-	chamadas := f.chamadas()
-	require.Len(t, chamadas, 1)
-	assert.Equal(t, []string{"kill", "-0", "7"}, chamadas[0])
+	calls := f.calls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, []string{"kill", "-0", "7"}, calls[0])
 }
 
 // With --sudo the operator has already authorized privilege, and DR5 requires
@@ -157,18 +157,18 @@ func TestStateNaoUsaSudoNoKill(t *testing.T) {
 //
 // The pair of cases is what proves the rule: without the flag nothing is
 // escalated.
-func TestStateComSudoConfirmaProcessoDeOutroUsuario(t *testing.T) {
-	novo := func() *fakeTransport {
-		f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{
+func TestStateWithSudoConfirmsProcessOfAnotherUser(t *testing.T) {
+	newTransport := func() *fakeTransport {
+		f := newFake("ssh://opc@10.0.0.7:22").respond("kill -0 4242", response{
 			stderr: "kill: (4242): Operation not permitted\n",
 			exit:   1,
-		}).responde("sudo -n kill -0 4242", resposta{})
-		f.arquivos["/run/nginx.pid"] = "4242"
+		}).respond("sudo -n kill -0 4242", response{})
+		f.files["/run/nginx.pid"] = "4242"
 		return f
 	}
 
 	t.Run("with sudo the field becomes available", func(t *testing.T) {
-		f := novo()
+		f := newTransport()
 		s, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
 		require.NoError(t, err)
 
@@ -178,12 +178,12 @@ func TestStateComSudoConfirmaProcessoDeOutroUsuario(t *testing.T) {
 	})
 
 	t.Run("without sudo nothing is escalated", func(t *testing.T) {
-		f := novo()
+		f := newTransport()
 		s, err := New(f).State(context.Background(), "/run/nginx.pid")
 		require.NoError(t, err)
 
 		assert.Nil(t, s.Running, "without the flag the field disappears, instead of becoming a guess")
-		for _, argv := range f.executados {
+		for _, argv := range f.executed {
 			assert.NotEqual(t, "sudo", argv[0], "escalating without --sudo goes against DR5")
 		}
 	})
