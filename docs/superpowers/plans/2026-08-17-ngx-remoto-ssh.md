@@ -52,6 +52,8 @@ O `ngx` usa o `known_hosts` do usuário e **recusa** host desconhecido ou cuja c
 
 A ordem de resolução é: flags explícitas vencem; o que faltar vem do `~/.ssh/config` para aquele host; a autenticação tenta o `ssh-agent` antes de qualquer arquivo de chave.
 
+*Exceção medida contra servidor real:* quando o usuário nomeia a chave em `--key`, ela é oferecida **antes** do `ssh-agent`. O `MaxAuthTries` padrão do sshd é 6; cada chave carregada no `ssh-agent` gasta uma tentativa, e um desenvolvedor costuma ter várias. Com o agente na frente, a chave explicitamente pedida nunca chegava a ser oferecida e a conexão morria com `no supported methods remain` — mensagem que não aponta para a causa. É o mesmo problema que `IdentitiesOnly=yes` resolve no `ssh`. Sem `--key`, a ordem original vale.
+
 *Por quê:* com o `ssh-agent`, a chave privada nunca é lida pelo `ngx` — ele envia o desafio e recebe a assinatura. Menos código nosso tocando material de chave é menos superfície para errar. E ler o `~/.ssh/config` significa que `ngx --host web1 inspect` funciona para quem já tem `ssh web1` funcionando, sem reconfigurar nada.
 
 ### DR3 — Nada é instalado no servidor remoto

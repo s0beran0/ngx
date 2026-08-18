@@ -86,9 +86,19 @@ func diagnosticoComCodigo(diags []output.Diagnostic, codigo string) *output.Diag
 	return nil
 }
 
-// A ordem e o contrato central da DR2: ssh-agent primeiro, chave depois,
-// senha por ultimo.
-func TestMontarAutenticacaoOrdemCompleta(t *testing.T) {
+// A ordem e o contrato central da DR2, com a excecao da chave nomeada.
+//
+// Quando o usuario passa --key, ela vem ANTES do ssh-agent. O motivo foi
+// medido contra um sshd real: o MaxAuthTries padrao e 6, cada chave do
+// ssh-agent gasta uma tentativa, e um desenvolvedor costuma ter varias
+// carregadas -- entao a chave explicitamente pedida nunca chegava a ser
+// oferecida e a conexao morria com "no supported methods remain", mensagem
+// que nao aponta para a causa. E o mesmo problema que IdentitiesOnly=yes
+// resolve no ssh.
+//
+// Sem --key, o ssh-agent continua na frente, que e o preferivel: com ele a
+// chave privada nunca e lida pelo ngx.
+func TestMontarAutenticacaoChaveNomeadaVemAntesDoAgente(t *testing.T) {
 	amb := comSSHAgent(t, comEnv(ambienteVazio(t), map[string]string{
 		EnvSenhaSSH: "s3nha",
 	}))
@@ -101,10 +111,27 @@ func TestMontarAutenticacaoOrdemCompleta(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = auth.Close() })
 
-	require.Equal(t, []string{MetodoSSHAgent, MetodoChave, MetodoSenha}, auth.Nomes)
+	require.Equal(t, []string{MetodoChave, MetodoSSHAgent, MetodoSenha}, auth.Nomes,
+		"chave nomeada em --key precede o ssh-agent para nao esbarrar no MaxAuthTries")
 	require.Len(t, auth.Metodos, len(auth.Nomes))
 	require.NotNil(t, diags)
 	require.Empty(t, diags)
+}
+
+func TestMontarAutenticacaoSemChaveNomeadaMantemAgenteNaFrente(t *testing.T) {
+	amb := comSSHAgent(t, comEnv(ambienteVazio(t), map[string]string{
+		EnvSenhaSSH: "s3nha",
+	}))
+
+	auth, _, err := montarAutenticacao(SSHOptions{
+		Host: "web1",
+		User: "deploy",
+	}, amb)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = auth.Close() })
+
+	require.Equal(t, []string{MetodoSSHAgent, MetodoSenha}, auth.Nomes,
+		"sem --key o ssh-agent vem primeiro: a chave privada nunca e lida pelo ngx")
 }
 
 // Ausencia de ssh-agent nao e erro: e um metodo a menos, com um diagnostico

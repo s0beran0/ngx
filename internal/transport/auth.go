@@ -147,14 +147,37 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 		}
 	}
 
+	// Ordem da DR2 -- ssh-agent antes de arquivo de chave -- com uma
+	// excecao medida contra servidor real: quando o usuario NOMEIA a chave
+	// em --key, ela vem primeiro.
+	//
+	// O motivo e o MaxAuthTries do sshd, 6 por padrao. Cada chave do
+	// ssh-agent gasta uma tentativa, e um desenvolvedor costuma ter varias
+	// carregadas. Com o agente na frente, a chave explicitamente pedida
+	// simplesmente nunca chega a ser oferecida, e o servidor derruba a
+	// conexao com "no supported methods remain" -- mensagem que nao aponta
+	// para a causa. E o mesmo problema que o IdentitiesOnly=yes do ssh
+	// resolve.
+	//
+	// Sem --key a ordem original vale: o agente e preferivel justamente
+	// porque a chave privada nunca e lida pelo ngx.
+	chaveExplicita := opts.KeyPath != ""
+
+	if chaveExplicita {
+		metodo, diag := metodoChave(opts, amb)
+		adicionar(MetodoChave, metodo, diag)
+	}
+
 	metodo, fechar, diag := metodoSSHAgent(amb)
 	if fechar != nil {
 		auth.fechar = append(auth.fechar, fechar)
 	}
 	adicionar(MetodoSSHAgent, metodo, diag)
 
-	metodo, diag = metodoChave(opts, amb)
-	adicionar(MetodoChave, metodo, diag)
+	if !chaveExplicita {
+		metodo, diag := metodoChave(opts, amb)
+		adicionar(MetodoChave, metodo, diag)
+	}
 
 	adicionar(MetodoSenha, metodoSenha(opts, amb), nil)
 
