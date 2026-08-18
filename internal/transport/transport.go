@@ -1,6 +1,6 @@
-// Package transport abstrai de onde vem a configuracao e onde os comandos
-// rodam. O resto do ngx nao sabe se opera na maquina local ou num servidor
-// remoto: fala sempre com um Transport.
+// Package transport abstracts where the configuration comes from and where
+// commands run. The rest of ngx does not know whether it operates on the local
+// machine or on a remote server: it always talks to a Transport.
 package transport
 
 import (
@@ -8,34 +8,34 @@ import (
 	"io"
 )
 
-// Transport e o acesso a um alvo — a maquina local ou um host remoto.
+// Transport is the access to a target — the local machine or a remote host.
 //
-// A distincao entre codigo de saida e erro em Run e a regra central da
-// interface: um comando que roda ate o fim e sai com codigo diferente de
-// zero devolve esse codigo com err nil, porque isso e resultado. Erro de
-// transporte e o binario nao existir, a conexao cair ou o contexto ser
-// cancelado — ai err e nao nulo e o exitCode nao significa nada.
+// The distinction between exit code and error in Run is the central rule of
+// this interface: a command that runs to completion and exits with a non-zero
+// code returns that code with a nil err, because that is a result. A transport
+// error is the binary not existing, the connection dropping, or the context
+// being cancelled — then err is non-nil and the exitCode means nothing.
 //
-// Confundir os dois faz um `nginx -t` que reprova a configuracao parecer
-// falha de infraestrutura.
+// Confusing the two makes an `nginx -t` that rejects the configuration look
+// like an infrastructure failure.
 type Transport interface {
-	// Open abre um arquivo para leitura. Quem chama fecha.
+	// Open opens a file for reading. The caller closes it.
 	Open(path string) (io.ReadCloser, error)
 
-	// Glob expande um padrao de caminho. Sem correspondencia devolve uma
-	// lista vazia e err nil, nunca nil.
+	// Glob expands a path pattern. With no match it returns an empty
+	// list and a nil err, never nil.
 	Glob(pattern string) ([]string, error)
 
-	// Run executa argv sem shell: argv[0] e o binario e o resto sao os
-	// argumentos, ja separados.
+	// Run executes argv without a shell: argv[0] is the binary and the
+	// rest are the arguments, already separated.
 	Run(ctx context.Context, argv []string) (stdout, stderr []byte, exitCode int, err error)
 
-	// Close libera os recursos do transporte. Chamar duas vezes e seguro.
+	// Close releases the transport resources. Calling it twice is safe.
 	Close() error
 
-	// Describe identifica o alvo em uma linha, para o meta do envelope
-	// JSON: quem consome a saida precisa saber contra o que a ferramenta
-	// operou. "local" para a maquina local, "ssh://user@host:porta" para
-	// um host remoto.
+	// Describe identifies the target in one line, for the meta section of
+	// the JSON envelope: whoever consumes the output needs to know what
+	// the tool operated against. "local" for the local machine,
+	// "ssh://user@host:port" for a remote host.
 	Describe() string
 }

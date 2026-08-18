@@ -5,39 +5,40 @@ import (
 	"strings"
 )
 
-// Por que SkipDirectiveArgsCheck esta ligado em Parse (parse.go), e por que
-// esta validacao existe apesar disso:
+// Why SkipDirectiveArgsCheck is turned on in Parse (parse.go), and why this
+// validation exists in spite of that:
 //
-// A checagem de argumentos do crossplane (analyze.go:206-247) roda contra uma
-// tabela de diretivas gerada para uma versao especifica do nginx e dos modulos
-// dela. Diretiva desconhecida ja e ignorada antes disso -- analyze.go:176-178
-// devolve nil quando !knownDirective, independente da flag --, entao a flag
-// NAO existe para aceitar diretiva de terceiro: ela existe para nao recusar
-// uma diretiva CONHECIDA cuja aridade mudou entre versoes do nginx ou do
-// modulo. Um ngx que recusa um .conf que o nginx do usuario aceita e pior que
-// um ngx que aceita algo que o nginx recusaria: quem valida semantica e o
-// "nginx -t", e o ngx e uma ferramenta de leitura e edicao.
+// Crossplane's argument check (analyze.go:206-247) runs against a directive
+// table generated for one specific version of nginx and of its modules. An
+// unknown directive is already ignored before that -- analyze.go:176-178
+// returns nil when !knownDirective, regardless of the flag --, so the flag is
+// NOT there to accept third-party directives: it is there so we do not refuse
+// a KNOWN directive whose arity changed between versions of nginx or of the
+// module. An ngx that refuses a .conf the user's nginx accepts is worse than
+// an ngx that accepts something nginx would refuse: what validates semantics
+// is "nginx -t", and ngx is a tool for reading and editing.
 //
-// So que uma das guardas suprimidas nao era de aridade: analyze.go:212
-// (`(mask&ngxConfExpr) > 0 && !validExpr(stmt)`) e o unico ponto que impede o
-// crossplane de entregar um "if" mal formado para prepareIfArgs
-// (util.go:71-86), que para Args == ["()"] faz d.Args[1:0] e derruba o
-// processo (util.go:83). Esta funcao recoloca exatamente essa guarda, so para
-// "if", replicando validExpr (util.go:57-67) argumento a argumento -- nada de
-// aridade, nada de contexto.
+// Except that one of the suppressed guards was not about arity:
+// analyze.go:212 (`(mask&ngxConfExpr) > 0 && !validExpr(stmt)`) is the only
+// point that keeps crossplane from handing a malformed "if" to prepareIfArgs
+// (util.go:71-86), which for Args == ["()"] does d.Args[1:0] and brings the
+// process down (util.go:83). This function puts exactly that guard back, for
+// "if" only, replicating validExpr (util.go:57-67) argument by argument --
+// no arity, no context.
 //
-// Rodar antes de entregar o arquivo ao crossplane e o que torna isso uma
-// correcao de causa raiz e nao um paliativo: o panic deixa de acontecer, em
-// vez de ser capturado depois. A barreira de recover em parse.go continua
-// existindo para a proxima surpresa da dependencia, nao para esta.
+// Running it before handing the file to crossplane is what makes this a
+// root-cause fix and not a workaround: the panic stops happening, instead of
+// being caught afterwards. The recover barrier in parse.go stays around for
+// the next surprise from the dependency, not for this one.
 
-// validarExpressoesIf devolve as recusas das diretivas "if" cuja expressao
-// nao esta entre parenteses. Trabalha sobre os tokens deste pacote, que
-// casam token a token com o lexer do crossplane.
+// validarExpressoesIf returns the refusals of the "if" directives whose
+// expression is not parenthesized. It works over this package's tokens, which
+// match crossplane's lexer token for token.
 //
-// Fonte que nao tokeniza devolve zero recusas de proposito: ali quem decide
-// e o alinhador (que classifica a recusa) ou o proprio crossplane, e um
-// palpite sobre tokens que nao existem so produziria mensagem errada.
+// A source that does not tokenize yields zero refusals on purpose: at that
+// point the decision belongs to the aligner (which classifies the refusal) or
+// to crossplane itself, and guessing about tokens that do not exist would
+// only produce a wrong message.
 func validarExpressoesIf(path string, src []byte) ParseErrors {
 	toks, err := Tokenize(src)
 	if err != nil {
@@ -45,10 +46,10 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 	}
 
 	var problemas ParseErrors
-	// mapLike conta os blocos map-like abertos. Dentro deles o crossplane
-	// nem chega em analyze/prepareIfArgs: parse.go:304-321 anexa o statement
-	// e faz continue. Um "if" ali e parametro de map, nao diretiva -- recusar
-	// seria sobre-rejeicao.
+	// mapLike counts the open map-like blocks. Inside them crossplane never
+	// even reaches analyze/prepareIfArgs: parse.go:304-321 appends the
+	// statement and moves on. An "if" in there is a map parameter, not a
+	// directive -- refusing it would be over-rejection.
 	mapLike := 0
 	i := 0
 	for i < len(toks) {
@@ -64,9 +65,9 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 			i++
 			continue
 		case TokenBlockStart:
-			// "{" onde se esperava um nome de diretiva. O crossplane o trata
-			// como nome (parse.go:256-261); aqui so precisamos manter a
-			// contagem de blocos coerente.
+			// "{" where a directive name was expected. Crossplane treats it
+			// as the name (parse.go:256-261); here we only need to keep the
+			// block count coherent.
 			i++
 			continue
 		}
@@ -82,8 +83,8 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 			if k == TokenWord {
 				args = append(args, toks[i].Value)
 			}
-			// TokenComment no meio dos argumentos nao entra em Args
-			// (crossplane/parse.go:286-290).
+			// A TokenComment in the middle of the arguments does not go into
+			// Args (crossplane/parse.go:286-290).
 			i++
 		}
 
@@ -97,9 +98,9 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 			i++
 		}
 
-		// stmt.Directive e o VALOR do token, com ou sem aspas: o crossplane
-		// compara `stmt.Directive == "if"` sem olhar IsQuoted
-		// (parse.go:352-354), entao `"if" ()` cai no mesmo prepareIfArgs.
+		// stmt.Directive is the token VALUE, quoted or not: crossplane
+		// compares `stmt.Directive == "if"` without looking at IsQuoted
+		// (parse.go:352-354), so `"if" ()` lands in the same prepareIfArgs.
 		if mapLike > 0 {
 			continue
 		}
@@ -112,7 +113,7 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 		problemas = append(problemas, ParseError{
 			File:    path,
 			Line:    nome.Line,
-			Message: fmt.Sprintf("diretiva \"if\" com expressao %q: a expressao precisa estar entre parenteses e nao pode ser vazia", strings.Join(args, " ")),
+			Message: fmt.Sprintf("directive \"if\" with expression %q: the expression must be parenthesized and cannot be empty", strings.Join(args, " ")),
 			Classe:  RecusaExpressaoIfInvalida,
 			Token:   nome.Raw,
 		})
@@ -120,11 +121,11 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 	return problemas
 }
 
-// expressaoValida replica validExpr (crossplane/util.go:57-67) sobre os
-// valores dos argumentos: primeiro argumento comecando em "(", ultimo
-// terminando em ")", e a expressao entre eles nao pode ser vazia -- e a
-// vacuidade e testada pelo TAMANHO dos tokens de borda, exatamente como no
-// original, porque e isso que prepareIfArgs (util.go:71-86) assume.
+// expressaoValida replicates validExpr (crossplane/util.go:57-67) over the
+// argument values: the first argument must start with "(", the last one must
+// end with ")", and the expression between them cannot be empty -- and
+// emptiness is tested by the LENGTH of the edge tokens, exactly as in the
+// original, because that is what prepareIfArgs (util.go:71-86) assumes.
 func expressaoValida(args []string) bool {
 	l := len(args)
 	if l == 0 {

@@ -38,8 +38,9 @@ func TestStatePidfileAusenteSignificaParado(t *testing.T) {
 	assert.Equal(t, output.SeverityInfo, s.Diagnostics[0].Severity)
 }
 
-// "Nao consegui ler" e diferente de "nao existe" (DR5). Sem permissao, o
-// campo sai do JSON e um diagnostico diz por que — nunca um false silencioso.
+// "I could not read it" is different from "it does not exist" (DR5). Without
+// permission, the field drops out of the JSON and a diagnostic says why --
+// never a silent false.
 func TestStatePidfileIlegivelOmiteRunning(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22")
 	f.errosOpen["/run/nginx.pid"] = &fs.PathError{
@@ -73,11 +74,12 @@ func TestStatePidfileObsoleto(t *testing.T) {
 	assert.False(t, *s.Running)
 	assert.Equal(t, 4242, s.MasterPID)
 	require.Len(t, s.Diagnostics, 1)
-	assert.Contains(t, s.Diagnostics[0].Message, "obsoleto")
+	assert.Contains(t, s.Diagnostics[0].Message, "stale")
 }
 
-// Processo de outro usuario: afirmar que nao roda seria falso, afirmar que
-// roda seria adivinhar. O campo some e o motivo aparece.
+// A process of another user: saying it is not running would be false, saying
+// it is running would be guessing. The field disappears and the reason shows
+// up.
 func TestStateProcessoDeOutroUsuario(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{
 		stderr: "kill: (4242): Operation not permitted\n",
@@ -96,7 +98,7 @@ func TestStateProcessoDeOutroUsuario(t *testing.T) {
 
 func TestStatePidfileComLixo(t *testing.T) {
 	f := novoFake("local")
-	f.arquivos["/run/nginx.pid"] = "nao e um pid\n"
+	f.arquivos["/run/nginx.pid"] = "not a pid\n"
 
 	s, err := New(f).State(context.Background(), "/run/nginx.pid")
 	require.NoError(t, err)
@@ -116,9 +118,9 @@ func TestStateSemCaminhoDePidfile(t *testing.T) {
 	assert.Equal(t, CodigoEstadoProcesso, s.Diagnostics[0].Code)
 }
 
-// O estado nunca traz workers nem horario de carga da configuracao: os dois
-// exigem inspecao de processo e nao tem fonte confiavel por SSH. Este teste
-// existe para que acrescentar um deles sem fonte quebre alguma coisa.
+// The state never carries workers nor the configuration load time: both
+// require process inspection and have no trustworthy source over SSH. This
+// test exists so that adding one of them without a source breaks something.
 func TestStateNaoInventaWorkersNemHorario(t *testing.T) {
 	f := novoFake("local").responde("kill -0 7", resposta{})
 	f.arquivos["/run/nginx.pid"] = "7"
@@ -133,8 +135,9 @@ func TestStateNaoInventaWorkersNemHorario(t *testing.T) {
 	assert.Contains(t, string(bruto), `"diagnostics":[]`)
 }
 
-// O estado tambem nao escala privilegio: perguntar se um pid existe nao exige
-// sudo, e escalar aqui contrariaria a DR5 sem ganho nenhum.
+// The state does not escalate privilege either: asking whether a pid exists
+// does not require sudo, and escalating here would go against DR5 with no gain
+// at all.
 func TestStateNaoUsaSudoNoKill(t *testing.T) {
 	f := novoFake("local").responde("kill -0 7", resposta{})
 	f.arquivos["/run/nginx.pid"] = "7"
@@ -147,12 +150,13 @@ func TestStateNaoUsaSudoNoKill(t *testing.T) {
 	assert.Equal(t, []string{"kill", "-0", "7"}, chamadas[0])
 }
 
-// Com --sudo o operador ja autorizou privilegio, e a DR5 exige que ele seja
-// EXPLICITO, nao que seja recusado. O master do nginx roda como root, entao
-// sem esta segunda tentativa o campo `running` ficaria indisponivel no caso
-// mais comum que existe -- verificado contra um nginx de producao real.
+// With --sudo the operator has already authorized privilege, and DR5 requires
+// it to be EXPLICIT, not to be refused. The nginx master runs as root, so
+// without this second attempt the `running` field would stay unavailable in
+// the most common case there is -- verified against a real production nginx.
 //
-// O par de casos e o que prova a regra: sem a flag nada e escalado.
+// The pair of cases is what proves the rule: without the flag nothing is
+// escalated.
 func TestStateComSudoConfirmaProcessoDeOutroUsuario(t *testing.T) {
 	novo := func() *fakeTransport {
 		f := novoFake("ssh://opc@10.0.0.7:22").responde("kill -0 4242", resposta{
@@ -163,24 +167,24 @@ func TestStateComSudoConfirmaProcessoDeOutroUsuario(t *testing.T) {
 		return f
 	}
 
-	t.Run("com sudo o campo fica disponivel", func(t *testing.T) {
+	t.Run("with sudo the field becomes available", func(t *testing.T) {
 		f := novo()
 		s, err := New(f, ComSudo(true)).State(context.Background(), "/run/nginx.pid")
 		require.NoError(t, err)
 
-		require.NotNil(t, s.Running, "com privilegio autorizado o estado e conhecido")
+		require.NotNil(t, s.Running, "with privilege authorized the state is known")
 		assert.True(t, *s.Running)
-		assert.Empty(t, s.Diagnostics, "nada a avisar quando a resposta e inequivoca")
+		assert.Empty(t, s.Diagnostics, "nothing to warn about when the answer is unambiguous")
 	})
 
-	t.Run("sem sudo nada e escalado", func(t *testing.T) {
+	t.Run("without sudo nothing is escalated", func(t *testing.T) {
 		f := novo()
 		s, err := New(f).State(context.Background(), "/run/nginx.pid")
 		require.NoError(t, err)
 
-		assert.Nil(t, s.Running, "sem a flag o campo some, em vez de virar palpite")
+		assert.Nil(t, s.Running, "without the flag the field disappears, instead of becoming a guess")
 		for _, argv := range f.executados {
-			assert.NotEqual(t, "sudo", argv[0], "escalar sem --sudo contraria a DR5")
+			assert.NotEqual(t, "sudo", argv[0], "escalating without --sudo goes against DR5")
 		}
 	})
 }

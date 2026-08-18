@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// abreviacoes encurta as diretivas de bloco mais comuns. Primeira letra
-// sozinha nao serve: server e stream colidiriam.
+// abreviacoes shortens the most common block directives. A bare first letter
+// would not do: server and stream would collide.
 var abreviacoes = map[string]string{
 	"http":     "h",
 	"stream":   "st",
@@ -18,8 +18,8 @@ var abreviacoes = map[string]string{
 	"map":      "mp",
 }
 
-// blocosRaiz sao os contextos de topo, que ocorrem no maximo uma vez e por
-// isso dispensam indice: o ID e "h", nao "h0".
+// blocosRaiz are the top-level contexts, which occur at most once and
+// therefore need no index: the ID is "h", not "h0".
 var blocosRaiz = map[string]bool{
 	"http":   true,
 	"stream": true,
@@ -27,12 +27,12 @@ var blocosRaiz = map[string]bool{
 	"mail":   true,
 }
 
-// AtribuirIDs preenche o campo ID de cada no, recursivamente.
+// AtribuirIDs fills in the ID field of every node, recursively.
 //
-// O indice conta entre irmaos da mesma diretiva, nao por posicao absoluta:
-// inserir uma location nao renumera os servers ao lado. Comentarios nao
-// recebem ID nem participam da contagem, senao adicionar um comentario
-// deslocaria os IDs das diretivas vizinhas.
+// The index counts among siblings of the same directive, not by absolute
+// position: inserting a location does not renumber the servers next to it.
+// Comments get no ID and take no part in the count -- otherwise adding a
+// comment would shift the IDs of the directives around it.
 func AtribuirIDs(nodes []*Node, prefixo string) {
 	contadores := map[string]int{}
 	naRaiz := prefixo == ""
@@ -56,8 +56,8 @@ func AtribuirIDs(nodes []*Node, prefixo string) {
 }
 
 func segmento(n *Node, contadores map[string]int, naRaiz bool) string {
-	// So o nivel raiz dispensa indice: um stream aninhado dentro de http e
-	// apenas mais um bloco irmao e precisa ser numerado normalmente.
+	// Only the root level goes without an index: a stream nested inside http
+	// is just one more sibling block and has to be numbered like any other.
 	if naRaiz && n.HasBlock() && blocosRaiz[n.Directive] {
 		return abreviar(n.Directive)
 	}
@@ -65,7 +65,8 @@ func segmento(n *Node, contadores map[string]int, naRaiz bool) string {
 	chave := n.Directive
 	base := abreviar(n.Directive)
 	if !n.HasBlock() && abreviacoes[n.Directive] == "" {
-		// Diretivas simples sem abreviacao propria compartilham o contador d.
+		// Plain directives with no abbreviation of their own share the d
+		// counter.
 		chave, base = "", "d"
 	}
 
@@ -81,7 +82,7 @@ func abreviar(directive string) string {
 	return directive
 }
 
-// FindByID localiza um no pelo seu ID. Devolve nil se nao existir.
+// FindByID locates a node by its ID. Returns nil when there is none.
 func FindByID(t *Tree, id string) *Node {
 	id = strings.TrimPrefix(id, "#")
 

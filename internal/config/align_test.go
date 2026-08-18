@@ -63,7 +63,7 @@ func TestSpanDeBlocoTerminaNaChaveDeFechamento(t *testing.T) {
 	require.Contains(t, texto, "server 10.0.0.1:8080;")
 
 	require.Equal(t, "upstream backend_v1", string(src[upstream.HeadSpan.Start:upstream.HeadSpan.End]),
-		"o head nao inclui o bloco")
+		"the head does not include the block")
 }
 
 func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
@@ -86,7 +86,7 @@ func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
 	require.Contains(t, linhas[serverName.Line-1], "server_name")
 }
 
-// Aspas contendo ponto e virgula sao o caso que quebra um alinhamento ingenuo.
+// Quotes containing a semicolon are the case that breaks a naive alignment.
 func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
 	tree := parseSimples(t)
 	src := tree.Files[0].Source
@@ -104,7 +104,7 @@ func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
 	require.Equal(t, `add_header X-A "b; c";`, string(src[addHeader.Span.Start:addHeader.Span.End]))
 }
 
-// Invariante de contencao: o span de um filho vive dentro do span do pai.
+// Containment invariant: the span of a child lives inside the span of its parent.
 func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
 	tree := parseSimples(t)
 
@@ -114,12 +114,12 @@ func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
 		for _, n := range nodes {
 			if pai != nil {
 				require.GreaterOrEqual(t, n.Span.Start, pai.Span.Start,
-					"%s comeca antes do pai %s", n.Directive, pai.Directive)
+					"%s starts before its parent %s", n.Directive, pai.Directive)
 				require.LessOrEqual(t, n.Span.End, pai.Span.End,
-					"%s termina depois do pai %s", n.Directive, pai.Directive)
+					"%s ends after its parent %s", n.Directive, pai.Directive)
 			}
 			require.GreaterOrEqual(t, n.Span.Start, anteriorFim,
-				"%s sobrepoe o irmao anterior", n.Directive)
+				"%s overlaps the previous sibling", n.Directive)
 			anteriorFim = n.Span.End
 			verificar(n.Block, n)
 		}
@@ -130,9 +130,9 @@ func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
 	}
 }
 
-// Cobertura: todo byte significativo do arquivo pertence ao span de algum no
-// de nivel raiz. E a formulacao concreta da propriedade que sustenta a
-// arquitetura: se ela vale, o casamento token-arvore esta correto.
+// Coverage: every significant byte of the file belongs to the span of some
+// root-level node. This is the concrete formulation of the property that holds
+// the architecture up: if it holds, the token-tree matching is correct.
 func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 	tree := parseSimples(t)
 	src := tree.Files[0].Source
@@ -149,13 +149,13 @@ func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 			continue
 		}
 		require.True(t, b == ' ' || b == '\t' || b == '\n' || b == '\r',
-			"byte %d (%q) na linha nao coberta nao e espaco", i, string(b))
+			"byte %d (%q) on an uncovered line is not whitespace", i, string(b))
 	}
 }
 
-// Comentario entre argumentos: crossplane/parse.go:286-290 tira "# prod" de
-// Args e crossplane/parse.go:435-445 o anexa como no "#" irmao depois da
-// diretiva inteira (Task 9, defeito 1).
+// A comment between arguments: crossplane/parse.go:286-290 strips "# prod"
+// out of Args and crossplane/parse.go:435-445 attaches it as a sibling "#"
+// node after the whole directive (Task 9, defect 1).
 func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
@@ -166,7 +166,7 @@ func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
 	require.NoError(t, err)
 
 	nodes := tree.Files[0].Nodes
-	require.Len(t, nodes, 3, "server_name, o comentario dos argumentos e listen")
+	require.Len(t, nodes, 3, "server_name, the comment from the arguments and listen")
 
 	serverName := nodes[0]
 	require.Equal(t, "server_name", serverName.Directive)
@@ -184,9 +184,9 @@ func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
 	require.Equal(t, "listen 80;", string(src[listen.Span.Start:listen.Span.End]))
 }
 
-// Comentario entre o nome/argumentos e o bloco: mesmo mecanismo do
-// crossplane, mas agora o no "#" fica depois da diretiva E depois do bloco
-// dela (Task 9, defeito 1, segundo exemplo).
+// A comment between the name/arguments and the block: same crossplane
+// mechanism, but now the "#" node lands after the directive AND after its
+// block (Task 9, defect 1, second example).
 func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
@@ -197,14 +197,14 @@ func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
 	require.NoError(t, err)
 
 	nodes := tree.Files[0].Nodes
-	require.Len(t, nodes, 2, "location e o comentario dos seus argumentos")
+	require.Len(t, nodes, 2, "location and the comment from its arguments")
 
 	location := nodes[0]
 	require.Equal(t, "location", location.Directive)
 	require.Equal(t, []string{"/api"}, location.Args)
 	require.True(t, location.HasBlock())
 	require.Equal(t, "location /api", string(src[location.HeadSpan.Start:location.HeadSpan.End]),
-		"o head span nao inclui o comentario, que vem depois do ultimo arg")
+		"the head span does not include the comment, which comes after the last arg")
 	require.Equal(t, "location /api # gw\n{ proxy_pass http://a; }",
 		string(src[location.Span.Start:location.Span.End]))
 
@@ -213,9 +213,10 @@ func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
 	require.Equal(t, "# gw", string(src[comentario.Span.Start:comentario.Span.End]))
 }
 
-// if com parenteses isolados: crossplane/util.go:71-86 (prepareIfArgs) tira
-// "(" e ")" de Args quando vem isolados, entao len(n.Args) nao conta os
-// tokens-palavra reais entre "if" e o terminador (Task 9, defeito 2).
+// if with isolated parentheses: crossplane/util.go:71-86 (prepareIfArgs)
+// strips "(" and ")" out of Args when they come isolated, so len(n.Args) does
+// not count the real word tokens between "if" and the terminator (Task 9,
+// defect 2).
 func TestIfComParentesesEspacadosAlinha(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
@@ -250,6 +251,6 @@ func TestBlocoVazioEhReconhecido(t *testing.T) {
 
 	events := tree.Files[0].Nodes[0]
 	require.Equal(t, "events", events.Directive)
-	require.True(t, events.HasBlock(), "events {} abre um bloco, mesmo vazio")
+	require.True(t, events.HasBlock(), "events {} opens a block, empty though it is")
 	require.Equal(t, "events {}", string(tree.Files[0].Source[events.Span.Start:events.Span.End]))
 }

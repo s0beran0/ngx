@@ -19,15 +19,14 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// Nenhum teste deste arquivo abre socket. O ssh.HostKeyCallback e chamado
-// direto, com um net.Addr montado a mao — e assim que a politica de host key
-// se testa sem servidor e sem rede.
+// No test in this file opens a socket. The ssh.HostKeyCallback is called
+// directly, with a hand-built net.Addr — that is how the host key policy is
+// tested with no server and no network.
 
 const hostDeTeste = "10.0.0.9:22"
 
-// gerarChave produz uma chave de host nova a cada chamada. Chave de teste e
-// gerada no teste, nunca commitada: uma chave privada versionada e uma chave
-// publicada.
+// gerarChave produces a fresh host key on every call. A test key is generated
+// in the test, never committed: a versioned private key is a published key.
 func gerarChave(t *testing.T) ssh.PublicKey {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -37,7 +36,7 @@ func gerarChave(t *testing.T) ssh.PublicKey {
 	return signer.PublicKey()
 }
 
-// escreverKnownHosts monta um known_hosts em t.TempDir() com as linhas dadas.
+// escreverKnownHosts builds a known_hosts in t.TempDir() with the given lines.
 func escreverKnownHosts(t *testing.T, linhas ...string) string {
 	t.Helper()
 	caminho := filepath.Join(t.TempDir(), "known_hosts")
@@ -46,29 +45,29 @@ func escreverKnownHosts(t *testing.T, linhas ...string) string {
 	return caminho
 }
 
-// linhaKnownHosts formata a chave como o known_hosts espera, para o host de
-// teste.
+// linhaKnownHosts formats the key the way known_hosts expects it, for the test
+// host.
 func linhaKnownHosts(key ssh.PublicKey) string {
 	return knownhosts.Line([]string{knownhosts.Normalize(hostDeTeste)}, key)
 }
 
-// enderecoRemoto e o net.Addr que o handshake passaria ao callback.
+// enderecoRemoto is the net.Addr the handshake would pass to the callback.
 func enderecoRemoto() net.Addr {
 	return &net.TCPAddr{IP: net.ParseIP("10.0.0.9"), Port: 22}
 }
 
-// diagnosticoDe extrai o Diagnostic de um erro do ngx. Falha o teste se o erro
-// nao for um *output.Error — um erro cru nao tem mensagem propria e nao serve
-// a nenhum dos quatro desfechos.
+// diagnosticoDe extracts the Diagnostic from an ngx error. It fails the test if
+// the error is not an *output.Error — a bare error has no message of its own
+// and serves none of the four outcomes.
 func diagnosticoDe(t *testing.T, err error) output.Diagnostic {
 	t.Helper()
 	require.Error(t, err)
 	var e *output.Error
-	require.ErrorAs(t, err, &e, "a recusa precisa carregar diagnostico proprio")
+	require.ErrorAs(t, err, &e, "the refusal has to carry its own diagnostic")
 	return e.Diag
 }
 
-// --- Desfecho 1: a chave confere ---
+// --- Outcome 1: the key checks out ---
 
 func TestHostKeyChaveConfereNaoProduzDiagnostico(t *testing.T) {
 	key := gerarChave(t)
@@ -76,17 +75,17 @@ func TestHostKeyChaveConfereNaoProduzDiagnostico(t *testing.T) {
 
 	callback, diags, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: caminho})
 	require.NoError(t, err)
-	require.NotNil(t, diags, "a lista de diagnosticos nunca e nil")
-	assert.Empty(t, diags, "o caminho feliz nao avisa nada")
+	require.NotNil(t, diags, "the list of diagnostics is never nil")
+	assert.Empty(t, diags, "the happy path warns about nothing")
 
 	assert.NoError(t, callback(hostDeTeste, enderecoRemoto(), key))
 }
 
-// --- Desfecho 2: host desconhecido ---
+// --- Outcome 2: unknown host ---
 
 func TestHostKeyHostDesconhecidoRecusaEEnsinaAAdicionar(t *testing.T) {
 	registrada := gerarChave(t)
-	// O arquivo existe e tem entradas, so nao para este host.
+	// The file exists and has entries, just not for this host.
 	caminho := escreverKnownHosts(t,
 		knownhosts.Line([]string{"outro.exemplo"}, registrada))
 
@@ -98,14 +97,14 @@ func TestHostKeyHostDesconhecidoRecusaEEnsinaAAdicionar(t *testing.T) {
 
 	assert.Equal(t, CodigoHostDesconhecido, diag.Code)
 	assert.Equal(t, output.SeverityError, diag.Severity)
-	assert.Contains(t, diag.Message, "10.0.0.9", "a mensagem diz qual host")
-	assert.Contains(t, diag.Message, caminho, "a mensagem diz qual arquivo")
+	assert.Contains(t, diag.Message, "10.0.0.9", "the message says which host")
+	assert.Contains(t, diag.Message, caminho, "the message says which file")
 	assert.Contains(t, diag.Message, linhaKnownHosts(apresentada),
-		"a mensagem entrega a linha pronta para o known_hosts")
+		"the message hands over the ready-made known_hosts line")
 	assert.Equal(t, caminho, diag.File)
 }
 
-// --- Desfecho 3: a chave mudou ---
+// --- Outcome 3: the key changed ---
 
 func TestHostKeyChaveAlteradaAcusaPossivelAtaque(t *testing.T) {
 	registrada := gerarChave(t)
@@ -121,22 +120,23 @@ func TestHostKeyChaveAlteradaAcusaPossivelAtaque(t *testing.T) {
 	assert.Equal(t, output.SeverityError, diag.Severity)
 
 	minuscula := strings.ToLower(diag.Message)
-	assert.Contains(t, minuscula, "mudou", "a mensagem diz que a chave mudou")
-	assert.Contains(t, minuscula, "ataque",
-		"chave alterada e possivel ataque e a mensagem tem que dizer isso")
+	assert.Contains(t, minuscula, "changed", "the message says the key changed")
+	assert.Contains(t, minuscula, "attack",
+		"a changed key is a possible attack and the message has to say so")
 	assert.Contains(t, minuscula, "man-in-the-middle")
 	assert.Contains(t, diag.Message, serializarChave(apresentada),
-		"a mensagem mostra a chave apresentada")
+		"the message shows the presented key")
 	assert.Contains(t, diag.Message, serializarChave(registrada),
-		"a mensagem mostra a chave registrada")
-	assert.Equal(t, caminho, diag.File, "aponta o arquivo do registro que diverge")
-	assert.Equal(t, 1, diag.Line, "aponta a linha do registro que diverge")
+		"the message shows the recorded key")
+	assert.Equal(t, caminho, diag.File, "points at the file of the diverging record")
+	assert.Equal(t, 1, diag.Line, "points at the line of the diverging record")
 }
 
-// TestHostKeyDesconhecidoEAlteradaSaoDistinguiveis e o teste que justifica a
-// tarefa. Um teste que so verificasse "deu erro" nos dois casos passaria com a
-// mesma mensagem nos dois — e quem le a saida nao teria como separar primeiro
-// acesso de interceptacao, que e a unica distincao que importa aqui.
+// TestHostKeyDesconhecidoEAlteradaSaoDistinguiveis is the test that justifies
+// the task. A test that only checked "it errored" in both cases would pass
+// with the same message in both — and whoever reads the output would have no
+// way of separating first access from interception, which is the only
+// distinction that matters here.
 func TestHostKeyDesconhecidoEAlteradaSaoDistinguiveis(t *testing.T) {
 	registrada := gerarChave(t)
 	apresentada := gerarChave(t)
@@ -153,30 +153,32 @@ func TestHostKeyDesconhecidoEAlteradaSaoDistinguiveis(t *testing.T) {
 	diagDesconhecido := diagnosticoDe(t, callbackDesconhecido(hostDeTeste, enderecoRemoto(), apresentada))
 	diagAlterada := diagnosticoDe(t, callbackAlterada(hostDeTeste, enderecoRemoto(), apresentada))
 
-	// 1. Distinguiveis por campo, que e como um agente separa os casos sem
-	//    interpretar texto.
+	// 1. Distinguishable by field, which is how an agent separates the
+	//    cases without interpreting text.
 	assert.NotEqual(t, diagDesconhecido.Code, diagAlterada.Code,
-		"os dois desfechos precisam de codigos diferentes")
+		"the two outcomes need different codes")
 
-	// 2. Distinguiveis por texto, que e como um humano os separa.
+	// 2. Distinguishable by text, which is how a human separates them.
 	assert.NotEqual(t, diagDesconhecido.Message, diagAlterada.Message)
 
-	// 3. E a diferenca e a certa: so o caso de chave alterada fala em ataque,
-	//    e so o caso de host desconhecido fala em primeiro acesso.
-	assert.NotContains(t, strings.ToLower(diagDesconhecido.Message), "ataque",
-		"primeiro acesso nao pode sequer mencionar ataque: quem filtra a saida por "+
-			"essa palavra tem que pegar so o caso 3")
-	assert.Contains(t, strings.ToLower(diagDesconhecido.Message), "primeiro acesso")
-	assert.Contains(t, strings.ToLower(diagAlterada.Message), "ataque")
-	assert.NotContains(t, strings.ToLower(diagAlterada.Message), "primeiro acesso",
-		"chave trocada nao pode ser confundida com primeiro acesso")
+	// 3. And the difference is the right one: only the changed key case
+	//    talks about an attack, and only the unknown host case talks about
+	//    a first access.
+	assert.NotContains(t, strings.ToLower(diagDesconhecido.Message), "attack",
+		"a first access cannot even mention an attack: whoever filters the output by "+
+			"that word has to catch only case 3")
+	assert.Contains(t, strings.ToLower(diagDesconhecido.Message), "first access")
+	assert.Contains(t, strings.ToLower(diagAlterada.Message), "attack")
+	assert.NotContains(t, strings.ToLower(diagAlterada.Message), "first access",
+		"a swapped key cannot be confused with a first access")
 
-	// 4. E ambos recusam de fato: distinguir sem recusar nao seria a DR1.
+	// 4. And both actually refuse: distinguishing without refusing would not
+	//    be DR1.
 	assert.Equal(t, output.SeverityError, diagDesconhecido.Severity)
 	assert.Equal(t, output.SeverityError, diagAlterada.Severity)
 }
 
-// --- Desfecho 4a: chave revogada ---
+// --- Outcome 4a: revoked key ---
 
 func TestHostKeyChaveRevogadaTemDesfechoProprio(t *testing.T) {
 	revogada := gerarChave(t)
@@ -193,43 +195,43 @@ func TestHostKeyChaveRevogadaTemDesfechoProprio(t *testing.T) {
 	assert.Equal(t, CodigoHostKeyRevogada, diag.Code)
 	assert.NotEqual(t, CodigoHostDesconhecido, diag.Code)
 	assert.NotEqual(t, CodigoHostKeyAlterada, diag.Code)
-	assert.Contains(t, strings.ToLower(diag.Message), "revogada")
-	assert.Equal(t, caminho, diag.File, "informa o arquivo da revogacao")
-	assert.Equal(t, 2, diag.Line, "informa a linha da revogacao")
+	assert.Contains(t, strings.ToLower(diag.Message), "revoked")
+	assert.Equal(t, caminho, diag.File, "reports the file of the revocation")
+	assert.Equal(t, 2, diag.Line, "reports the line of the revocation")
 
-	// A mesma politica ainda aceita a chave valida do mesmo arquivo: a
-	// revogacao nao contamina o resto.
+	// The same policy still accepts the valid key from the same file: the
+	// revocation does not contaminate the rest.
 	assert.NoError(t, callback(hostDeTeste, enderecoRemoto(), valida))
 }
 
-// --- Desfecho 4b: known_hosts ausente ---
+// --- Outcome 4b: missing known_hosts ---
 
 func TestHostKeyKnownHostsAusenteTemDesfechoProprio(t *testing.T) {
 	caminho := filepath.Join(t.TempDir(), "known_hosts")
 
 	callback, diags, err := VerificadorHostKey(SSHOptions{Host: "10.0.0.9", KnownHostsPath: caminho})
-	require.Error(t, err, "sem arquivo nao ha o que comparar; o ngx recusa")
+	require.Error(t, err, "with no file there is nothing to compare; ngx refuses")
 	assert.Nil(t, callback)
 	assert.Empty(t, diags)
 
 	diag := diagnosticoDe(t, err)
 	assert.Equal(t, CodigoKnownHostsAusente, diag.Code)
 	assert.NotEqual(t, CodigoHostDesconhecido, diag.Code,
-		"arquivo ausente nao e a mesma coisa que host ausente do arquivo")
+		"a missing file is not the same as a host missing from the file")
 	assert.Contains(t, diag.Message, caminho)
 	assert.Contains(t, diag.Message, "--insecure-host-key",
-		"a mensagem diz qual e a saida")
+		"the message says what the way out is")
 	assert.Contains(t, diag.Message, "ssh 10.0.0.9",
-		"a mensagem diz como registrar o host")
+		"the message says how to record the host")
 
-	// O PathError original continua acessivel para quem quiser inspecionar,
-	// mas nao vaza cru na mensagem.
+	// The original PathError stays reachable for whoever wants to inspect
+	// it, but does not leak raw into the message.
 	var pathErr *fs.PathError
-	assert.True(t, errors.As(err, &pathErr), "a causa original e preservada")
+	assert.True(t, errors.As(err, &pathErr), "the original cause is preserved")
 }
 
 func TestHostKeyKnownHostsIlegivelNaoViraArquivoAusente(t *testing.T) {
-	// Um diretorio no lugar do arquivo: existe, mas nao da para ler.
+	// A directory in place of the file: it exists, but cannot be read.
 	caminho := filepath.Join(t.TempDir(), "known_hosts")
 	require.NoError(t, os.Mkdir(caminho, 0o700))
 
@@ -238,11 +240,11 @@ func TestHostKeyKnownHostsIlegivelNaoViraArquivoAusente(t *testing.T) {
 
 	diag := diagnosticoDe(t, err)
 	assert.NotEqual(t, CodigoKnownHostsAusente, diag.Code,
-		"arquivo ilegivel tem causa e solucao diferentes de arquivo ausente")
+		"an unreadable file has a different cause and a different fix than a missing one")
 	assert.Contains(t, diag.Message, caminho)
 }
 
-// --- O escape da DR1 ---
+// --- The DR1 escape hatch ---
 
 func TestHostKeyInseguroAceitaQualquerChaveMasAvisa(t *testing.T) {
 	callback, diags, err := VerificadorHostKey(SSHOptions{
@@ -252,23 +254,23 @@ func TestHostKeyInseguroAceitaQualquerChaveMasAvisa(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, callback)
 
-	// Aceita qualquer chave, inclusive uma nunca vista.
+	// Accepts any key, including one never seen before.
 	assert.NoError(t, callback(hostDeTeste, enderecoRemoto(), gerarChave(t)))
 	assert.NoError(t, callback(hostDeTeste, enderecoRemoto(), gerarChave(t)))
 
-	// Mas nunca em silencio.
-	require.Len(t, diags, 1, "usar o escape tem que aparecer na saida")
+	// But never in silence.
+	require.Len(t, diags, 1, "using the escape hatch has to show up in the output")
 	assert.Equal(t, output.SeverityWarning, diags[0].Severity)
 	assert.Equal(t, CodigoAvisoHostKeyInsegura, diags[0].Code)
 	assert.Contains(t, diags[0].Message, "--insecure-host-key")
 	assert.Contains(t, diags[0].Message, "10.0.0.9")
 	assert.Contains(t, strings.ToLower(diags[0].Message), "man-in-the-middle",
-		"o aviso diz o que se perdeu, nao so que uma flag foi usada")
+		"the warning says what was lost, not just that a flag was used")
 }
 
 func TestHostKeyInseguroIgnoraKnownHostsAusente(t *testing.T) {
-	// O escape serve justamente a quem nao tem o host registrado: ele nao
-	// pode esbarrar no arquivo ausente antes de tomar efeito.
+	// The escape hatch serves precisely whoever does not have the host
+	// recorded: it cannot trip over the missing file before taking effect.
 	callback, diags, err := VerificadorHostKey(SSHOptions{
 		Host:            "10.0.0.9",
 		KnownHostsPath:  filepath.Join(t.TempDir(), "nao-existe"),
@@ -279,7 +281,7 @@ func TestHostKeyInseguroIgnoraKnownHostsAusente(t *testing.T) {
 	assert.NoError(t, callback(hostDeTeste, enderecoRemoto(), gerarChave(t)))
 }
 
-// --- Contrato comum aos desfechos de recusa ---
+// --- Contract shared by the refusal outcomes ---
 
 func TestHostKeyRecusasUsamExitCodeDocumentado(t *testing.T) {
 	registrada := gerarChave(t)
@@ -304,20 +306,21 @@ func TestHostKeyRecusasUsamExitCodeDocumentado(t *testing.T) {
 
 	vistos := map[string]string{}
 	for nome, err := range casos {
-		// A v0.1 so documenta os exit codes que emite; recusa de host key
-		// entra em 1 (interno/IO) ate haver codigo proprio documentado.
+		// v0.1 only documents the exit codes it emits; a host key refusal
+		// falls under 1 (internal/IO) until there is a documented code of
+		// its own.
 		assert.Equal(t, output.ExitInternal, output.CodeOf(err), nome)
 
 		diag := diagnosticoDe(t, err)
 		anterior, repetido := vistos[diag.Code]
-		assert.False(t, repetido, "%s e %s dividem o codigo %s", nome, anterior, diag.Code)
+		assert.False(t, repetido, "%s and %s share the code %s", nome, anterior, diag.Code)
 		vistos[diag.Code] = nome
 	}
 
-	// Somando o known_hosts ausente, sao quatro codigos distintos.
+	// Adding the missing known_hosts, that is four distinct codes.
 	_, _, err := VerificadorHostKey(SSHOptions{
 		KnownHostsPath: filepath.Join(t.TempDir(), "nao-existe"),
 	})
 	vistos[diagnosticoDe(t, err).Code] = "known_hosts ausente"
-	assert.Len(t, vistos, 4, "os quatro desfechos de recusa sao distinguiveis por codigo")
+	assert.Len(t, vistos, 4, "the four refusal outcomes are distinguishable by code")
 }

@@ -10,8 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A invariante que sustenta todo o resto: o texto entre Start e End precisa
-// ser exatamente o Raw do token. Se isso vale, os spans sao confiaveis.
+// The invariant that holds up everything else: the text between Start and End
+// has to be exactly the Raw of the token. If that holds, the spans are
+// trustworthy.
 func TestTokenSpansApontamParaOTextoOriginal(t *testing.T) {
 	src := []byte("server {\n    listen 443 ssl;\n}\n")
 
@@ -20,7 +21,7 @@ func TestTokenSpansApontamParaOTextoOriginal(t *testing.T) {
 
 	for _, tok := range toks {
 		require.Equal(t, tok.Raw, string(src[tok.Start:tok.End]),
-			"token %q em [%d,%d)", tok.Value, tok.Start, tok.End)
+			"token %q at [%d,%d)", tok.Value, tok.Start, tok.End)
 	}
 }
 
@@ -43,8 +44,8 @@ func TestTokenizeSeparaDelimitadores(t *testing.T) {
 	}, kinds)
 }
 
-// Aspas escondem ; e { do tokenizador. Errar isso quebra o alinhamento
-// inteiro no primeiro add_header com ponto e virgula dentro.
+// Quotes hide ; and { from the tokenizer. Getting this wrong breaks the whole
+// alignment at the first add_header with a semicolon inside.
 func TestAspasProtegemDelimitadores(t *testing.T) {
 	src := []byte(`add_header X-A "b; c { d }";`)
 
@@ -54,37 +55,37 @@ func TestAspasProtegemDelimitadores(t *testing.T) {
 	require.Len(t, toks, 4)
 	require.Equal(t, "add_header", toks[0].Value)
 	require.Equal(t, "X-A", toks[1].Value)
-	require.Equal(t, "b; c { d }", toks[2].Value, "o valor vem sem as aspas")
-	require.Equal(t, `"b; c { d }"`, toks[2].Raw, "o raw mantem as aspas")
+	require.Equal(t, "b; c { d }", toks[2].Value, "the value comes without the quotes")
+	require.Equal(t, `"b; c { d }"`, toks[2].Raw, "the raw keeps the quotes")
 	require.True(t, toks[2].Quoted)
 	require.Equal(t, config.TokenSemicolon, toks[3].Kind)
 }
 
 func TestAspasSimplesTambemFuncionam(t *testing.T) {
-	toks, err := config.Tokenize([]byte(`return 200 'ok; fim';`))
+	toks, err := config.Tokenize([]byte(`return 200 'ok; end';`))
 	require.NoError(t, err)
 
-	require.Equal(t, "ok; fim", toks[2].Value)
+	require.Equal(t, "ok; end", toks[2].Value)
 	require.True(t, toks[2].Quoted)
 }
 
 func TestEscapeDentroDeAspas(t *testing.T) {
-	toks, err := config.Tokenize([]byte(`msg "diz \"oi\"";`))
+	toks, err := config.Tokenize([]byte(`msg "says \"hi\"";`))
 	require.NoError(t, err)
 
-	require.Equal(t, `diz "oi"`, toks[1].Value)
+	require.Equal(t, `says "hi"`, toks[1].Value)
 }
 
 func TestComentarioVaiAteOFimDaLinha(t *testing.T) {
-	src := []byte("# um comentario; com ponto e virgula\nlisten 80;\n")
+	src := []byte("# a comment; with a semicolon\nlisten 80;\n")
 
 	toks, err := config.Tokenize(src)
 	require.NoError(t, err)
 
 	require.Equal(t, config.TokenComment, toks[0].Kind)
-	require.Equal(t, "# um comentario; com ponto e virgula", toks[0].Raw)
-	require.Equal(t, " um comentario; com ponto e virgula", toks[0].Value,
-		"o valor do comentario vem sem o # inicial")
+	require.Equal(t, "# a comment; with a semicolon", toks[0].Raw)
+	require.Equal(t, " a comment; with a semicolon", toks[0].Value,
+		"the comment value comes without the leading #")
 	require.Equal(t, "listen", toks[1].Value)
 }
 
@@ -97,7 +98,7 @@ func TestLinhaEColunaSaoBaseUm(t *testing.T) {
 	require.Equal(t, 1, toks[0].Line)
 	require.Equal(t, 1, toks[0].Column)
 
-	// "listen" comeca na segunda linha, apos quatro espacos.
+	// "listen" starts on the second line, after four spaces.
 	require.Equal(t, "listen", toks[2].Value)
 	require.Equal(t, 2, toks[2].Line)
 	require.Equal(t, 5, toks[2].Column)
@@ -109,15 +110,15 @@ func TestAspasNaoFechadasVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Fix round 1 -- Critical: "${" e tratado pelo crossplane como expansao de
-// parametro e fica dentro da mesma palavra. Sem isso, "http://${backend}"
-// vira quatro tokens com "{" e "}" fantasmas, e a Task 9 rejeita o arquivo
-// inteiro no primeiro proxy_pass com variavel de template Docker/envsubst.
+// Fix round 1 -- Critical: crossplane treats "${" as a parameter expansion
+// and keeps it inside the same word. Without this, "http://${backend}" turns
+// into four tokens with phantom "{" and "}", and Task 9 rejects the whole file
+// at the first proxy_pass with a Docker/envsubst template variable.
 func TestExpansaoDeParametroNaoQuotadaFicaNumSoToken(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`proxy_pass http://${backend};`))
 	require.NoError(t, err)
 
-	require.Len(t, toks, 3, "http://${backend} precisa ser um unico token, sem { e } fantasmas")
+	require.Len(t, toks, 3, "http://${backend} has to be a single token, with no phantom { and }")
 	require.Equal(t, "proxy_pass", toks[0].Value)
 	require.Equal(t, config.TokenWord, toks[1].Kind)
 	require.Equal(t, "http://${backend}", toks[1].Value)
@@ -125,8 +126,8 @@ func TestExpansaoDeParametroNaoQuotadaFicaNumSoToken(t *testing.T) {
 	require.Equal(t, config.TokenSemicolon, toks[2].Kind)
 }
 
-// Expansao de parametro tambem funciona dentro de aspas, onde ela e so mais
-// um caractere do valor (nao ha estado inVar dentro de aspas).
+// Parameter expansion also works inside quotes, where it is just one more
+// character of the value (there is no inVar state inside quotes).
 func TestExpansaoDeParametroDentroDeAspas(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`set $a "${b}c";`))
 	require.NoError(t, err)
@@ -135,10 +136,10 @@ func TestExpansaoDeParametroDentroDeAspas(t *testing.T) {
 	require.True(t, toks[2].Quoted)
 }
 
-// Fix round 1 -- Important: o conjunto de espacos tem que bater com o do
-// crossplane (strings.TrimSpace / unicode.IsSpace), nao so os quatro bytes
-// ascii. NBSP entra em .conf por copia de documentacao web e e invisivel;
-// sem esse ajuste a contagem de argumentos diverge da do crossplane.
+// Fix round 1 -- Important: the whitespace set has to match crossplane's
+// (strings.TrimSpace / unicode.IsSpace), not just the four ascii bytes. NBSP
+// gets into a .conf by copying from web documentation and is invisible;
+// without this adjustment the argument count diverges from crossplane's.
 func TestConjuntoDeEspacosCobreNBSPTabVerticalEFormFeed(t *testing.T) {
 	src := []byte("listen 80;\vserver_name\fa;")
 
@@ -150,42 +151,42 @@ func TestConjuntoDeEspacosCobreNBSPTabVerticalEFormFeed(t *testing.T) {
 		valores = append(valores, tok.Value)
 	}
 	require.Equal(t, []string{"listen", "80", ";", "server_name", "a", ";"}, valores,
-		"NBSP, tab vertical e form feed tem que separar argumentos, igual ao crossplane")
+		"NBSP, vertical tab and form feed have to separate arguments, just like in crossplane")
 }
 
-// Fix round 1 -- Important: o CR de um terminador CRLF nao pode entrar no
-// span (nem no Value) de um comentario. Se entrasse, reescrever esse
-// comentario na v0.2 apagaria o CR e converteria a linha de CRLF para LF --
-// uma mudanca fora do alvo que o projeto promete nunca fazer.
+// Fix round 1 -- Important: the CR of a CRLF terminator must not get into the
+// span (nor into the Value) of a comment. If it did, rewriting that comment in
+// v0.2 would erase the CR and convert the line from CRLF to LF -- an
+// off-target change the project promises never to make.
 func TestComentarioCRLFExcluiCRDoSpanEDoValue(t *testing.T) {
-	src := []byte("# comentario\r\nlisten 80;\r\n")
+	src := []byte("# comment\r\nlisten 80;\r\n")
 
 	toks, err := config.Tokenize(src)
 	require.NoError(t, err)
 
 	require.Equal(t, config.TokenComment, toks[0].Kind)
-	require.Equal(t, "# comentario", toks[0].Raw, "o CR fica de fora do span do comentario")
-	require.Equal(t, " comentario", toks[0].Value)
+	require.Equal(t, "# comment", toks[0].Raw, "the CR stays out of the comment span")
+	require.Equal(t, " comment", toks[0].Value)
 	require.Equal(t, string(src[toks[0].Start:toks[0].End]), toks[0].Raw)
 
 	require.Equal(t, "listen", toks[1].Value)
-	require.Equal(t, 2, toks[1].Line, "a segunda linha comeca depois do CRLF")
+	require.Equal(t, 2, toks[1].Line, "the second line starts after the CRLF")
 }
 
-// Fix round 1 -- Important: so a barra que precede a aspa delimitadora e
-// desescapada; qualquer outro escape fica literal em Value, igual ao
-// crossplane. msg "a\nb"; produz Value a\nb (barra e n literais), nao uma
-// quebra de linha real.
+// Fix round 1 -- Important: only the backslash preceding the delimiting quote
+// is unescaped; any other escape stays literal in Value, just like in
+// crossplane. msg "a\nb"; yields Value a\nb (a literal backslash and n), not a
+// real line break.
 func TestEscapeDentroDeAspasSoDesescapaAAspaAtiva(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`msg "a\nb";`))
 	require.NoError(t, err)
 
 	require.Equal(t, `a\nb`, toks[1].Value,
-		"so a barra antes da aspa e removida; o resto do escape fica literal")
+		"only the backslash before the quote is removed; the rest of the escape stays literal")
 }
 
-// Fix round 1 -- Important: Column conta runes, nao bytes -- e a posicao
-// visual que um editor mostraria. Start continua obrigatoriamente em bytes.
+// Fix round 1 -- Important: Column counts runes, not bytes -- it is the visual
+// position an editor would show. Start stays mandatorily in bytes.
 func TestColumnContaRunesNaoBytes(t *testing.T) {
 	src := []byte(`msg "çãé";`)
 
@@ -194,50 +195,50 @@ func TestColumnContaRunesNaoBytes(t *testing.T) {
 	require.Len(t, toks, 3)
 
 	require.Equal(t, config.TokenSemicolon, toks[2].Kind)
-	require.Equal(t, 12, toks[2].Start, "start continua contando bytes (ç, ã, e sao 2 bytes cada)")
-	require.Equal(t, 10, toks[2].Column, "column conta runes: e a posicao que um editor mostraria")
+	require.Equal(t, 12, toks[2].Start, "start keeps counting bytes (c, a, e with a diacritic are 2 bytes each)")
+	require.Equal(t, 10, toks[2].Column, "column counts runes: it is the position an editor would show")
 }
 
-// Achado do fuzz no fix round 1: uma barra invertida solta no ultimo byte
-// do arquivo (sem par de escape possivel) e engolida pelo crossplane --
-// nao produz token nenhum. Sem esse tratamento, viravamos um token fantasma
-// "\" que o crossplane nunca produz, desalinhando a contagem na Task 9.
+// Fuzz finding from fix round 1: a stray backslash on the last byte of the
+// file (with no possible escape pair) is swallowed by crossplane -- it
+// produces no token at all. Without this handling we produced a phantom "\"
+// token crossplane never produces, throwing the count of Task 9 off.
 func TestBarraInvertidaNoFimDoArquivoNaoGeraTokenFantasma(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`foo \`))
 	require.NoError(t, err)
 
-	require.Len(t, toks, 1, "a barra final solta nao deve gerar token nenhum")
+	require.Len(t, toks, 1, "the stray trailing backslash must not produce any token")
 	require.Equal(t, "foo", toks[0].Value)
 }
 
-// Achado do fuzz no fix round 1: um \r solto (sem \n depois) no meio de uma
-// palavra nao-quotada e invisivel para o crossplane -- nunca termina a
-// palavra. So um \n de verdade termina. Sem isso, "0\r0" virava dois tokens
-// em vez de um, desalinhando a contagem na Task 9.
+// Fuzz finding from fix round 1: a stray \r (with no \n after it) in the
+// middle of an unquoted word is invisible to crossplane -- it never ends the
+// word. Only a real \n ends it. Without this, "0\r0" became two tokens
+// instead of one, throwing the count of Task 9 off.
 func TestBarraCRSoltaNoMeioDaPalavraNaoTerminaAPalavra(t *testing.T) {
 	toks, err := config.Tokenize([]byte("0\r0;"))
 	require.NoError(t, err)
 
 	require.Len(t, toks, 2)
-	require.Equal(t, "00", toks[0].Value, "o \\r solto fica invisivel, nao separa os dois digitos")
+	require.Equal(t, "00", toks[0].Value, "the stray \\r stays invisible, it does not split the two digits")
 	require.Equal(t, config.TokenSemicolon, toks[1].Kind)
 }
 
-// Achado do fuzz no fix round 1: uma barra invertida seguida de \r, quando
-// forma a palavra inteira (nada mais para tokenizar), nao produz token
-// nenhum -- igual ao crossplane, que tambem engole os dois sem nunca
-// mesclar nada com o esc pendente.
+// Fuzz finding from fix round 1: a backslash followed by \r, when it makes up
+// the whole word (nothing else left to tokenize), produces no token at all --
+// just like crossplane, which also swallows both without ever merging anything
+// into the pending escape.
 func TestBarraSeguidaDeCRSemMaisNadaNaoGeraToken(t *testing.T) {
 	toks, err := config.Tokenize([]byte(" \\\r"))
 	require.NoError(t, err)
 	require.Empty(t, toks)
 }
 
-// Fix round 2 -- Important: o conserto do CR de um CRLF em lerComentario
-// nao foi espelhado em lerPalavra nem em lerVar, deixando o CR dentro do
-// span de uma palavra comum. Uma futura reescrita por substituicao de bytes
-// apagaria esse CR e converteria a linha de CRLF para LF -- a mesma mudanca
-// fora do alvo que o comentario ja evita.
+// Fix round 2 -- Important: the CRLF fix in lerComentario was not mirrored in
+// lerPalavra nor in lerVar, leaving the CR inside the span of an ordinary
+// word. A future rewrite by byte replacement would erase that CR and convert
+// the line from CRLF to LF -- the same off-target change the comment case
+// already avoids.
 func TestPalavraCRLFExcluiCRDoSpan(t *testing.T) {
 	src := []byte("proxy_set_header Host\r\n  $host;\r\n")
 
@@ -245,12 +246,12 @@ func TestPalavraCRLFExcluiCRDoSpan(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "Host", toks[1].Value)
-	require.Equal(t, "Host", toks[1].Raw, "o CR do CRLF nao pode ficar dentro do span da palavra")
+	require.Equal(t, "Host", toks[1].Raw, "the CR of the CRLF must not stay inside the word span")
 }
 
-// Fix round 2 -- Important: rede de regressao explicita para a terminacao
-// do modo ${...} por espaco. Um revisor mutou essa condicao e a suite
-// inteira passou sem esse teste.
+// Fix round 2 -- Important: an explicit regression net for the termination of
+// ${...} mode by whitespace. A reviewer mutated that condition and the whole
+// suite passed without this test.
 func TestExpansaoDeParametroTerminaPorEspaco(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`a ${b c;`))
 	require.NoError(t, err)
@@ -262,7 +263,7 @@ func TestExpansaoDeParametroTerminaPorEspaco(t *testing.T) {
 	require.Equal(t, []string{"a", "${b c", ";"}, valores)
 }
 
-// Cobertura: todo byte que nao e espaco em branco pertence a algum token.
+// Coverage: every byte that is not whitespace belongs to some token.
 func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))
 	require.NoError(t, err)
@@ -273,7 +274,7 @@ func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 	coberto := make([]bool, len(src))
 	prev := 0
 	for _, tok := range toks {
-		require.GreaterOrEqual(t, tok.Start, prev, "tokens fora de ordem")
+		require.GreaterOrEqual(t, tok.Start, prev, "tokens out of order")
 		for i := tok.Start; i < tok.End; i++ {
 			coberto[i] = true
 		}
@@ -285,6 +286,6 @@ func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 			continue
 		}
 		require.True(t, unicode.IsSpace(rune(b)),
-			"byte %d (%q) nao coberto e nao e espaco", i, string(b))
+			"byte %d (%q) is uncovered and is not whitespace", i, string(b))
 	}
 }

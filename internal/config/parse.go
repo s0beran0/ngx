@@ -15,14 +15,14 @@ import (
 	crossplane "github.com/nginxinc/nginx-go-crossplane"
 )
 
-// ParseOptions controla a leitura. Open existe para permitir testes com
-// filesystem em memoria, sem tocar disco.
+// ParseOptions controls the reading. Open is there so that tests can run
+// against an in-memory filesystem, without touching disk.
 //
-// Glob acompanha Open e nao e opcional na pratica: quem injeta um filesystem
-// -- teste em memoria ou host remoto -- precisa injetar os dois. Sem Glob, o
-// crossplane cai em filepath.Glob e resolve "include conf.d/*.conf" contra o
-// disco LOCAL, entao a arvore misturaria arquivos da maquina de quem roda o
-// comando com a configuracao que se pediu para ler.
+// Glob comes along with Open and is not optional in practice: whoever injects
+// a filesystem -- an in-memory test or a remote host -- has to inject both.
+// Without Glob, crossplane falls back to filepath.Glob and resolves "include
+// conf.d/*.conf" against the LOCAL disk, so the tree would mix files from the
+// machine running the command with the configuration it was asked to read.
 type ParseOptions struct {
 	Path string
 	Open func(path string) (io.ReadCloser, error)
@@ -43,16 +43,16 @@ func (o ParseOptions) expandir(pattern string) ([]string, error) {
 	return filepath.Glob(pattern)
 }
 
-// Parse le a configuracao e devolve a arvore canonica. Cada arquivo e
-// parseado separadamente, preservando sua fonte: a resolucao de include e
-// uma view construida sobre esta arvore, nao uma concatenacao previa, para
-// que os spans continuem apontando para offsets reais de arquivos reais.
+// Parse reads the configuration and returns the canonical tree. Each file is
+// parsed separately, with its source preserved: include resolution is a view
+// built on top of this tree, not an up-front concatenation, so that the spans
+// keep pointing at real offsets of real files.
 //
-// Um parse com Status != "ok" nao vira erro no crossplane por si so: ele
-// registra o problema em payload.Errors/cfg.Errors e segue adiante, o que
-// deixaria a arvore com Source completo e zero Nodes numa config quebrada.
-// Aqui isso e tratado como falha, preservando arquivo e linha via
-// ParseErrors, para que a saida possa apontar o lugar exato do problema.
+// A parse with Status != "ok" does not become an error in crossplane by
+// itself: it records the problem in payload.Errors/cfg.Errors and carries on,
+// which would leave the tree with a complete Source and zero Nodes for a
+// broken config. Here that is treated as a failure, keeping file and line in
+// ParseErrors so that the output can point at the exact spot of the problem.
 func Parse(opts ParseOptions) (*Tree, error) {
 	cache := novaCacheFonte()
 	abrirEspelhado := cache.decora(opts.abrir)
@@ -68,24 +68,25 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		Glob:                      opts.expandir,
 	})
 
-	// A recusa da validacao previa vem antes de qualquer erro do crossplane:
-	// quando ela dispara, o Open devolve erro de proposito para que o parser
-	// nunca chegue no statement quebrado, e o erro que o crossplane relata em
-	// seguida e so o eco disso. Quem explica o problema e a recusa.
+	// The refusal from the up-front validation comes before any crossplane
+	// error: when it fires, Open returns an error on purpose so that the
+	// parser never reaches the broken statement, and the error crossplane
+	// reports next is only an echo of that. What explains the problem is the
+	// refusal.
 	if problemas := cache.recusas(); len(problemas) > 0 {
 		return nil, problemas
 	}
 
-	// Falha de I/O na leitura tem precedencia sobre o que o crossplane
-	// relatar em seguida, porque o que ele relata e consequencia dela e
-	// aponta o arquivo errado. Sao dois desfechos: se o arquivo truncado era
-	// o de topo (ou veio de um glob), o crossplane devolve o erro cru e a
-	// mensagem sai com a string do runtime; se era alvo de um include
-	// explicito, ele converte o erro do Open num ParseError localizado no
-	// arquivo QUE FAZ o include, na linha do include -- e o consumidor
-	// recebe "erro na linha N" para um .conf intacto e vai depurar o arquivo
-	// errado. Quem sabe o que aconteceu, e em qual arquivo, e a leitura que
-	// falhou; ela ja esta registrada no cache.
+	// An I/O failure while reading takes precedence over whatever crossplane
+	// reports next, because what it reports is a consequence of it and points
+	// at the wrong file. There are two outcomes: if the truncated file was
+	// the top-level one (or came from a glob), crossplane returns the raw
+	// error and the message goes out with the runtime string; if it was the
+	// target of an explicit include, it turns the Open error into a
+	// ParseError located in the file THAT DOES the include, on the include
+	// line -- and the consumer gets "error on line N" for an intact .conf and
+	// goes off debugging the wrong file. What knows what happened, and in
+	// which file, is the read that failed; it is already recorded in the cache.
 	if problemas := cache.errosDeLeitura(); len(problemas) > 0 {
 		return nil, problemas
 	}
@@ -95,7 +96,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		if errors.As(err, &problemas) {
 			return nil, problemas
 		}
-		return nil, fmt.Errorf("ao parsear %s: %w", opts.Path, err)
+		return nil, fmt.Errorf("while parsing %s: %w", opts.Path, err)
 	}
 
 	if payload.Status != "ok" {
@@ -123,16 +124,16 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	return tree, nil
 }
 
-// parseComBarreira roda o parser do crossplane com uma rede de seguranca
-// contra panic. Uma CLI cujo consumidor e um agente de IA nao pode emitir
-// stack trace: isso nao e JSON, nao e legivel, e nao tem exit code util. O
-// panic vira ParseErrors, que a camada de CLI ja traduz para o exit code de
-// configuracao invalida (3, ver internal/cli/inspect.go).
+// parseComBarreira runs crossplane's parser behind a safety net against
+// panics. A CLI whose consumer is an AI agent cannot emit a stack trace: that
+// is not JSON, is not readable, and carries no useful exit code. The panic
+// becomes ParseErrors, which the CLI layer already translates into the exit
+// code for an invalid configuration (3, see internal/cli/inspect.go).
 //
-// Cobre a goroutine do parser, que e esta; um panic dentro da goroutine do
-// lexer do crossplane continuaria escapando, e nao ha como recupera-lo daqui.
-// O caso conhecido -- prepareIfArgs (util.go:71-86) -- e do parser, e alem
-// disso ja e barrado antes por validarExpressoesIf.
+// It covers the parser goroutine, which is this one; a panic inside
+// crossplane's lexer goroutine would still escape, and there is no way to
+// recover it from here. The known case -- prepareIfArgs (util.go:71-86) -- is
+// in the parser, and besides is already blocked earlier by validarExpressoesIf.
 func parseComBarreira(path string, opts *crossplane.ParseOptions) (payload *crossplane.Payload, err error) {
 	defer func() {
 		r := recover()
@@ -142,18 +143,18 @@ func parseComBarreira(path string, opts *crossplane.ParseOptions) (payload *cros
 		payload = nil
 		err = ParseErrors{{
 			File:    path,
-			Message: fmt.Sprintf("o parser da dependencia entrou em panico nesta configuracao: %v", r),
+			Message: fmt.Sprintf("the dependency parser panicked on this configuration: %v", r),
 			Classe:  RecusaPanicoDoCrossplane,
 		}}
 	}()
 	return crossplane.Parse(path, opts)
 }
 
-// coletarErros converte os problemas relatados pelo crossplane num unico
-// erro localizado. Os problemas aparecem tanto em payload.Errors quanto no
-// Errors de cada Config afetado -- o crossplane grava a mesma ocorrencia
-// nos dois lugares --, entao aqui eles sao deduplicados por arquivo, linha
-// e mensagem antes de virar ParseErrors.
+// coletarErros turns the problems crossplane reported into a single located
+// error. The problems show up both in payload.Errors and in the Errors of
+// each affected Config -- crossplane records the same occurrence in both
+// places --, so here they are deduplicated by file, line and message before
+// becoming ParseErrors.
 func coletarErros(payload *crossplane.Payload) error {
 	var problemas ParseErrors
 	visto := map[string]bool{}
@@ -184,17 +185,16 @@ func coletarErros(payload *crossplane.Payload) error {
 	}
 
 	if len(problemas) == 0 {
-		problemas = append(problemas, ParseError{Message: "parse falhou sem detalhar o erro"})
+		problemas = append(problemas, ParseError{Message: "parse failed without detailing the error"})
 	}
 	return problemas
 }
 
-// cacheFonte guarda, por caminho de arquivo, os bytes que o crossplane
-// efetivamente leu durante o parse. Sem isso, Source viria de uma segunda
-// leitura de disco independente da que o crossplane tokenizou: as duas
-// poderiam divergir (arquivo alterado entre as leituras, Open de uso
-// unico, etc.), e a Task 9 casaria os spans com um conteudo que nao e o
-// que foi de fato parseado.
+// cacheFonte keeps, per file path, the bytes crossplane actually read during
+// the parse. Without it, Source would come from a second disk read
+// independent of the one crossplane tokenized: the two could diverge (file
+// changed between the reads, single-use Open, and so on), and Task 9 would
+// match the spans against content that is not what was in fact parsed.
 type cacheFonte struct {
 	mu       sync.Mutex
 	dados    map[string][]byte
@@ -206,46 +206,48 @@ func novaCacheFonte() *cacheFonte {
 	return &cacheFonte{dados: map[string][]byte{}, erros: map[string]error{}}
 }
 
-// decora envolve a funcao de abertura original: le o arquivo inteiro, guarda
-// os bytes lidos e devolve ao crossplane um leitor sobre esses MESMOS bytes.
-// Duas coisas dependem disso.
+// decora wraps the original open function: it reads the whole file, keeps the
+// bytes read and hands crossplane a reader over those SAME bytes. Two things
+// depend on that.
 //
-// A primeira e Source: sem a copia, ele viria de uma segunda leitura de disco
-// independente da que o crossplane tokenizou, e as duas poderiam divergir
-// (arquivo alterado entre as leituras, Open de uso unico), o que faria os
-// spans da Task 9 casarem com um conteudo que nao foi o parseado.
+// The first is Source: without the copy it would come from a second disk read
+// independent of the one crossplane tokenized, and the two could diverge
+// (file changed between the reads, single-use Open), which would make the
+// spans of Task 9 match content that was not the one parsed.
 //
-// A segunda e a validacao previa: e aqui, antes de o primeiro token chegar ao
-// parser, o unico ponto em que da para recusar um "if" mal formado ANTES de
-// prepareIfArgs derrubar o processo (ver expressao_if.go). Uma versao
-// anterior espelhava a leitura em streaming, e ali nao havia esse ponto: o
-// parser ja consome tokens enquanto o lexer ainda le. A leitura de uma vez
-// tambem elimina a concorrencia entre Read e Close que o streaming tinha (o
-// crossplane lexa cada arquivo numa goroutine e a abandona em varios retornos
-// antecipados: include sem argumentos, erro de Glob, erro de parse aninhado).
+// The second is the up-front validation: right here, before the first token
+// reaches the parser, is the only point where a malformed "if" can be refused
+// BEFORE prepareIfArgs brings the process down (see expressao_if.go). An
+// earlier version mirrored the read in streaming fashion, and there was no
+// such point there: the parser already consumes tokens while the lexer is
+// still reading. Reading it all at once also removes the race between Read
+// and Close that the streaming version had (crossplane lexes each file in a
+// goroutine and abandons it on several early returns: include with no
+// arguments, Glob error, nested parse error).
 //
-// Erro de leitura nao vira leitura parcial: e registrado e devolvido, para
-// que o crossplane pare em vez de tokenizar um prefixo -- um Source truncado
-// seria pior que o erro, porque os spans ficariam coerentes com ele e uma
-// reescrita da v0.2 truncaria o arquivo do usuario.
+// A read error does not become a partial read: it is recorded and returned,
+// so that crossplane stops instead of tokenizing a prefix -- a truncated
+// Source would be worse than the error, because the spans would be coherent
+// with it and a v0.2 rewrite would truncate the user's file.
 func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) func(string) (io.ReadCloser, error) {
 	return func(path string) (io.ReadCloser, error) {
 		rc, err := abrirOriginal(path)
 		if err != nil {
-			// Falha ao ABRIR tambem e falha de I/O, e precisa ser registrada
-			// como as de leitura. Localmente abrir quase sempre da certo, e
-			// por isso o caso passou; num alvo remoto e rotina -- medido
-			// contra um nginx de producao, um arquivo entre 128 nao era
-			// legivel pelo usuario da conexao. Sem o registro, o crossplane
-			// devolve um erro generico e o diagnostico acusa o arquivo de
-			// topo em vez daquele que realmente falhou, mandando quem le
-			// depurar o lugar errado.
+			// Failing to OPEN is an I/O failure too, and has to be recorded
+			// like the read ones. Locally opening almost always works, which
+			// is why the case slipped through; against a remote target it is
+			// routine -- measured against a production nginx, one file out of
+			// 128 was not readable by the connection user. Without the
+			// record, crossplane returns a generic error and the diagnostic
+			// blames the top-level file instead of the one that actually
+			// failed, sending the reader off to debug the wrong place.
 			//
-			// Arquivo INEXISTENTE e a excecao, e fica de fora: `include
-			// /nao/existe.conf` e erro de configuracao, nao de ambiente, e
-			// nesse caso o que ajuda e a LINHA do include -- que o crossplane
-			// reporta e que se perderia aqui, porque um arquivo que nao abriu
-			// nao tem linha nenhuma para oferecer.
+			// A MISSING file is the exception, and is left out: `include
+			// /does/not/exist.conf` is a configuration error, not an
+			// environment one, and what helps there is the LINE of the
+			// include -- which crossplane reports and which would be lost
+			// here, because a file that never opened has no line at all to
+			// offer.
 			if !errors.Is(err, fs.ErrNotExist) {
 				c.guardarErro(path, err)
 			}
@@ -277,25 +279,26 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 	}
 }
 
-// recusarAlvoNaoRegular recusa um caminho que abriu mas nao e arquivo
-// regular -- diretorio, socket, fifo, dispositivo.
+// recusarAlvoNaoRegular refuses a path that opened but is not a regular file
+// -- directory, socket, fifo, device.
 //
-// O crossplane aceita: para um alvo de include sem caractere de glob,
-// parse.go:385-395 so confere que o os.Open funciona ("nginx will check that
-// the included file can be opened and read"), e abrir diretorio funciona; o
-// alvo entra em fnames, e lexado no laco de parse.go:161-168, e como o lexer
-// nao consulta o erro de leitura o payload sai com Status "ok" e zero
-// diretiva. O nginx, ao contrario do que o comentario deles diz, LE o alvo, e
-// ler diretorio falha -- entao recusar e o comportamento do nginx.
+// Crossplane accepts it: for an include target with no glob character,
+// parse.go:385-395 only checks that os.Open works ("nginx will check that the
+// included file can be opened and read"), and opening a directory works; the
+// target goes into fnames, is lexed in the loop of parse.go:161-168, and
+// since the lexer never consults the read error the payload comes out with
+// Status "ok" and zero directives. nginx, contrary to what their comment
+// says, does READ the target, and reading a directory fails -- so refusing is
+// nginx's behavior.
 //
-// Sem esta checagem a recusa acontecia de qualquer jeito, mas pelo io.ReadAll,
-// e o diagnostico saia com a string crua do runtime ("read /tmp/x: is a
-// directory"). Numa CLI feita para ser lida por agente, mensagem de erro e
-// contrato: ela tem que ser nossa e ter classe.
+// Without this check the refusal happened anyway, but via io.ReadAll, and the
+// diagnostic went out with the raw runtime string ("read /tmp/x: is a
+// directory"). In a CLI meant to be read by an agent, an error message is a
+// contract: it has to be ours and it has to carry a class.
 //
-// A checagem depende de o io.ReadCloser saber se descrever (os.File sabe). Um
-// ParseOptions.Open que devolva um leitor em memoria nao tem alvo no
-// filesystem e simplesmente nao entra aqui.
+// The check depends on the io.ReadCloser being able to describe itself
+// (os.File can). A ParseOptions.Open that returns an in-memory reader has no
+// target on the filesystem and simply never gets here.
 func recusarAlvoNaoRegular(path string, rc io.ReadCloser) ParseErrors {
 	comStat, ok := rc.(interface{ Stat() (os.FileInfo, error) })
 	if !ok {
@@ -306,13 +309,13 @@ func recusarAlvoNaoRegular(path string, rc io.ReadCloser) ParseErrors {
 		return nil
 	}
 
-	tipo := "nao e um arquivo regular"
+	tipo := "not a regular file"
 	if info.IsDir() {
-		tipo = "e um diretorio"
+		tipo = "is a directory"
 	}
 	return ParseErrors{{
 		File:    path,
-		Message: fmt.Sprintf("%s: configuracao precisa ser arquivo regular", tipo),
+		Message: fmt.Sprintf("%s: a configuration has to be a regular file", tipo),
 		Classe:  RecusaAlvoNaoERegular,
 	}}
 }
@@ -329,15 +332,15 @@ func (c *cacheFonte) recusas() ParseErrors {
 	return c.recusasV
 }
 
-// errosDeLeitura converte as falhas de I/O registradas durante o parse em
-// recusas nossas: uma por arquivo, com o caminho de quem de fato falhou e
-// mensagem propria. A string crua do runtime ("read tcp ...: connection reset
-// by peer") fica de fora do diagnostico pelo mesmo motivo de
-// recusarAlvoNaoRegular: numa CLI lida por agente a mensagem e contrato, tem
-// que ser nossa e ter classe.
+// errosDeLeitura turns the I/O failures recorded during the parse into
+// refusals of our own: one per file, with the path of whoever actually failed
+// and a message of ours. The raw runtime string ("read tcp ...: connection
+// reset by peer") is kept out of the diagnostic for the same reason as in
+// recusarAlvoNaoRegular: in a CLI read by an agent the message is a contract,
+// it has to be ours and it has to carry a class.
 //
-// A ordem sai por caminho para que dois parses da mesma configuracao quebrada
-// produzam o mesmo diagnostico -- a iteracao de map em Go e aleatoria.
+// The order comes out by path so that two parses of the same broken
+// configuration produce the same diagnostic -- map iteration in Go is random.
 func (c *cacheFonte) errosDeLeitura() ParseErrors {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -388,22 +391,22 @@ func (c *cacheFonte) guardarErro(path string, err error) {
 	c.erros[path] = err
 }
 
-// lerFonte devolve os bytes que o crossplane leu para path durante o
-// parse. Se aquela leitura registrou um erro, lerFonte propaga esse erro
-// em vez de reler o arquivo: uma releitura poderia ter sucesso mesmo
-// quando a leitura original que o crossplane de fato tokenizou falhou --
-// uma falha de I/O transitoria, por exemplo --, o que produziria uma
-// Tree com Source completo e Nodes correspondendo so ao prefixo que o
-// lexer alcancou antes do erro, com err == nil escondendo o problema.
+// lerFonte returns the bytes crossplane read for path during the parse. If
+// that read recorded an error, lerFonte propagates the error instead of
+// re-reading the file: a second read could succeed even when the original
+// read crossplane actually tokenized had failed -- a transient I/O failure,
+// for instance --, which would produce a Tree with a complete Source and
+// Nodes matching only the prefix the lexer reached before the error, with err
+// == nil hiding the problem.
 //
-// So cai para uma leitura direta via opts.abrir (que ainda respeita
-// ParseOptions.Open) quando o cache nao tem nem bytes nem erro para esse
-// caminho -- um Config presente no payload sem leitura correspondente
-// registrada, o que nao deveria acontecer no caminho normal do
-// crossplane, mas serve de rede de seguranca.
+// It only falls back to a direct read through opts.abrir (which still honors
+// ParseOptions.Open) when the cache has neither bytes nor an error for that
+// path -- a Config present in the payload with no corresponding read
+// recorded, which should not happen on crossplane's normal path, but serves
+// as a safety net.
 func lerFonte(opts ParseOptions, cache *cacheFonte, path string) ([]byte, error) {
 	if erroLeitura, ok := cache.obterErro(path); ok {
-		return nil, fmt.Errorf("ao ler %s: %w", path, erroLeitura)
+		return nil, fmt.Errorf("while reading %s: %w", path, erroLeitura)
 	}
 
 	if b, ok := cache.obter(path); ok {
@@ -412,13 +415,13 @@ func lerFonte(opts ParseOptions, cache *cacheFonte, path string) ([]byte, error)
 
 	rc, err := opts.abrir(path)
 	if err != nil {
-		return nil, fmt.Errorf("ao ler %s: %w", path, err)
+		return nil, fmt.Errorf("while reading %s: %w", path, err)
 	}
 	defer rc.Close()
 
 	b, err := io.ReadAll(rc)
 	if err != nil {
-		return nil, fmt.Errorf("ao ler %s: %w", path, err)
+		return nil, fmt.Errorf("while reading %s: %w", path, err)
 	}
 	return b, nil
 }
@@ -442,10 +445,10 @@ func converterDirectives(ds crossplane.Directives, file string) []*Node {
 	return nodes
 }
 
-// clonarArgs copia os argumentos da diretiva para que nos construidos por
-// tarefas futuras (a Task 12 monta nos novos a partir destes) nao
-// compartilhem o array de backing com a arvore do crossplane: um append
-// num Args copiado poderia sobrescrever o vizinho.
+// clonarArgs copies the directive arguments so that nodes built by future
+// tasks (Task 12 builds new nodes out of these ones) do not share the backing
+// array with crossplane's tree: an append on a copied Args could overwrite
+// the neighbour.
 func clonarArgs(args []string) []string {
 	if args == nil {
 		return []string{}
@@ -453,31 +456,32 @@ func clonarArgs(args []string) []string {
 	return slices.Clone(args)
 }
 
-// mensagemDeFalhaDeLeitura classifica a causa em vez de repassar a string do
-// runtime.
+// mensagemDeFalhaDeLeitura classifies the cause instead of forwarding the
+// runtime string.
 //
-// As duas coisas importam. A string crua e instavel -- muda entre sistemas e
-// entre versoes da biblioteca -- e um agente que ramifique por ela quebra
-// sozinho; por isso a mensagem e nossa. Mas dizer apenas "nao pode ser lido"
-// desperdica a unica informacao acionavel que existe: permissao negada se
-// resolve de um jeito, conexao caindo de outro. Entao a causa entra
-// classificada, nao literal.
+// Both things matter. The raw string is unstable -- it changes across systems
+// and across library versions -- and an agent branching on it breaks on its
+// own; hence the message is ours. But saying only "cannot be read" wastes the
+// one piece of actionable information there is: permission denied is fixed
+// one way, a dropping connection another. So the cause goes in classified,
+// not literal.
 //
-// A distincao so passou a importar com o acesso remoto. Verificado contra um
-// servidor real que o erro do SFTP casa com fs.ErrPermission, entao a mesma
-// checagem serve ao alvo local e ao remoto.
+// The distinction only started to matter with remote access. Verified against
+// a real server that the SFTP error matches fs.ErrPermission, so the same
+// check serves both the local and the remote target.
 func mensagemDeFalhaDeLeitura(err error) string {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
-		// "o ngx" e nao "o usuario da conexao": a mesma mensagem sai quando o
-		// binario roda na propria maquina, onde nao ha conexao nenhuma.
-		return "o ngx nao tem permissao para ler este arquivo, " +
-			"entao a configuracao nao pode ser apresentada por inteiro"
+		// "ngx" and not "the connection user": the same message goes out
+		// when the binary runs on the machine itself, where there is no
+		// connection at all.
+		return "ngx has no permission to read this file, " +
+			"so the configuration cannot be presented in full"
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return "a leitura deste arquivo foi interrompida antes do fim, " +
-			"entao a configuracao nao pode ser apresentada por inteiro"
+		return "reading this file was interrupted before the end, " +
+			"so the configuration cannot be presented in full"
 	default:
-		return "a leitura deste arquivo falhou antes do fim, " +
-			"entao a configuracao nao pode ser apresentada por inteiro"
+		return "reading this file failed before the end, " +
+			"so the configuration cannot be presented in full"
 	}
 }

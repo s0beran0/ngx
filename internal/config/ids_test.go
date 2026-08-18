@@ -20,7 +20,7 @@ func parseTexto(t *testing.T, conteudo string) *config.Tree {
 	return tree
 }
 
-// Blocos de contexto do nivel raiz nao levam indice: ocorrem no maximo uma vez.
+// Root-level context blocks carry no index: they occur at most once.
 func TestBlocosRaizNaoLevamIndice(t *testing.T) {
 	tree := parseTexto(t, "events {}\nhttp {}\n")
 
@@ -39,8 +39,9 @@ func TestServersSaoNumeradosEntreSi(t *testing.T) {
 	require.Equal(t, "h.s1", http.Block[1].ID)
 }
 
-// A regra que reduz a fragilidade: o indice conta entre irmaos do mesmo tipo,
-// nao por posicao absoluta. Inserir uma location nao renumera os servers.
+// The rule that reduces brittleness: the index counts among siblings of the
+// same kind, not by absolute position. Inserting a location does not renumber
+// the servers.
 func TestIndiceContaEntreIrmaosDoMesmoTipo(t *testing.T) {
 	tree := parseTexto(t, `http {
   upstream a { server 10.0.0.1; }
@@ -53,7 +54,7 @@ func TestIndiceContaEntreIrmaosDoMesmoTipo(t *testing.T) {
 	require.Equal(t, "h.u0", http.Block[0].ID)
 	require.Equal(t, "h.s0", http.Block[1].ID)
 	require.Equal(t, "h.u1", http.Block[2].ID)
-	require.Equal(t, "h.s1", http.Block[3].ID, "o segundo server continua sendo s1")
+	require.Equal(t, "h.s1", http.Block[3].ID, "the second server is still s1")
 }
 
 func TestDiretivasSimplesUsamPrefixoD(t *testing.T) {
@@ -68,11 +69,11 @@ func TestDiretivasSimplesUsamPrefixoD(t *testing.T) {
 	server := tree.Files[0].Nodes[0].Block[0]
 	require.Equal(t, "h.s0.d0", server.Block[0].ID)
 	require.Equal(t, "h.s0.d1", server.Block[1].ID)
-	require.Equal(t, "h.s0.l0", server.Block[2].ID, "location tem abreviacao propria")
+	require.Equal(t, "h.s0.l0", server.Block[2].ID, "location has an abbreviation of its own")
 }
 
-// Comentarios nao recebem ID e nao contam no indice: se contassem, adicionar
-// um comentario renumeraria as diretivas ao redor.
+// Comments get no ID and do not count towards the index: if they did, adding
+// a comment would renumber the directives around it.
 func TestComentariosNaoRecebemIDNemDeslocamIndices(t *testing.T) {
 	tree := parseTexto(t, `http {
   server {
@@ -85,10 +86,10 @@ func TestComentariosNaoRecebemIDNemDeslocamIndices(t *testing.T) {
 
 	server := tree.Files[0].Nodes[0].Block[0]
 
-	require.Empty(t, server.Block[0].ID, "comentario nao tem ID")
+	require.Empty(t, server.Block[0].ID, "a comment has no ID")
 	require.Equal(t, "h.s0.d0", server.Block[1].ID)
 	require.Empty(t, server.Block[2].ID)
-	require.Equal(t, "h.s0.d1", server.Block[3].ID, "o comentario no meio nao deslocou o indice")
+	require.Equal(t, "h.s0.d1", server.Block[3].ID, "the comment in between did not shift the index")
 }
 
 func TestLocationsAninhadasEncadeiamOID(t *testing.T) {
@@ -105,8 +106,8 @@ func TestLocationsAninhadasEncadeiamOID(t *testing.T) {
 	require.Equal(t, "h.s0.l0.l0", server.Block[0].Block[0].ID)
 }
 
-// Diretivas sem abreviacao na tabela usam o nome completo, o que mantem o ID
-// legivel e evita colisao entre server e stream.
+// Directives with no abbreviation in the table use the full name, which keeps
+// the ID readable and avoids a collision between server and stream.
 func TestDiretivaSemAbreviacaoUsaNomeCompleto(t *testing.T) {
 	tree := parseTexto(t, `http {
   map $a $b { default 0; }

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Um agente consumindo a saida faz `.diagnostics.length`. Uma lista nula
-// quebra esse acesso, então lista vazia precisa serializar como [].
+// An agent consuming the output does `.diagnostics.length`. A null list
+// breaks that access, so an empty list needs to serialize as [].
 func TestEnvelopeSerializaDiagnosticsVaziosComoArray(t *testing.T) {
 	env := output.New("status")
 
@@ -28,13 +28,13 @@ func TestEnvelopeNasceOK(t *testing.T) {
 	require.Equal(t, output.Version, env.NgxVersion)
 }
 
-// Teste golden: trava as tags JSON do envelope, do diagnostico e do meta
-// contra renomeacao futura. Tarefas seguintes consomem esses nomes
-// verbatim; sem este teste, qualquer campo pode ser renomeado sem quebrar
-// nada aqui.
+// Golden test: locks the JSON tags of the envelope, the diagnostic and the
+// meta against future renaming. Later tasks consume those names verbatim;
+// without this test, any field could be renamed without breaking anything
+// here.
 func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
 	env := output.New("lint")
-	env.Data = map[string]string{"resultado": "ok"}
+	env.Data = map[string]string{"result": "ok"}
 	env.Meta = output.Meta{
 		DurationMS:   42,
 		NginxVersion: "1.25.3",
@@ -43,7 +43,7 @@ func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
 	env.AddDiagnostic(output.Diagnostic{
 		Severity: output.SeverityError,
 		Code:     "NGX-0002",
-		Message:  "seletor malformado",
+		Message:  "malformed selector",
 		File:     "nginx.conf",
 		Line:     10,
 		Column:   4,
@@ -59,12 +59,12 @@ func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
 		"ok": false,
 		"command": "lint",
 		"ngx_version": "0.1.0-dev",
-		"data": {"resultado": "ok"},
+		"data": {"result": "ok"},
 		"diagnostics": [
 			{
 				"severity": "error",
 				"code": "NGX-0002",
-				"message": "seletor malformado",
+				"message": "malformed selector",
 				"file": "nginx.conf",
 				"line": 10,
 				"column": 4,
@@ -83,36 +83,37 @@ func TestEnvelopeSerializaTodosOsCamposComAsTagsEsperadas(t *testing.T) {
 	require.JSONEq(t, expected, string(b))
 }
 
-// A severidade error é o que derruba o ok do envelope. Warning e info não.
+// The error severity is what brings the envelope's ok down. Warning and info
+// do not.
 func TestAddDiagnosticErrorDerrubaOK(t *testing.T) {
 	env := output.New("test")
 
-	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityWarning, Message: "cuidado"})
-	require.True(t, env.OK, "warning nao deve derrubar ok")
+	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityWarning, Message: "careful"})
+	require.True(t, env.OK, "warning must not bring ok down")
 
-	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityInfo, Message: "so um aviso"})
-	require.True(t, env.OK, "info nao deve derrubar ok")
+	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityInfo, Message: "just a note"})
+	require.True(t, env.OK, "info must not bring ok down")
 
-	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityError, Message: "falhou"})
-	require.False(t, env.OK, "error deve derrubar ok")
+	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityError, Message: "failed"})
+	require.False(t, env.OK, "error must bring ok down")
 
 	require.Len(t, env.Diagnostics, 3)
 }
 
-// Campos opcionais ausentes nao devem poluir a saida do agente.
+// Absent optional fields must not pollute the agent's output.
 func TestDiagnosticOmiteCamposVazios(t *testing.T) {
 	b, err := json.Marshal(output.Diagnostic{
 		Severity: output.SeverityError,
 		Code:     "NGX-0002",
-		Message:  "seletor malformado",
+		Message:  "malformed selector",
 	})
 	require.NoError(t, err)
 
 	s := string(b)
-	require.NotContains(t, s, `"file"`, "file vazio deve ser omitido")
-	require.NotContains(t, s, `"line"`, "line zero deve ser omitido")
-	require.NotContains(t, s, `"column"`, "column zero deve ser omitido")
-	require.NotContains(t, s, `"selector"`, "selector vazio deve ser omitido")
-	require.NotContains(t, s, `"id"`, "id vazio deve ser omitido")
-	require.NotContains(t, s, `"docs"`, "docs vazio deve ser omitido")
+	require.NotContains(t, s, `"file"`, "an empty file must be omitted")
+	require.NotContains(t, s, `"line"`, "a zero line must be omitted")
+	require.NotContains(t, s, `"column"`, "a zero column must be omitted")
+	require.NotContains(t, s, `"selector"`, "an empty selector must be omitted")
+	require.NotContains(t, s, `"id"`, "an empty id must be omitted")
+	require.NotContains(t, s, `"docs"`, "an empty docs must be omitted")
 }

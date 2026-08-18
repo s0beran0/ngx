@@ -6,11 +6,11 @@ import (
 	"unicode/utf8"
 )
 
-// TokenKind classifica um token.
+// TokenKind classifies a token.
 type TokenKind int
 
 const (
-	// TokenWord e um nome de diretiva ou um argumento.
+	// TokenWord is a directive name or an argument.
 	TokenWord TokenKind = iota
 	TokenSemicolon
 	TokenBlockStart
@@ -18,16 +18,16 @@ const (
 	TokenComment
 )
 
-// Token e um lexema com sua posicao exata. Value e o conteudo semantico (sem
-// aspas, sem o # do comentario); Raw e o texto original.
+// Token is a lexeme with its exact position. Value is the semantic content
+// (no quotes, no leading # of a comment); Raw is the original text.
 //
-// Start e End sao SEMPRE offsets em bytes: src[Start:End] == Raw, sempre,
-// sem excecao -- isso e o que sustenta a edicao cirurgica da v0.2. Line e
-// Column, por outro lado, contam RUNES, nao bytes: existem para leitura
-// humana e de agente como posicao visual (a mesma coisa que um editor de
-// texto mostraria), e um caractere multibyte (ç, ã, é) conta como uma unica
-// coluna. Para offsets exatos em bytes use Start/End; nunca derive offset de
-// byte a partir de Column.
+// Start and End are ALWAYS byte offsets: src[Start:End] == Raw, always, no
+// exception -- that is what underpins the surgical editing of v0.2. Line and
+// Column, on the other hand, count RUNES, not bytes: they exist for human and
+// agent reading as a visual position (the same thing a text editor would
+// show), and a multibyte character (c, a, e with a diacritic) counts as a
+// single column. For exact byte offsets use Start/End; never derive a byte
+// offset from Column.
 type Token struct {
 	Kind   TokenKind
 	Value  string
@@ -47,11 +47,11 @@ type tokenizer struct {
 	tokens []Token
 }
 
-// Tokenize quebra a fonte em tokens com offsets de byte. Nao interpreta
-// diretiva nenhuma: so precisa saber onde cada lexema comeca e termina,
-// respeitando aspas, escapes, expansao de parametro (${...}) e comentarios
-// -- casando token a token com o lexer do nginx-go-crossplane, que e o que
-// a Task 9 usa para alinhar contra a arvore semantica.
+// Tokenize breaks the source into tokens with byte offsets. It interprets no
+// directive at all: it only needs to know where each lexeme begins and ends,
+// honoring quotes, escapes, parameter expansion (${...}) and comments --
+// matching nginx-go-crossplane's lexer token for token, which is what Task 9
+// uses to align against the semantic tree.
 func Tokenize(src []byte) ([]Token, error) {
 	t := &tokenizer{src: src, line: 1, col: 1}
 	for {
@@ -65,12 +65,11 @@ func Tokenize(src []byte) ([]Token, error) {
 	}
 }
 
-// runeAqui devolve a rune que comeca em t.pos e seu tamanho em bytes, sem
-// avancar. utf8.DecodeRune ja devolve (RuneError, 1) para um byte invalido
-// ou uma sequencia truncada -- o tokenizador nunca trava numa entrada
-// malformada (o fuzz gera essas entradas de proposito), so avanca 1 byte
-// por vez por ela, do mesmo jeito que bufio.ScanRunes faz no lexer do
-// crossplane.
+// runeAqui returns the rune beginning at t.pos and its size in bytes, without
+// advancing. utf8.DecodeRune already returns (RuneError, 1) for an invalid
+// byte or a truncated sequence -- the tokenizer never gets stuck on malformed
+// input (the fuzz produces such input on purpose), it just advances 1 byte at
+// a time through it, the same way bufio.ScanRunes does in crossplane's lexer.
 func (t *tokenizer) runeAqui() (rune, int) {
 	if t.pos >= len(t.src) {
 		return 0, 0
@@ -78,17 +77,16 @@ func (t *tokenizer) runeAqui() (rune, int) {
 	return utf8.DecodeRune(t.src[t.pos:])
 }
 
-// espacoAqui diz se a rune em t.pos e espaco em branco no sentido unicode
-// completo -- inclui \v, \f e NBSP (U+00A0), nao so os quatro bytes ascii.
-// E o mesmo conjunto que o crossplane usa via strings.TrimSpace.
+// espacoAqui says whether the rune at t.pos is whitespace in the full unicode
+// sense -- \v, \f and NBSP (U+00A0) included, not just the four ascii bytes.
+// It is the same set crossplane uses through strings.TrimSpace.
 func (t *tokenizer) espacoAqui() bool {
 	r, _ := t.runeAqui()
 	return unicode.IsSpace(r)
 }
 
-// avancar consome uma rune inteira (1 ou mais bytes) a partir de t.pos,
-// atualizando posicao, linha e coluna. Column conta runes; pos continua em
-// bytes.
+// avancar consumes one whole rune (1 or more bytes) starting at t.pos,
+// updating position, line and column. Column counts runes; pos stays in bytes.
 func (t *tokenizer) avancar() {
 	r, tam := t.runeAqui()
 	if tam == 0 {
@@ -103,13 +101,13 @@ func (t *tokenizer) avancar() {
 	}
 }
 
-// consumirParaValor consome a rune em t.pos e devolve os bytes que devem
-// entrar em Value: para uma rune valida, os proprios bytes da fonte; para um
-// byte UTF-8 invalido, a codificacao da rune de substituicao U+FFFD -- e o
-// que bufio.ScanRunes (o scanner usado pelo lexer do crossplane) devolve
-// para bytes invalidos, mesmo avancando so 1 byte na fonte de entrada. Sem
-// isso, um byte invalido no meio de uma palavra faz o nosso Value discordar
-// do valor do crossplane, quebrando a comparacao diferencial da Task 9.
+// consumirParaValor consumes the rune at t.pos and returns the bytes that
+// should go into Value: for a valid rune, the source bytes themselves; for an
+// invalid UTF-8 byte, the encoding of the replacement rune U+FFFD -- which is
+// what bufio.ScanRunes (the scanner crossplane's lexer uses) returns for
+// invalid bytes, even though it advances only 1 byte in the input source.
+// Without this, an invalid byte in the middle of a word makes our Value
+// disagree with crossplane's, breaking the differential comparison of Task 9.
 func (t *tokenizer) consumirParaValor() []byte {
 	r, tam := t.runeAqui()
 	antes := t.pos
@@ -120,19 +118,19 @@ func (t *tokenizer) consumirParaValor() []byte {
 	return t.src[antes:t.pos]
 }
 
-// consumirEscape consome a barra invertida em t.pos e, logo depois dela,
-// qualquer sequencia de \r -- cada um invisivel, igual ao crossplane -- ate
-// achar a rune real que forma o par de escape com essa barra (ja com bytes
-// invalidos substituidos por U+FFFD via consumirParaValor). Isso replica um
-// comportamento genuino do crossplane: o estado "escape pendente" atravessa
-// um \r solto e se funde com o PROXIMO caractere de verdade, esteja ele onde
-// estiver -- nao com o \r em si. Se a fonte acabar antes de achar essa rune
-// (so havia a barra e talvez alguns \r ate o fim do arquivo), o par nunca se
-// forma: tudo o que foi consumido fica invisivel (nunca entra em Value, mas
-// continua avancando a posicao, entao continua dentro do Raw do token que
-// estiver sendo construido), e ok volta false.
+// consumirEscape consumes the backslash at t.pos and, right after it, any run
+// of \r -- each one invisible, just like in crossplane -- until it finds the
+// real rune that forms the escape pair with that backslash (already with
+// invalid bytes replaced by U+FFFD through consumirParaValor). This
+// replicates a genuine crossplane behavior: the "escape pending" state
+// crosses a stray \r and merges with the NEXT real character, wherever it may
+// be -- not with the \r itself. If the source ends before that rune is found
+// (there was only the backslash and perhaps a few \r up to the end of the
+// file), the pair never forms: everything consumed stays invisible (it never
+// goes into Value, but it still advances the position, so it stays inside the
+// Raw of whatever token is being built), and ok comes back false.
 func (t *tokenizer) consumirEscape() (proximo []byte, ok bool) {
-	t.avancar() // a barra em si, sempre ascii de 1 byte
+	t.avancar() // the backslash itself, always 1 ascii byte
 	for t.pos < len(t.src) && t.src[t.pos] == '\r' {
 		t.avancar()
 	}
@@ -174,11 +172,11 @@ func (t *tokenizer) proximo() error {
 	}
 }
 
-// lerComentario consome um comentario at o fim da linha. O CR de um
-// terminador CRLF fica de fora do span do token: pertence ao espaco em
-// branco que vem depois, nao ao comentario. Assim a v0.2, ao reescrever
-// esse comentario, nunca converte a quebra de linha de CRLF para LF -- uma
-// mudanca fora do alvo que o projeto promete nunca fazer.
+// lerComentario consumes a comment up to the end of the line. The CR of a
+// CRLF terminator stays out of the token span: it belongs to the whitespace
+// that follows, not to the comment. That way v0.2, when rewriting that
+// comment, never converts the line break from CRLF to LF -- an off-target
+// change the project promises never to make.
 func (t *tokenizer) lerComentario(start, line, col int) {
 	for t.pos < len(t.src) {
 		if t.src[t.pos] == '\n' {
@@ -192,16 +190,16 @@ func (t *tokenizer) lerComentario(start, line, col int) {
 	t.emitir(TokenComment, string(t.src[start+1:t.pos]), start, line, col, false)
 }
 
-// lerAspas consome uma string entre aspas simples ou duplas. Barra invertida
-// so e removida quando precede a aspa ativa (o delimitador atual); qualquer
-// outro escape fica literal em Value, igual ao crossplane -- por isso
-// msg "a\nb"; produz Value a\nb (barra e n literais), nao uma quebra de
-// linha real. Um \r solto nunca entra em Value, fica invisivel, igual ao
-// crossplane -- mas continua avancando a posicao, entao continua dentro do
-// Raw. Uma barra seguida de \r pula os \r (invisiveis) e forma o par de
-// escape com a rune real que vier depois, via consumirEscape.
+// lerAspas consumes a string between single or double quotes. A backslash is
+// only dropped when it precedes the active quote (the current delimiter); any
+// other escape stays literal in Value, just like in crossplane -- which is
+// why msg "a\nb"; yields Value a\nb (a literal backslash and n), not a real
+// line break. A stray \r never goes into Value, it stays invisible, just like
+// in crossplane -- but it still advances the position, so it stays inside
+// Raw. A backslash followed by \r skips the \r (invisible) and forms the
+// escape pair with the real rune that comes next, through consumirEscape.
 func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
-	t.avancar() // consome a aspa de abertura
+	t.avancar() // consumes the opening quote
 
 	var valor []byte
 	for t.pos < len(t.src) {
@@ -210,17 +208,17 @@ func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
 		case c == '\\':
 			if prox, ok := t.consumirEscape(); ok {
 				if len(prox) == 1 && prox[0] == aspa {
-					valor = append(valor, prox...) // so a aspa, sem a barra
+					valor = append(valor, prox...) // the quote only, no backslash
 				} else {
 					valor = append(valor, '\\')
 					valor = append(valor, prox...)
 				}
 			}
 		case c == '\r':
-			// CR solto fica invisivel -- nunca entra em Value.
+			// A stray CR stays invisible -- it never goes into Value.
 			t.avancar()
 		case c == aspa:
-			t.avancar() // consome a aspa de fechamento
+			t.avancar() // consumes the closing quote
 			t.emitir(TokenWord, string(valor), start, line, col, true)
 			return nil
 		default:
@@ -230,39 +228,39 @@ func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
 	return &ErroDeAspa{Aspa: string(aspa), Linha: line}
 }
 
-// ErroDeAspa e a fonte terminando dentro de uma aspa aberta. E um tipo, e nao
-// um fmt.Errorf, porque essa e uma das divergencias enumeradas contra o
-// crossplane: o lexer dele fecha a aspa implicitamente no fim do arquivo
+// ErroDeAspa is the source ending inside an open quote. It is a type, and not
+// an fmt.Errorf, because this is one of the enumerated divergences against
+// crossplane: their lexer closes the quote implicitly at end of file
 // (lex.go:325-327, "if token.Len() > 0 { emit(tokenStartLine, lexState ==
-// inQuote, nil) }") e nao emite token nenhum quando o conteudo esta vazio
-// (mesma guarda), de modo que uma aspa solta vira config "ok" para ele. O
-// nginx recusa; nos recusamos junto, e o fuzz precisa reconhecer essa recusa
-// pela classe, nao por substring da mensagem.
+// inQuote, nil) }") and emits no token at all when the content is empty (same
+// guard), so that a dangling quote yields an "ok" config for them. nginx
+// refuses it; we refuse it too, and the fuzz has to recognize this refusal by
+// its class, not by a substring of the message.
 type ErroDeAspa struct {
 	Aspa  string
 	Linha int
 }
 
 func (e *ErroDeAspa) Error() string {
-	return fmt.Sprintf("aspa %q aberta na linha %d nao foi fechada", e.Aspa, e.Linha)
+	return fmt.Sprintf("quote %q opened on line %d was never closed", e.Aspa, e.Linha)
 }
 
-// lerPalavra consome uma palavra nao-quotada: nome de diretiva ou argumento.
-// Trata ${...} (expansao de parametro, comum em templates Docker/envsubst,
-// njs, rewrite e set) como parte da mesma palavra -- sem esse tratamento,
-// "{" e "}" fantasmas aparecem no meio da palavra e desalinham a Task 9
-// contra a arvore do crossplane. Um \r solto fica invisivel no meio da
-// palavra, igual ao crossplane: nao termina a palavra, nunca entra em Value
-// -- so um \n de verdade termina. Uma barra pula qualquer \r que vier logo
-// depois e forma o par de escape com a rune real seguinte, via
-// consumirEscape; se a fonte acabar antes disso, a barra (e os \r) somem
-// sem deixar conteudo, exatamente como o crossplane.
+// lerPalavra consumes an unquoted word: a directive name or an argument. It
+// treats ${...} (parameter expansion, common in Docker/envsubst templates,
+// njs, rewrite and set) as part of the same word -- without that handling,
+// phantom "{" and "}" show up in the middle of the word and throw Task 9 out
+// of alignment against crossplane's tree. A stray \r stays invisible in the
+// middle of the word, just like in crossplane: it does not end the word and
+// never goes into Value -- only a real \n ends it. A backslash skips any \r
+// that comes right after it and forms the escape pair with the next real
+// rune, through consumirEscape; if the source ends before that, the backslash
+// (and the \r) vanish leaving no content, exactly like in crossplane.
 func (t *tokenizer) lerPalavra(start, line, col int) error {
 	var valor []byte
 	for t.pos < len(t.src) {
 		if len(valor) > 0 && valor[len(valor)-1] == '$' && t.src[t.pos] == '{' {
 			antes := t.pos
-			t.avancar() // consome o '{' que abre a expansao
+			t.avancar() // consumes the '{' that opens the expansion
 			valor = append(valor, t.src[antes:t.pos]...)
 			t.lerVar(&valor)
 			continue
@@ -277,10 +275,10 @@ func (t *tokenizer) lerPalavra(start, line, col int) error {
 			continue
 		}
 		if c == '\r' {
-			// espelha lerComentario: o CR de um terminador CRLF fica de fora
-			// do span, pertence ao espaco em branco que vem depois, nao a
-			// palavra. So um CR solto (sem \n em seguida) e invisivel e
-			// consumido aqui.
+			// mirrors lerComentario: the CR of a CRLF terminator stays out
+			// of the span, it belongs to the whitespace that follows, not to
+			// the word. Only a stray CR (with no \n after it) is invisible
+			// and consumed here.
 			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
 				break
 			}
@@ -294,27 +292,27 @@ func (t *tokenizer) lerPalavra(start, line, col int) error {
 		valor = append(valor, t.consumirParaValor()...)
 	}
 	if len(valor) == 0 {
-		// a unica coisa consumida foi uma barra (e talvez \r) engolida sem
-		// nunca achar par: nao ha conteudo nenhum, e o crossplane tambem
-		// nao produz token para ela.
+		// the only thing consumed was a backslash (and maybe some \r)
+		// swallowed without ever finding a pair: there is no content at all,
+		// and crossplane produces no token for it either.
 		return nil
 	}
 	t.emitir(TokenWord, string(valor), start, line, col, false)
 	return nil
 }
 
-// lerVar consome o corpo de uma expansao de parametro (${...}) depois do
-// '{' de abertura ja ter sido incorporado a palavra por lerPalavra. Espelha
-// o estado inVar do lexer do crossplane, byte a byte: a leitura para (volta
-// ao modo palavra normal) na primeira '}' ou no primeiro espaco em branco
-// nao escapado, e os dois ainda fazem parte da mesma palavra -- e um
-// comportamento estranho (o proprio crossplane documenta como um bug, "does
-// not terminate on token boundary"), mas e o que ele faz, e este
-// tokenizador precisa casar token a token com ele, nao corrigi-lo. Uma barra
-// escapando qualquer coisa (exceto '}') nunca conta como o espaco que
-// termina a expansao, so uma barra escapando '}' termina, igual ao
-// crossplane. Um \r solto fica invisivel, igual em lerAspas; uma barra pula
-// qualquer \r antes de formar o par de escape, via consumirEscape.
+// lerVar consumes the body of a parameter expansion (${...}) after the
+// opening '{' has already been folded into the word by lerPalavra. It mirrors
+// the inVar state of crossplane's lexer, byte by byte: the reading stops
+// (back to normal word mode) at the first '}' or the first unescaped
+// whitespace, and both are still part of the same word -- odd behavior
+// (crossplane itself documents it as a bug, "does not terminate on token
+// boundary"), but it is what it does, and this tokenizer has to match it
+// token for token, not fix it. A backslash escaping anything (except '}')
+// never counts as the whitespace that ends the expansion, only a backslash
+// escaping '}' ends it, just like in crossplane. A stray \r stays invisible,
+// as in lerAspas; a backslash skips any \r before forming the escape pair,
+// through consumirEscape.
 func (t *tokenizer) lerVar(valor *[]byte) {
 	for t.pos < len(t.src) {
 		c := t.src[t.pos]
@@ -330,8 +328,8 @@ func (t *tokenizer) lerVar(valor *[]byte) {
 			continue
 		}
 		if c == '\r' {
-			// mesmo tratamento de lerPalavra: o CR de um CRLF fica de fora
-			// do span, nao entra na expansao.
+			// same handling as in lerPalavra: the CR of a CRLF stays out of
+			// the span, it does not go into the expansion.
 			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
 				return
 			}

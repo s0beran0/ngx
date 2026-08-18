@@ -17,31 +17,33 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// Nenhum teste deste arquivo abre socket, sobe servidor ou espera digitacao.
-// O ambienteAuth existe para isso: a montagem dos metodos e uma decisao pura
-// sobre o que esta disponivel, e e essa decisao que se verifica aqui.
+// No test in this file opens a socket, brings up a server or waits for
+// keystrokes. ambienteAuth exists for that: assembling the methods is a pure
+// decision about what is available, and that decision is what is verified
+// here.
 
-// ambienteVazio e o pior cenario: sem ssh-agent, sem variaveis de ambiente e
-// sem terminal. lerSegredo reprova o teste se for chamado — um prompt aqui
-// significaria que o ngx pararia esperando alguem digitar num pipe.
+// ambienteVazio is the worst case: no ssh-agent, no environment variables and
+// no terminal. lerSegredo fails the test if it is called — a prompt here would
+// mean ngx would block waiting for someone to type into a pipe.
 func ambienteVazio(t *testing.T) ambienteAuth {
 	t.Helper()
 	return ambienteAuth{
 		conectarAgente: func() (net.Conn, error) {
-			return nil, errors.New("SSH_AUTH_SOCK nao esta definida no ambiente")
+			return nil, errors.New("SSH_AUTH_SOCK is not set in the environment")
 		},
 		lerEnv:          func(string) string { return "" },
 		stdinEhTerminal: func() bool { return false },
 		lerSegredo: func(prompt string) (string, error) {
-			t.Fatalf("prompt de segredo disparado sem terminal: %q", prompt)
+			t.Fatalf("secret prompt fired with no terminal: %q", prompt)
 			return "", nil
 		},
 	}
 }
 
-// comSSHAgent devolve um ambiente onde o ssh-agent responde. A conexao e um
-// net.Pipe que nunca e usado: agent.NewClient nao faz I/O na construcao e o
-// metodo so consulta o agente durante o handshake, que estes testes nao fazem.
+// comSSHAgent returns an environment where the ssh-agent answers. The
+// connection is a net.Pipe that is never used: agent.NewClient does no I/O at
+// construction time and the method only queries the agent during the
+// handshake, which these tests do not perform.
 func comSSHAgent(t *testing.T, amb ambienteAuth) ambienteAuth {
 	t.Helper()
 	amb.conectarAgente = func() (net.Conn, error) {
@@ -57,8 +59,8 @@ func comEnv(amb ambienteAuth, pares map[string]string) ambienteAuth {
 	return amb
 }
 
-// escreverChave grava uma chave ed25519 em disco. Com passphrase vazia a chave
-// sai em claro.
+// escreverChave writes an ed25519 key to disk. With an empty passphrase the
+// key comes out in the clear.
 func escreverChave(t *testing.T, passphrase string) string {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -86,18 +88,18 @@ func diagnosticoComCodigo(diags []output.Diagnostic, codigo string) *output.Diag
 	return nil
 }
 
-// A ordem e o contrato central da DR2, com a excecao da chave nomeada.
+// The order is the central contract of DR2, with the exception of the named
+// key.
 //
-// Quando o usuario passa --key, ela vem ANTES do ssh-agent. O motivo foi
-// medido contra um sshd real: o MaxAuthTries padrao e 6, cada chave do
-// ssh-agent gasta uma tentativa, e um desenvolvedor costuma ter varias
-// carregadas -- entao a chave explicitamente pedida nunca chegava a ser
-// oferecida e a conexao morria com "no supported methods remain", mensagem
-// que nao aponta para a causa. E o mesmo problema que IdentitiesOnly=yes
-// resolve no ssh.
+// When the user passes --key, it comes BEFORE the ssh-agent. The reason was
+// measured against a real sshd: the default MaxAuthTries is 6, each ssh-agent
+// key spends one attempt, and a developer usually has several loaded -- so the
+// explicitly requested key never got offered and the connection died with "no
+// supported methods remain", a message that does not point at the cause. It is
+// the same problem IdentitiesOnly=yes solves in ssh.
 //
-// Sem --key, o ssh-agent continua na frente, que e o preferivel: com ele a
-// chave privada nunca e lida pelo ngx.
+// Without --key, the ssh-agent stays in front, which is preferable: with it
+// the private key is never read by ngx.
 func TestMontarAutenticacaoChaveNomeadaVemAntesDoAgente(t *testing.T) {
 	amb := comSSHAgent(t, comEnv(ambienteVazio(t), map[string]string{
 		EnvSenhaSSH: "s3nha",
@@ -112,17 +114,18 @@ func TestMontarAutenticacaoChaveNomeadaVemAntesDoAgente(t *testing.T) {
 	t.Cleanup(func() { _ = auth.Close() })
 
 	require.Equal(t, []string{MetodoChave, MetodoSSHAgent, MetodoSenha}, auth.Nomes,
-		"chave nomeada em --key precede o ssh-agent para nao esbarrar no MaxAuthTries")
+		"a key named in --key precedes the ssh-agent so it does not hit MaxAuthTries")
 
-	// Duas fontes de chave, UM metodo de chave publica (mais o de senha).
+	// Two key sources, ONE public key method (plus the password one).
 	//
-	// Medido contra servidor real: oferecer agente e arquivo como metodos
-	// separados falha quando o agente tem chaves e nenhuma serve -- assim que
-	// o primeiro metodo de chave publica se esgota, o seguinte nao salva, e o
-	// ngx recusava conexao que o `ssh` fazia. O OpenSSH oferece tudo num
-	// metodo so; este require e o que impede a separacao de voltar.
+	// Measured against a real server: offering agent and file as separate
+	// methods fails when the agent has keys and none of them serves -- as
+	// soon as the first public key method is exhausted, the next one does
+	// not save the day, and ngx refused a connection that `ssh` made.
+	// OpenSSH offers everything in a single method; this require is what
+	// keeps the split from coming back.
 	require.Len(t, auth.Metodos, 2,
-		"todas as chaves precisam caber num unico metodo de chave publica")
+		"all keys must fit into a single public key method")
 	require.NotNil(t, diags)
 	require.Empty(t, diags)
 }
@@ -140,12 +143,12 @@ func TestMontarAutenticacaoSemChaveNomeadaMantemAgenteNaFrente(t *testing.T) {
 	t.Cleanup(func() { _ = auth.Close() })
 
 	require.Equal(t, []string{MetodoSSHAgent, MetodoSenha}, auth.Nomes,
-		"sem --key o ssh-agent vem primeiro: a chave privada nunca e lida pelo ngx")
+		"without --key the ssh-agent comes first: the private key is never read by ngx")
 }
 
-// Ausencia de ssh-agent nao e erro: e um metodo a menos, com um diagnostico
-// informativo. Confundir os dois faria o ngx falhar em qualquer maquina que
-// nao esteja com o agente rodando.
+// The absence of an ssh-agent is not an error: it is one less method, with an
+// informational diagnostic. Confusing the two would make ngx fail on any
+// machine that does not have the agent running.
 func TestSSHAgentAusenteNaoEErro(t *testing.T) {
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
 
@@ -156,14 +159,14 @@ func TestSSHAgentAusenteNaoEErro(t *testing.T) {
 	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
 
 	d := diagnosticoComCodigo(diags, CodigoAvisoSSHAgentAusente)
-	require.NotNil(t, d, "a ausencia do ssh-agent precisa ser informada, nao silenciosa")
+	require.NotNil(t, d, "the absence of the ssh-agent has to be reported, not silent")
 	require.Equal(t, output.SeverityInfo, d.Severity,
-		"nao ha ssh-agent e uma situacao normal; severidade de erro faria parecer defeito")
+		"having no ssh-agent is a normal situation; error severity would make it look like a defect")
 	require.Contains(t, d.Message, "ssh-add")
 }
 
-// A senha vem do ambiente, e vir do ambiente dispensa qualquer prompt: o
-// lerSegredo de ambienteVazio reprova o teste se for chamado.
+// The password comes from the environment, and coming from the environment
+// waives any prompt: the lerSegredo of ambienteVazio fails the test if called.
 func TestSenhaVemDoAmbiente(t *testing.T) {
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
 
@@ -174,9 +177,10 @@ func TestSenhaVemDoAmbiente(t *testing.T) {
 	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
 }
 
-// Rodando sob pipe — que e como um agente de IA usa o ngx — nao ha como
-// perguntar nada. O comando tem de falhar com uma instrucao acionavel, e nao
-// travar. O teste completa: se travasse, ele estouraria o timeout do go test.
+// Running under a pipe — which is how an AI agent uses ngx — there is no way
+// to ask anything. The command has to fail with an actionable instruction, and
+// not hang. The test completing is the proof: if it hung, it would blow the
+// go test timeout.
 func TestSemTerminalESemAmbienteFalhaComMensagemClara(t *testing.T) {
 	auth, diags, err := montarAutenticacao(
 		SSHOptions{Host: "web1", User: "deploy"}, ambienteVazio(t))
@@ -189,18 +193,18 @@ func TestSemTerminalESemAmbienteFalhaComMensagemClara(t *testing.T) {
 	require.Equal(t, CodigoSemMetodoAuth, saida.Diag.Code)
 	require.Equal(t, output.SeverityError, saida.Diag.Severity)
 	require.Contains(t, saida.Diag.Message, EnvSenhaSSH,
-		"a mensagem precisa dizer qual variavel de ambiente definir")
+		"the message has to say which environment variable to set")
 	require.Contains(t, saida.Diag.Message, "deploy@web1")
 }
 
-// Com terminal existe metodo de senha, mas o prompt e adiado para o handshake:
-// se o servidor aceitar a chave, ninguem e perguntado. Montar a lista nunca
-// pode ler segredo.
+// With a terminal there is a password method, but the prompt is deferred to
+// the handshake: if the server accepts the key, nobody is asked. Assembling
+// the list can never read a secret.
 func TestComTerminalNaoPerguntaNaMontagem(t *testing.T) {
 	amb := ambienteVazio(t)
 	amb.stdinEhTerminal = func() bool { return true }
 	amb.lerSegredo = func(prompt string) (string, error) {
-		t.Fatalf("prompt disparado durante a montagem, antes de qualquer handshake: %q", prompt)
+		t.Fatalf("prompt fired during assembly, before any handshake: %q", prompt)
 		return "", nil
 	}
 
@@ -211,7 +215,8 @@ func TestComTerminalNaoPerguntaNaMontagem(t *testing.T) {
 	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
 }
 
-// Chave cifrada com a passphrase no ambiente e aberta na montagem, sem prompt.
+// An encrypted key with the passphrase in the environment is unlocked at
+// assembly time, with no prompt.
 func TestChaveCifradaComPassphraseNoAmbiente(t *testing.T) {
 	caminho := escreverChave(t, "abre-te")
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvPassphraseChaveSSH: "abre-te"})
@@ -224,8 +229,9 @@ func TestChaveCifradaComPassphraseNoAmbiente(t *testing.T) {
 	require.Nil(t, diagnosticoComCodigo(diags, CodigoAvisoChaveIndisponivel))
 }
 
-// Chave cifrada, sem passphrase no ambiente e sem terminal: o metodo sai da
-// lista com um aviso que nomeia a variavel. Nada de prompt sob pipe.
+// An encrypted key, with no passphrase in the environment and no terminal: the
+// method leaves the list with a warning naming the variable. No prompt under a
+// pipe.
 func TestChaveCifradaSemTerminalSaiDaListaComAviso(t *testing.T) {
 	caminho := escreverChave(t, "abre-te")
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
@@ -243,9 +249,9 @@ func TestChaveCifradaSemTerminalSaiDaListaComAviso(t *testing.T) {
 	require.Equal(t, caminho, d.File)
 }
 
-// Chave apontada que nao existe nao derruba a conexao: vira aviso e a ordem
-// segue. Mas nao pode ser silenciosa — cair calado para a senha faria um
-// caminho errado parecer certo.
+// A key that was pointed at and does not exist does not bring the connection
+// down: it becomes a warning and the order goes on. But it cannot be silent —
+// falling back to the password quietly would make a wrong path look right.
 func TestChaveInexistenteViraAvisoENaoErro(t *testing.T) {
 	caminho := filepath.Join(t.TempDir(), "nao-existe")
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
@@ -261,10 +267,10 @@ func TestChaveInexistenteViraAvisoENaoErro(t *testing.T) {
 	require.Equal(t, output.SeverityWarning, d.Severity)
 }
 
-// Arquivo que nao e chave nenhuma tambem sai com aviso, e nao com erro.
+// A file that is no key at all also leaves with a warning, and not an error.
 func TestChaveMalformadaViraAviso(t *testing.T) {
 	caminho := filepath.Join(t.TempDir(), "lixo")
-	require.NoError(t, os.WriteFile(caminho, []byte("isto nao e uma chave"), 0o600))
+	require.NoError(t, os.WriteFile(caminho, []byte("this is not a key"), 0o600))
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
 
 	auth, diags, err := montarAutenticacao(SSHOptions{Host: "web1", KeyPath: caminho}, amb)
@@ -275,8 +281,8 @@ func TestChaveMalformadaViraAviso(t *testing.T) {
 	require.NotNil(t, diagnosticoComCodigo(diags, CodigoAvisoChaveIndisponivel))
 }
 
-// Passphrase errada no ambiente nao pode virar uma tentativa muda: sai aviso
-// dizendo que a variavel nao abre a chave.
+// A wrong passphrase in the environment cannot become a mute attempt: a
+// warning comes out saying the variable does not unlock the key.
 func TestPassphraseErradaNoAmbienteViraAviso(t *testing.T) {
 	caminho := escreverChave(t, "abre-te")
 	amb := comEnv(ambienteVazio(t), map[string]string{
@@ -295,8 +301,8 @@ func TestPassphraseErradaNoAmbienteViraAviso(t *testing.T) {
 	require.Contains(t, d.Message, EnvPassphraseChaveSSH)
 }
 
-// Nenhum segredo pode escapar por diagnostico ou mensagem de erro. Quem le a
-// saida do ngx nao e necessariamente quem tem direito ao segredo.
+// No secret may escape through a diagnostic or an error message. Whoever reads
+// the ngx output is not necessarily entitled to the secret.
 func TestSegredoNaoVazaEmDiagnostico(t *testing.T) {
 	const senha = "s3nha-supersecreta"
 	const passphrase = "passphrase-supersecreta"
@@ -317,8 +323,8 @@ func TestSegredoNaoVazaEmDiagnostico(t *testing.T) {
 	}
 }
 
-// O metodo do ssh-agent segura a conexao aberta ate o fim do handshake; Close
-// e quem a devolve, e chamar duas vezes precisa ser seguro.
+// The ssh-agent method holds the connection open until the end of the
+// handshake; Close is what gives it back, and calling it twice has to be safe.
 func TestCloseEIdempotente(t *testing.T) {
 	amb := comSSHAgent(t, ambienteVazio(t))
 
@@ -332,8 +338,8 @@ func TestCloseEIdempotente(t *testing.T) {
 	require.NoError(t, nulo.Close())
 }
 
-// A montagem nunca devolve lista ou nomes nulos: um agente que faz .length
-// numa lista nula quebra.
+// The assembly never returns a nil list or nil names: an agent calling .length
+// on a null list breaks.
 func TestListasNuncaSaoNulas(t *testing.T) {
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "s3nha"})
 
@@ -346,8 +352,8 @@ func TestListasNuncaSaoNulas(t *testing.T) {
 	require.NotNil(t, diags)
 }
 
-// Uma senha ja resolvida pelo chamador vence o ambiente. O campo existe para
-// receber o que veio do ambiente, nunca de flag.
+// A password already resolved by the caller beats the environment. The field
+// exists to receive what came from the environment, never from a flag.
 func TestSenhaDasOpcoesVenceOAmbiente(t *testing.T) {
 	amb := comEnv(ambienteVazio(t), map[string]string{EnvSenhaSSH: "do-ambiente"})
 
@@ -359,9 +365,9 @@ func TestSenhaDasOpcoesVenceOAmbiente(t *testing.T) {
 	require.Equal(t, []string{MetodoSenha}, auth.Nomes)
 }
 
-// Nenhuma flag de senha pode existir na superficie do pacote: flag aparece em
-// `ps`, no historico do shell e no log de CI. O teste le o proprio fonte
-// porque o defeito que ele previne e alguem acrescentar a flag depois.
+// No password flag may exist on the package surface: a flag shows up in `ps`,
+// in the shell history and in the CI log. The test reads the source itself
+// because the defect it prevents is somebody adding the flag later.
 func TestNenhumaFlagDeSenhaNoPacote(t *testing.T) {
 	entradas, err := os.ReadDir(".")
 	require.NoError(t, err)
@@ -375,7 +381,7 @@ func TestNenhumaFlagDeSenhaNoPacote(t *testing.T) {
 		require.NoError(t, err)
 		for _, p := range proibidos {
 			require.NotContains(t, string(conteudo), p,
-				"%s menciona %s: segredo nunca vem de flag", e.Name(), p)
+				"%s mentions %s: a secret never comes from a flag", e.Name(), p)
 		}
 	}
 }

@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A barreira e a segunda camada do defeito 1: mesmo com validarExpressoesIf
-// barrando o caso conhecido, nenhum panic vindo da dependencia pode escapar
-// como stack trace de uma CLI que um agente le como JSON. Aqui o panic e
-// forcado por um Open que entra em panico -- ele roda na goroutine do parser,
-// que e a que a barreira cobre.
+// The barrier is the second layer of defect 1: even with validarExpressoesIf
+// blocking the known case, no panic coming from the dependency may escape as a
+// stack trace out of a CLI that an agent reads as JSON. Here the panic is
+// forced by an Open that panics -- it runs on the parser goroutine, which is
+// the one the barrier covers.
 func TestBarreiraConvertePanicEmRecusaTipada(t *testing.T) {
 	payload, err := parseComBarreira("qualquer.conf", &crossplane.ParseOptions{
 		Open: func(string) (io.ReadCloser, error) { panic("boom da dependencia") },
@@ -28,25 +28,24 @@ func TestBarreiraConvertePanicEmRecusaTipada(t *testing.T) {
 	require.Contains(t, problemas[0].Message, "boom da dependencia")
 }
 
-// A validacao previa e o conserto de causa raiz: ela precisa recusar
-// exatamente o que validExpr (crossplane/util.go:57-67) recusava, nem mais
-// nem menos -- este teste trava a tabela de equivalencia argumento a
-// argumento.
+// The up-front validation is the root-cause fix: it has to refuse exactly
+// what validExpr (crossplane/util.go:57-67) used to refuse, no more and no
+// less -- this test pins the equivalence table argument by argument.
 func TestExpressaoValidaReplicaValidExpr(t *testing.T) {
 	casos := []struct {
 		args []string
 		ok   bool
 	}{
 		{nil, false},
-		{[]string{"()"}, false},          // o caso que faz Args[1:0] em util.go:83
-		{[]string{"(", ")"}, false},      // vira Args vazio em util.go:77-83
+		{[]string{"()"}, false},          // the case that does Args[1:0] at util.go:83
+		{[]string{"(", ")"}, false},      // becomes an empty Args at util.go:77-83
 		{[]string{"($a)"}, true},         // l == 1 && len > 2
 		{[]string{"($a", ")"}, true},     // l == 2 && len(args[0]) > 1
 		{[]string{"(", "$a)"}, true},     // l == 2 && len(args[1]) > 1
 		{[]string{"(", "$a", ")"}, true}, // l > 2
-		{[]string{"$a"}, false},          // sem parenteses
-		{[]string{"($a"}, false},         // nao fecha
-		{[]string{"$a)"}, false},         // nao abre
+		{[]string{"$a"}, false},          // no parentheses
+		{[]string{"($a"}, false},         // does not close
+		{[]string{"$a)"}, false},         // does not open
 	}
 	for _, c := range casos {
 		require.Equal(t, c.ok, expressaoValida(c.args), "args=%q", c.args)

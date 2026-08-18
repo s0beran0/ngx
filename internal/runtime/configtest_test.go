@@ -23,9 +23,9 @@ func TestTestConfigAprovada(t *testing.T) {
 	assert.NotNil(t, res.Diagnostics)
 }
 
-// A invariante do Transport aplicada ao runtime: uma configuracao reprovada e
-// resultado, nao falha de infraestrutura. Se isto virar erro, o agente perde a
-// resposta que pediu.
+// The Transport invariant applied to the runtime: a rejected configuration is
+// a result, not an infrastructure failure. If this becomes an error, the agent
+// loses the answer it asked for.
 func TestTestConfigReprovadaNaoEErro(t *testing.T) {
 	f := novoFake("local").responde("nginx -t", resposta{stderr: saidaTesteFalhou, exit: 1})
 
@@ -54,13 +54,13 @@ func TestTestConfigAvisoNaoDerrubaOVeredito(t *testing.T) {
 	assert.True(t, res.OK)
 	require.Len(t, res.Diagnostics, 1)
 	assert.Equal(t, output.SeverityWarning, res.Diagnostics[0].Severity)
-	// A severidade nunca entra no codigo: aviso e erro compartilham o codigo
-	// e se distinguem pelo campo severity.
+	// Severity never goes into the code: warning and error share the code
+	// and are told apart by the severity field.
 	assert.Equal(t, CodigoTesteConfig, res.Diagnostics[0].Code)
 }
 
-// O mesmo texto, vindo de dois transportes diferentes, produz o mesmo
-// resultado. E o ponto da tarefa: nao ha caminho de codigo "remoto".
+// The same text, coming from two different transports, produces the same
+// result. That is the point of the task: there is no "remote" code path.
 func TestTestConfigIdenticoLocalERemoto(t *testing.T) {
 	local := novoFake("local").responde("nginx -t", resposta{stderr: saidaTesteFalhou, exit: 1})
 	remoto := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -t", resposta{stderr: saidaTesteFalhou, exit: 1})
@@ -91,10 +91,10 @@ func TestParseDiagnosticosSemLocalizacao(t *testing.T) {
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 }
 
-// Nivel desconhecido nao pode virar info: subestimar o que nao se reconhece
-// esconde exatamente o caso novo.
+// An unknown level must not become info: underrating what is not recognized
+// hides exactly the new case.
 func TestParseDiagnosticosNivelDesconhecidoViraErro(t *testing.T) {
-	diags := ParseDiagnosticos("nginx: [xyz] algo inesperado")
+	diags := ParseDiagnosticos("nginx: [xyz] something unexpected")
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 }

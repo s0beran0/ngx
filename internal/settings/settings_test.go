@@ -16,7 +16,7 @@ func escreve(t *testing.T, dir, nome, conteudo string) string {
 	return p
 }
 
-// Sem nenhum arquivo, os defaults precisam ser utilizaveis por conta propria.
+// With no file at all, the defaults need to be usable on their own.
 func TestLoadSemArquivosUsaDefaults(t *testing.T) {
 	dir := t.TempDir()
 
@@ -24,7 +24,7 @@ func TestLoadSemArquivosUsaDefaults(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "auto", s.Output.Format)
-	require.NotEmpty(t, s.Output.Redact, "a redacao vem ligada por padrao")
+	require.NotEmpty(t, s.Output.Redact, "redaction comes turned on by default")
 	require.Contains(t, s.Output.Redact, "ssl_certificate_key")
 }
 
@@ -45,7 +45,7 @@ output:
 	require.Equal(t, "json", s.Output.Format)
 }
 
-// A regra da spec: o local sobrescreve o global, chave a chave.
+// The rule from the spec: the local file overrides the global one, key by key.
 func TestLocalSobrescreveGlobal(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -63,13 +63,13 @@ nginx:
 	s, err := settings.Load(global, local)
 
 	require.NoError(t, err)
-	require.Equal(t, "/tmp/teste/nginx.conf", s.Nginx.Config, "local vence")
-	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary, "chave nao sobrescrita sobrevive")
+	require.Equal(t, "/tmp/teste/nginx.conf", s.Nginx.Config, "the local file wins")
+	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary, "a key that was not overridden survives")
 	require.Equal(t, "json", s.Output.Format)
 }
 
-// Um arquivo escrito a partir da spec completa contem chaves de versoes
-// futuras. Elas precisam ser ignoradas, nao virar erro.
+// A file written from the complete spec contains keys from future versions.
+// They need to be ignored, not turned into an error.
 func TestChavesDeVersoesFuturasSaoIgnoradas(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -102,24 +102,24 @@ func TestYAMLInvalidoVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Se o usuario declara redact, a lista dele substitui a default em vez de
-// somar — senao ele nao consegue remover uma regra padrao.
+// If the user declares redact, their list replaces the default one instead of
+// adding to it -- otherwise they cannot remove a default rule.
 func TestRedactDeclaradoSubstituiODefault(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
 output:
   redact:
-    - minha_diretiva_secreta
+    - my_secret_directive
 `)
 
 	s, err := settings.Load(global, filepath.Join(dir, "ausente.yaml"))
 
 	require.NoError(t, err)
-	require.Equal(t, []string{"minha_diretiva_secreta"}, s.Output.Redact)
+	require.Equal(t, []string{"my_secret_directive"}, s.Output.Redact)
 }
 
-// redact: [] e uma lista vazia declarada de proposito: o usuario decidiu
-// desligar a redacao, e isso deve ser respeitado.
+// redact: [] is an empty list declared on purpose: the user decided to turn
+// redaction off, and that must be respected.
 func TestRedactListaVaziaDesligaARedacao(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -133,10 +133,10 @@ output:
 	require.Empty(t, s.Output.Redact)
 }
 
-// redact: sem valor e um YAML nulo, tipico de um arquivo onde a pessoa
-// comentou todos os itens da lista. Isso nao pode ser confundido com uma
-// lista vazia declarada: os defaults precisam sobreviver, senao a redacao
-// desliga em silencio numa feature de seguranca.
+// redact: with no value is a YAML null, typical of a file where the person
+// commented out every item of the list. That cannot be confused with a
+// declared empty list: the defaults need to survive, otherwise redaction turns
+// off silently on a security feature.
 func TestRedactNuloPreservaOsDefaults(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -154,8 +154,8 @@ output:
 	}, s.Output.Redact)
 }
 
-// Defaults() e contrato publico consumido pela Task 6; os tres valores de
-// redact sao parte explicita desse contrato e precisam estar travados.
+// Defaults() is a public contract consumed by Task 6; the three redact values
+// are an explicit part of that contract and need to be pinned.
 func TestDefaults(t *testing.T) {
 	d := settings.Defaults()
 	require.Equal(t, "auto", d.Output.Format)

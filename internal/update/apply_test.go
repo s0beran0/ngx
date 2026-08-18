@@ -27,20 +27,20 @@ func conteudo(t *testing.T, caminho string) string {
 }
 
 func TestApplyTrocaOConteudo(t *testing.T) {
-	caminho := binarioDeTeste(t, "versao antiga", 0o755)
+	caminho := binarioDeTeste(t, "old version", 0o755)
 
-	require.NoError(t, Apply(caminho, []byte("versao nova")))
+	require.NoError(t, Apply(caminho, []byte("new version")))
 
-	assert.Equal(t, "versao nova", conteudo(t, caminho))
+	assert.Equal(t, "new version", conteudo(t, caminho))
 }
 
 func TestApplyPreservaAPermissaoDoOriginal(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("modo de arquivo do Windows nao mapeia em permissao unix")
+		t.Skip("the Windows file mode does not map onto unix permissions")
 	}
-	caminho := binarioDeTeste(t, "antigo", 0o700)
+	caminho := binarioDeTeste(t, "old", 0o700)
 
-	require.NoError(t, Apply(caminho, []byte("novo")))
+	require.NoError(t, Apply(caminho, []byte("new")))
 
 	info, err := os.Stat(caminho)
 	require.NoError(t, err)
@@ -48,73 +48,73 @@ func TestApplyPreservaAPermissaoDoOriginal(t *testing.T) {
 }
 
 func TestApplyNaoDeixaTemporarioParaTras(t *testing.T) {
-	caminho := binarioDeTeste(t, "antigo", 0o755)
+	caminho := binarioDeTeste(t, "old", 0o755)
 
-	require.NoError(t, Apply(caminho, []byte("novo")))
+	require.NoError(t, Apply(caminho, []byte("new")))
 
 	entradas, err := os.ReadDir(filepath.Dir(caminho))
 	require.NoError(t, err)
-	assert.Len(t, entradas, 1, "sobrou arquivo no diretorio do binario")
+	assert.Len(t, entradas, 1, "a file was left behind in the binary directory")
 }
 
 func TestApplyNaoQuebraOProcessoQueJaAbriuOBinario(t *testing.T) {
-	// Em Unix, rename por cima de um executavel em uso funciona porque o
-	// inode antigo sobrevive enquanto houver descritor aberto — e escrever
-	// por cima e que falharia com ETXTBSY. O descritor aberto aqui faz o
-	// papel do processo em execucao.
+	// On Unix, renaming over an executable in use works because the old
+	// inode survives while a descriptor stays open -- it is writing over it
+	// that would fail with ETXTBSY. The open descriptor here plays the part
+	// of the running process.
 	if runtime.GOOS == "windows" {
-		t.Skip("no Windows o executavel em uso e travado; ver trocaComRenomeio")
+		t.Skip("on Windows the executable in use is locked; see trocaComRenomeio")
 	}
-	caminho := binarioDeTeste(t, "processo em execucao", 0o755)
+	caminho := binarioDeTeste(t, "running process", 0o755)
 	f, err := os.Open(caminho)
 	require.NoError(t, err)
 	defer f.Close()
 
-	require.NoError(t, Apply(caminho, []byte("binario novo")))
+	require.NoError(t, Apply(caminho, []byte("new binary")))
 
-	antigo := make([]byte, len("processo em execucao"))
+	antigo := make([]byte, len("running process"))
 	_, err = f.ReadAt(antigo, 0)
 	require.NoError(t, err)
-	assert.Equal(t, "processo em execucao", string(antigo),
-		"o inode antigo precisa sobreviver para o processo em execucao")
-	assert.Equal(t, "binario novo", conteudo(t, caminho))
+	assert.Equal(t, "running process", string(antigo),
+		"the old inode has to survive for the running process")
+	assert.Equal(t, "new binary", conteudo(t, caminho))
 }
 
 func TestApplyRecusaBinarioVazio(t *testing.T) {
-	caminho := binarioDeTeste(t, "antigo", 0o755)
+	caminho := binarioDeTeste(t, "old", 0o755)
 
 	err := Apply(caminho, nil)
 
 	assert.Equal(t, CodigoArtefatoInvalido, codigoDe(t, err))
-	assert.Equal(t, "antigo", conteudo(t, caminho))
+	assert.Equal(t, "old", conteudo(t, caminho))
 }
 
 func TestApplySemPermissaoNoDiretorioExplicaOQueFalta(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("permissao de diretorio no Windows nao segue o modo unix")
+		t.Skip("directory permission on Windows does not follow the unix mode")
 	}
 	if os.Geteuid() == 0 {
-		t.Skip("root ignora a permissao do diretorio")
+		t.Skip("root ignores the directory permission")
 	}
 	dir := t.TempDir()
 	caminho := filepath.Join(dir, "ngx")
-	require.NoError(t, os.WriteFile(caminho, []byte("antigo"), 0o755))
+	require.NoError(t, os.WriteFile(caminho, []byte("old"), 0o755))
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	err := Apply(caminho, []byte("novo"))
+	err := Apply(caminho, []byte("new"))
 
 	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
 	assert.Contains(t, err.Error(), dir)
-	assert.Contains(t, err.Error(), "privilegio")
-	assert.Equal(t, "antigo", conteudo(t, caminho), "o binario atual tem de continuar intacto")
+	assert.Contains(t, err.Error(), "privilege")
+	assert.Equal(t, "old", conteudo(t, caminho), "the current binary has to stay intact")
 }
 
-// --- sequencia do Windows (DD5), exercitada em qualquer sistema ---
+// --- the Windows sequence (DD5), exercised on any system ---
 
-// opsRegistradas embrulha operacoes reais registrando a ordem das chamadas, e
-// deixa injetar falha em qualquer passo. E o que torna a sequencia do Windows
-// testavel em Linux e macOS.
+// opsRegistradas wraps the real operations while recording the order of the
+// calls, and lets a failure be injected at any step. It is what makes the
+// Windows sequence testable on Linux and macOS.
 type opsRegistradas struct {
 	chamadas   []string
 	falharEm   string
@@ -128,7 +128,7 @@ func (o *opsRegistradas) ops() opsArquivo {
 			if o.erro != nil {
 				return o.erro
 			}
-			return errors.New("falha injetada em " + passo)
+			return errors.New("injected failure at " + passo)
 		}
 		return nil
 	}
@@ -159,12 +159,12 @@ func (o *opsRegistradas) ops() opsArquivo {
 }
 
 func TestTrocaComRenomeioSegueASequenciaDeDD5(t *testing.T) {
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
 	reg := &opsRegistradas{}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("ngx novo"), 0o755))
+	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "ngx novo", conteudo(t, caminho))
+	assert.Equal(t, "new ngx", conteudo(t, caminho))
 	assert.Equal(t, []string{
 		"remover ngx.new",
 		"escrever ngx.new",
@@ -176,100 +176,101 @@ func TestTrocaComRenomeioSegueASequenciaDeDD5(t *testing.T) {
 }
 
 func TestTrocaComRenomeioIgnoraFalhaAoRemoverOAntigo(t *testing.T) {
-	// No Windows a remocao do .old falha porque o arquivo ainda esta em uso
-	// pelo processo que esta rodando. Isso e esperado e nao pode abortar a
-	// atualizacao: a limpeza fica para LimparResiduo, na proxima execucao.
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
+	// On Windows the removal of the .old fails because the file is still in
+	// use by the running process. That is expected and must not abort the
+	// update: the cleanup is left to LimparResiduo, on the next run.
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
 	reg := &opsRegistradas{falharEm: "remover ngx.old"}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("ngx novo"), 0o755))
+	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "ngx novo", conteudo(t, caminho))
+	assert.Equal(t, "new ngx", conteudo(t, caminho))
 	assert.FileExists(t, caminho+sufixoAntigo)
-	assert.Equal(t, "ngx antigo", conteudo(t, caminho+sufixoAntigo))
+	assert.Equal(t, "old ngx", conteudo(t, caminho+sufixoAntigo))
 }
 
 func TestTrocaComRenomeioRestauraQuandoOTerceiroPassoFalha(t *testing.T) {
-	// O pior desfecho possivel e o usuario ficar sem binario. Se o novo nao
-	// entrar no lugar depois de o atual ter saido, o atual volta.
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
+	// The worst possible outcome is the user being left without a binary. If
+	// the new one does not get into place after the current one has left,
+	// the current one comes back.
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
 	reg := &opsRegistradas{falharEm: "renomear ngx.new->ngx"}
 
-	err := trocaComRenomeio(reg.ops(), caminho, []byte("ngx novo"), 0o755)
+	err := trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755)
 
 	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
-	assert.Contains(t, err.Error(), "restaurado")
+	assert.Contains(t, err.Error(), "restored")
 	require.FileExists(t, caminho)
-	assert.Equal(t, "ngx antigo", conteudo(t, caminho))
+	assert.Equal(t, "old ngx", conteudo(t, caminho))
 	assert.NoFileExists(t, caminho+".new")
 	assert.NoFileExists(t, caminho+sufixoAntigo)
 }
 
 func TestTrocaComRenomeioNaoTocaNoBinarioQuandoOSegundoPassoFalha(t *testing.T) {
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
 	reg := &opsRegistradas{falharEm: "renomear ngx->ngx.old"}
 
-	err := trocaComRenomeio(reg.ops(), caminho, []byte("ngx novo"), 0o755)
+	err := trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755)
 
 	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
-	assert.Equal(t, "ngx antigo", conteudo(t, caminho))
+	assert.Equal(t, "old ngx", conteudo(t, caminho))
 	assert.NoFileExists(t, caminho+".new")
 }
 
 func TestTrocaComRenomeioDizOndeEstaOBinarioQuandoNemARestauracaoFunciona(t *testing.T) {
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
 	reg := &opsRegistradas{}
 	base := reg.ops()
-	// Falha no passo 3 e tambem na restauracao: o unico caminho em que o
-	// usuario fica sem ngx no lugar. A mensagem tem de dizer onde esta o
-	// binario e o que fazer.
+	// A failure at step 3 and also at the restore: the only path in which the
+	// user is left with no ngx in place. The message has to say where the
+	// binary is and what to do.
 	ops := opsArquivo{
 		escrever: base.escrever,
 		remover:  base.remover,
 		renomear: func(de, para string) error {
 			if filepath.Base(de) == "ngx.new" || filepath.Base(de) == "ngx.old" {
-				return errors.New("falha injetada")
+				return errors.New("injected failure")
 			}
 			return base.renomear(de, para)
 		},
 	}
 
-	err := trocaComRenomeio(ops, caminho, []byte("ngx novo"), 0o755)
+	err := trocaComRenomeio(ops, caminho, []byte("new ngx"), 0o755)
 
 	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
 	assert.Contains(t, err.Error(), caminho+sufixoAntigo)
-	assert.Contains(t, err.Error(), "a mao")
-	// O conteudo antigo continua existindo, ainda que sob outro nome.
-	assert.Equal(t, "ngx antigo", conteudo(t, caminho+sufixoAntigo))
+	assert.Contains(t, err.Error(), "by hand")
+	// The old content still exists, even if under another name.
+	assert.Equal(t, "old ngx", conteudo(t, caminho+sufixoAntigo))
 }
 
 func TestTrocaComRenomeioLimpaNewDeTentativaAnterior(t *testing.T) {
-	caminho := binarioDeTeste(t, "ngx antigo", 0o755)
-	require.NoError(t, os.WriteFile(caminho+".new", []byte("lixo de antes"), 0o755))
+	caminho := binarioDeTeste(t, "old ngx", 0o755)
+	require.NoError(t, os.WriteFile(caminho+".new", []byte("junk from before"), 0o755))
 	reg := &opsRegistradas{}
 
-	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("ngx novo"), 0o755))
+	require.NoError(t, trocaComRenomeio(reg.ops(), caminho, []byte("new ngx"), 0o755))
 
-	assert.Equal(t, "ngx novo", conteudo(t, caminho))
+	assert.Equal(t, "new ngx", conteudo(t, caminho))
 }
 
 func TestTrocaComRenomeioSemPermissaoExplicaODiretorio(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("permissao de diretorio no Windows nao segue o modo unix")
+		t.Skip("directory permission on Windows does not follow the unix mode")
 	}
 	if os.Geteuid() == 0 {
-		t.Skip("root ignora a permissao do diretorio")
+		t.Skip("root ignores the directory permission")
 	}
 	dir := t.TempDir()
 	caminho := filepath.Join(dir, "ngx")
-	require.NoError(t, os.WriteFile(caminho, []byte("antigo"), 0o755))
+	require.NoError(t, os.WriteFile(caminho, []byte("old"), 0o755))
 	require.NoError(t, os.Chmod(dir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
-	err := trocaComRenomeio(opsReais(), caminho, []byte("novo"), 0o755)
+	err := trocaComRenomeio(opsReais(), caminho, []byte("new"), 0o755)
 
 	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
-	assert.Equal(t, "antigo", conteudo(t, caminho))
+	assert.Equal(t, "old", conteudo(t, caminho))
 }
 
 func TestErroDeEscritaSeparaPermissaoDeOutrasFalhas(t *testing.T) {
@@ -277,13 +278,13 @@ func TestErroDeEscritaSeparaPermissaoDeOutrasFalhas(t *testing.T) {
 	assert.Equal(t, CodigoPermissao, codigoDe(t, err))
 	assert.Contains(t, err.Error(), filepath.FromSlash("/opt/ngx/bin"))
 
-	err = erroDeEscrita(errors.New("disco cheio"), "/opt/ngx/bin/ngx")
+	err = erroDeEscrita(errors.New("disk full"), "/opt/ngx/bin/ngx")
 	assert.Equal(t, CodigoTrocaFalhou, codigoDe(t, err))
 }
 
 func TestLimparResiduoRemoveOAntigo(t *testing.T) {
 	caminho := binarioDeTeste(t, "ngx", 0o755)
-	require.NoError(t, os.WriteFile(caminho+sufixoAntigo, []byte("orfao"), 0o755))
+	require.NoError(t, os.WriteFile(caminho+sufixoAntigo, []byte("orphan"), 0o755))
 
 	LimparResiduo(caminho)
 
@@ -292,8 +293,8 @@ func TestLimparResiduoRemoveOAntigo(t *testing.T) {
 }
 
 func TestLimparResiduoEhSilenciosaQuandoNaoHaNada(t *testing.T) {
-	// Nao devolve erro e nao entra em panico: um orfao que nao existe, ou um
-	// caminho vazio na inicializacao, nao sao problema do usuario.
+	// It returns no error and does not panic: an orphan that does not exist,
+	// or an empty path at startup, are not the user's problem.
 	LimparResiduo(filepath.Join(t.TempDir(), "ngx"))
 	LimparResiduo("")
 }

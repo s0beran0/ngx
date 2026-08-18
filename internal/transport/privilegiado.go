@@ -15,49 +15,53 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// CodigoLeituraPrivilegiada informa que um arquivo so pode ser lido com
-// privilegio. Severidade info: nao e problema, e o registro de que houve
-// escalada -- ler config de servidor com sudo nao pode acontecer calado.
+// CodigoLeituraPrivilegiada reports that a file can only be read with
+// privilege. Info severity: it is not a problem, it is the record that an
+// escalation happened -- reading a server configuration with sudo cannot
+// happen silently.
 const CodigoLeituraPrivilegiada = "NGX-0230"
 
-// CodigoPrivilegioNegado cobre o caso em que nem com privilegio deu.
+// CodigoPrivilegioNegado covers the case where not even privilege worked.
 const CodigoPrivilegioNegado = "NGX-0231"
 
-// CodigoLeituraPeloDump informa que o conteudo veio de `nginx -T` porque nem
-// a leitura direta nem o `sudo cat` alcancaram o arquivo.
+// CodigoLeituraPeloDump reports that the content came from `nginx -T` because
+// neither the direct read nor the `sudo cat` reached the file.
 const CodigoLeituraPeloDump = "NGX-0232"
 
-// CodigoElevacaoForaDaArvore marca leitura privilegiada de um caminho fora de
-// qualquer diretorio que a configuracao ja tinha alcancado sem privilegio.
-// Severidade warning, nao error: e legitimo e nao bloqueia -- mas e novidade,
-// e novidade que envolve sudo merece ser vista.
+// CodigoElevacaoForaDaArvore marks a privileged read of a path outside any
+// directory the configuration had already reached without privilege. Warning
+// severity, not error: it is legitimate and does not block -- but it is news,
+// and news involving sudo deserves to be seen.
 const CodigoElevacaoForaDaArvore = "NGX-0233"
 
-// privilegiado envolve um Transport e, quando a leitura comum topa em
-// permissao, repete a leitura daquele arquivo com privilegio.
+// privilegiado wraps a Transport and, when a plain read runs into permissions,
+// repeats the read of that file with privilege.
 //
-// Por que um decorador e nao um ramo dentro do transporte SSH: a regra vale
-// igual para qualquer alvo, e mante-la fora do cliente SSH deixa o transporte
-// com uma responsabilidade so. Tambem torna o comportamento testavel sem
-// rede, com um Transport falso.
+// Why a decorator and not a branch inside the SSH transport: the rule holds
+// the same for any target, and keeping it out of the SSH client leaves the
+// transport with a single responsibility. It also makes the behavior testable
+// with no network, using a fake Transport.
 //
-// A escalada e MINIMA de proposito. Nao le tudo com sudo: tenta sem
-// privilegio primeiro e so repete o arquivo que foi recusado. Numa
-// configuracao de 132 arquivos onde um e restrito, 131 continuam sendo lidos
-// como o usuario comum, e o diagnostico nomeia o unico que exigiu mais.
+// The escalation is MINIMAL on purpose. It does not read everything with
+// sudo: it tries without privilege first and only repeats the file that was
+// refused. In a configuration of 132 files where one is restricted, 131 keep
+// being read as the ordinary user, and the diagnostic names the only one that
+// demanded more.
 type privilegiado struct {
 	Transport
 	ctx context.Context
 
-	// dump e o ultimo recurso: `nginx -T` executado com privilegio. Existe
-	// porque servidor endurecido costuma liberar no sudoers comandos
-	// ESPECIFICOS -- tipicamente o proprio nginx -- e nao um `cat` generico.
-	// Nesses hosts o `sudo cat` falha e o dump funciona, e sem ele a leitura
-	// privilegiada seria inutil justamente onde o sudo e bem configurado.
+	// dump is the last resort: `nginx -T` executed with privilege. It
+	// exists because a hardened server usually allows SPECIFIC commands in
+	// sudoers -- typically nginx itself -- and not a generic `cat`. On
+	// those hosts the `sudo cat` fails and the dump works, and without it
+	// privileged reading would be useless precisely where sudo is well
+	// configured.
 	//
-	// Nao e o primeiro recurso porque `nginx -T` exige configuracao VALIDA:
-	// a hora em que mais se precisa ler a configuracao e quando ela quebrou,
-	// e ai o dump nao responde. Ler arquivo a arquivo responde sempre.
+	// It is not the first resort because `nginx -T` requires a VALID
+	// configuration: the moment you most need to read the configuration is
+	// when it broke, and then the dump does not answer. Reading file by
+	// file always answers.
 	dump      func(context.Context) (map[string][]byte, error)
 	dumpFeito bool
 	dumpCache map[string][]byte
@@ -65,11 +69,12 @@ type privilegiado struct {
 
 	mu sync.Mutex
 
-	// arvore sao os diretorios que a configuracao alcancou SEM privilegio,
-	// mais o do arquivo de topo. Nao e lista fixa de caminhos: uma lista fixa
-	// quebraria instalacao fora do padrao, e o proprio servidor medido inclui
-	// de /etc/letsencrypt, fora de /etc/nginx. A arvore e derivada do que a
-	// configuracao de fato referencia.
+	// arvore holds the directories the configuration reached WITHOUT
+	// privilege, plus the one of the top-level file. It is not a fixed list
+	// of paths: a fixed list would break a non-standard installation, and
+	// the very server we measured includes from /etc/letsencrypt, outside
+	// /etc/nginx. The tree is derived from what the configuration actually
+	// references.
 	arvore       map[string]bool
 	elevados     []string
 	foraDaArvore []string
@@ -77,17 +82,17 @@ type privilegiado struct {
 	recusados    map[string]string
 }
 
-// ComLeituraPrivilegiada devolve um Transport que repete com privilegio a
-// leitura recusada por permissao. Passar ativo=false devolve o transporte
-// original intocado: a decisao de escalar e de quem chama, e a DR5 exige que
-// ela seja explicita.
+// ComLeituraPrivilegiada returns a Transport that repeats with privilege the
+// read that was refused for permissions. Passing ativo=false returns the
+// original transport untouched: the decision to escalate belongs to the
+// caller, and DR5 requires it to be explicit.
 func ComLeituraPrivilegiada(ctx context.Context, tr Transport, ativo bool) Transport {
 	return ComLeituraPrivilegiadaEDump(ctx, tr, ativo, nil)
 }
 
-// ComLeituraPrivilegiadaEDump acrescenta o ultimo recurso: uma funcao que
-// devolve a configuracao efetiva inteira (na pratica, `nginx -T` com
-// privilegio), consultada so quando a leitura por arquivo nao alcancou.
+// ComLeituraPrivilegiadaEDump adds the last resort: a function that returns
+// the whole effective configuration (in practice, `nginx -T` with privilege),
+// consulted only when the per-file read did not reach it.
 func ComLeituraPrivilegiadaEDump(
 	ctx context.Context,
 	tr Transport,
@@ -103,9 +108,9 @@ func ComLeituraPrivilegiadaEDump(
 	}
 }
 
-// conteudoDoDump devolve o conteudo de um caminho segundo o dump, executando-o
-// no maximo uma vez por transporte. Um `nginx -T` por arquivo recusado seria
-// absurdo numa configuracao de 132 arquivos.
+// conteudoDoDump returns the content of a path according to the dump, running
+// it at most once per transport. One `nginx -T` per refused file would be
+// absurd in a configuration of 132 files.
 func (p *privilegiado) conteudoDoDump(caminho string) ([]byte, bool) {
 	if p.dump == nil {
 		return nil, false
@@ -126,15 +131,15 @@ func (p *privilegiado) conteudoDoDump(caminho string) ([]byte, bool) {
 }
 
 func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
-	// O diretorio do PRIMEIRO caminho pedido entra na arvore antes de
-	// qualquer coisa: e a configuracao que o operador nomeou, entao nao ha
-	// novidade nenhuma nela, mesmo que ela precise de privilegio.
+	// The directory of the FIRST requested path enters the tree before
+	// anything else: it is the configuration the operator named, so there
+	// is nothing new about it, even if it needs privilege.
 	p.semearArvore(caminho)
 
 	rc, err := p.Transport.Open(caminho)
 	if err == nil {
-		// Alcancado sem privilegio: o diretorio dele passa a ser conhecido,
-		// e um irmao elevado ali dentro deixa de ser novidade.
+		// Reached without privilege: its directory becomes known, and an
+		// elevated sibling inside it stops being news.
 		p.registrarNaArvore(caminho)
 		return rc, nil
 	}
@@ -142,19 +147,21 @@ func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
 		return rc, err
 	}
 
-	// Argv explicito, sem shell: nome de arquivo com espaco, aspa ou cifrao
-	// nao vira injecao. O `--` fecha a lista de opcoes, e e ele que impede a
-	// outra injecao, a de ARGUMENTO: sem ele, um caminho comecando com `-`
-	// seria lido como flag pelo cat em vez de como arquivo. O caminho vem de
-	// diretiva `include` da configuracao do alvo, que nao e entrada confiavel
-	// -- e aqui o comando roda com privilegio, entao o custo de errar e alto
-	// e o de prevenir e um token.
+	// Explicit argv, no shell: a file name with a space, a quote or a
+	// dollar sign does not become an injection. The `--` closes the option
+	// list, and it is what prevents the other injection, the ARGUMENT one:
+	// without it, a path starting with `-` would be read as a flag by cat
+	// instead of as a file. The path comes from an `include` directive in
+	// the target's configuration, which is not trusted input -- and here
+	// the command runs with privilege, so the cost of getting it wrong is
+	// high and the cost of preventing it is one token.
 	//
-	// Nao recusamos caminho iniciado por `-`: com o `--` ele funciona, e
-	// recusar quebraria um arquivo de nome legitimo por precaucao redundante.
+	// We do not refuse a path starting with `-`: with the `--` it works,
+	// and refusing would break a legitimately named file out of redundant
+	// caution.
 	//
-	// O -n do sudo evita ficar pendurado esperando senha num processo sem
-	// terminal.
+	// The -n in sudo avoids hanging waiting for a password in a process
+	// with no terminal.
 	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "cat", "--", caminho})
 	if errRun != nil {
 		return nil, errRun
@@ -165,9 +172,10 @@ func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
 			return io.NopCloser(bytes.NewReader(conteudo)), nil
 		}
 		p.registrarRecusa(caminho, primeiraLinha(string(stderr)))
-		// Devolve o erro ORIGINAL de permissao: para quem chamou, o arquivo
-		// segue ilegivel, e a causa continua sendo permissao. O detalhe do
-		// que o sudo respondeu vai no diagnostico, nao no erro.
+		// Returns the ORIGINAL permission error: for the caller, the file
+		// is still unreadable, and the cause is still permissions. The
+		// detail of what sudo answered goes in the diagnostic, not in the
+		// error.
 		return nil, err
 	}
 
@@ -181,21 +189,22 @@ func (p *privilegiado) Glob(padrao string) ([]string, error) {
 		return achados, err
 	}
 
-	// Diretorio nao listavel pelo usuario comum. `ls -1` num diretorio so,
-	// sem recursao, e o minimo que responde a pergunta.
+	// A directory the ordinary user cannot list. `ls -1` on a single
+	// directory, without recursion, is the minimum that answers the
+	// question.
 	dir, arquivo := path.Split(padrao)
 	dir = path.Clean(dir)
-	// `--` pelo mesmo motivo do cat: sem ele um diretorio cujo nome comece
-	// com `-` viraria opcao do ls.
+	// `--` for the same reason as with cat: without it a directory whose
+	// name starts with `-` would become an ls option.
 	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "ls", "-1", "--", dir})
 	if errRun != nil {
 		return nil, errRun
 	}
 	if saida != 0 {
-		// O dump ja conhece TODOS os arquivos da configuracao efetiva, entao
-		// ele responde ao padrao sem precisar listar diretorio nenhum. E o
-		// caso do servidor endurecido: o sudoers libera o nginx e recusa
-		// tanto `cat` quanto `ls`.
+		// The dump already knows ALL the files of the effective
+		// configuration, so it answers the pattern without listing any
+		// directory. This is the hardened server case: sudoers allows
+		// nginx and refuses both `cat` and `ls`.
 		if casados, ok := p.globPeloDump(padrao); ok {
 			p.registrarViaDump(dir)
 			return casados, nil
@@ -210,8 +219,8 @@ func (p *privilegiado) Glob(padrao string) ([]string, error) {
 		if nome == "" {
 			continue
 		}
-		// path.Match, nunca filepath.Match: o alvo remoto usa separador
-		// POSIX mesmo quando o ngx roda no Windows.
+		// path.Match, never filepath.Match: the remote target uses the
+		// POSIX separator even when ngx runs on Windows.
 		if ok, _ := path.Match(arquivo, nome); ok {
 			casados = append(casados, path.Join(dir, nome))
 		}
@@ -221,10 +230,10 @@ func (p *privilegiado) Glob(padrao string) ([]string, error) {
 	return casados, nil
 }
 
-// globPeloDump casa o padrao contra os caminhos que o dump conhece. Devolve
-// ok=false quando nao ha dump: uma lista vazia com ok=true seria indistinguivel
-// de "o padrao nao casou nada", e apresentar configuracao incompleta como
-// completa e o defeito que a DR6 existe para impedir.
+// globPeloDump matches the pattern against the paths the dump knows. It
+// returns ok=false when there is no dump: an empty list with ok=true would be
+// indistinguishable from "the pattern matched nothing", and presenting an
+// incomplete configuration as complete is the defect DR6 exists to prevent.
 func (p *privilegiado) globPeloDump(padrao string) ([]string, bool) {
 	if p.dump == nil {
 		return nil, false
@@ -262,7 +271,7 @@ func (p *privilegiado) registrarElevado(caminho string) {
 	p.foraDaArvore = append(p.foraDaArvore, caminho)
 }
 
-// semearArvore registra o diretorio do arquivo de topo, uma unica vez.
+// semearArvore records the directory of the top-level file, exactly once.
 func (p *privilegiado) semearArvore(caminho string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -277,8 +286,8 @@ func (p *privilegiado) registrarNaArvore(caminho string) {
 	p.arvore[path.Dir(caminho)] = true
 }
 
-// dentroDaArvore diz se o caminho esta em algum diretorio que a configuracao
-// ja alcancou sem privilegio, ou abaixo dele.
+// dentroDaArvore tells whether the path is in some directory the configuration
+// already reached without privilege, or below it.
 func (p *privilegiado) dentroDaArvore(caminho string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -303,9 +312,9 @@ func (p *privilegiado) registrarRecusa(caminho, motivo string) {
 	p.recusados[caminho] = motivo
 }
 
-// Diagnosticos relata o que exigiu privilegio e o que nem com ele funcionou.
-// Escalar em silencio seria esconder do operador que a leitura da
-// configuracao do servidor dele passou por sudo.
+// Diagnosticos reports what required privilege and what did not work even with
+// it. Escalating in silence would hide from the operator that reading their
+// server configuration went through sudo.
 func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -318,8 +327,8 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 			Severity: output.SeverityInfo,
 			Code:     CodigoLeituraPrivilegiada,
 			Message: fmt.Sprintf(
-				"%d caminho(s) so puderam ser lidos com privilegio, porque --sudo foi "+
-					"pedido: %s", len(lista), resumirCaminhos(lista)),
+				"%d path(s) could only be read with privilege, because --sudo was "+
+					"requested: %s", len(lista), resumirCaminhos(lista)),
 		})
 	}
 	if len(p.foraDaArvore) > 0 {
@@ -329,9 +338,9 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 			Severity: output.SeverityWarning,
 			Code:     CodigoElevacaoForaDaArvore,
 			Message: fmt.Sprintf(
-				"%d caminho(s) foram lidos com privilegio FORA de qualquer diretorio que "+
-					"a configuracao ja alcancava sem ele: %s. Confira se o include que "+
-					"levou ate ali e esperado",
+				"%d path(s) were read with privilege OUTSIDE any directory the "+
+					"configuration already reached without it: %s. Check whether the "+
+					"include that led there is expected",
 				len(lista), resumirCaminhos(lista)),
 		})
 	}
@@ -343,8 +352,8 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 			Severity: output.SeverityInfo,
 			Code:     CodigoLeituraPeloDump,
 			Message: fmt.Sprintf(
-				"%d caminho(s) vieram de `nginx -T` com privilegio, porque o sudo do "+
-					"alvo nao permite ler arquivo diretamente: %s",
+				"%d path(s) came from `nginx -T` with privilege, because sudo on the "+
+					"target does not allow reading the file directly: %s",
 				len(lista), resumirCaminhos(lista)),
 		})
 	}
@@ -355,16 +364,17 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 			Code:     CodigoPrivilegioNegado,
 			File:     caminho,
 			Message: fmt.Sprintf(
-				"nem com privilegio foi possivel ler este caminho (%s); confira se o "+
-					"sudo do alvo permite `cat` sem senha para o usuario que roda o ngx", motivo),
+				"not even with privilege was it possible to read this path (%s); check "+
+					"whether sudo on the target allows `cat` without a password for the "+
+					"user running ngx", motivo),
 		})
 	}
 	return diags
 }
 
-// ehPermissao reconhece a recusa por permissao vinda de qualquer alvo. O erro
-// do SFTP casa com fs.ErrPermission -- verificado contra um servidor real --,
-// entao a mesma checagem serve ao local e ao remoto.
+// ehPermissao recognizes a permission refusal coming from any target. The SFTP
+// error matches fs.ErrPermission -- verified against a real server --, so the
+// same check serves both local and remote.
 func ehPermissao(err error) bool {
 	return errors.Is(err, fs.ErrPermission)
 }
@@ -375,27 +385,27 @@ func primeiraLinha(texto string) string {
 		return texto[:i]
 	}
 	if texto == "" {
-		return "sem detalhe do sudo"
+		return "no detail from sudo"
 	}
 	return texto
 }
 
-// resumirCaminhos evita despejar uma lista de centenas de caminhos numa linha
-// de diagnostico. A contagem exata ja aparece antes; aqui bastam exemplos
-// para o operador reconhecer do que se trata.
+// resumirCaminhos avoids dumping a list of hundreds of paths into a single
+// diagnostic line. The exact count already appears before it; here a few
+// examples are enough for the operator to recognize what it is about.
 func resumirCaminhos(lista []string) string {
 	const mostrar = 3
 	if len(lista) <= mostrar {
 		return strings.Join(lista, ", ")
 	}
-	return fmt.Sprintf("%s e mais %d",
+	return fmt.Sprintf("%s and %d more",
 		strings.Join(lista[:mostrar], ", "), len(lista)-mostrar)
 }
 
-// Diagnosticos recolhe o que um transporte observou, quando ele tem algo a
-// contar. Existe como funcao e nao como metodo da interface porque so o
-// transporte privilegiado tem algo a relatar: acrescentar isso a Transport
-// obrigaria toda implementacao a carregar um metodo vazio.
+// Diagnosticos collects what a transport observed, when it has something to
+// tell. It exists as a function and not as an interface method because only
+// the privileged transport has something to report: adding this to Transport
+// would force every implementation to carry an empty method.
 func Diagnosticos(tr Transport) []output.Diagnostic {
 	if d, ok := tr.(interface{ Diagnosticos() []output.Diagnostic }); ok {
 		return d.Diagnosticos()

@@ -14,69 +14,72 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// Codigos de diagnostico da autenticacao (DR2).
+// Diagnostic codes for authentication (DR2).
 //
-// So o primeiro e erro: nao ter ssh-agent, ou nao conseguir usar a chave
-// apontada, e apenas um metodo a menos na lista. O comando so para quando a
-// lista fica vazia — ai nao ha o que tentar contra o servidor.
+// Only the first one is an error: having no ssh-agent, or not being able to
+// use the key that was pointed at, is just one less method in the list. The
+// command only stops when the list ends up empty — then there is nothing left
+// to try against the server.
 const (
-	// CodigoSemMetodoAuth: nenhum metodo de autenticacao pode ser montado.
+	// CodigoSemMetodoAuth: no authentication method can be assembled.
 	CodigoSemMetodoAuth = "NGX-0205"
 
-	// CodigoAvisoSSHAgentAusente: nao ha ssh-agent alcancavel. Situacao
-	// normal, informada porque muda o que sera tentado.
+	// CodigoAvisoSSHAgentAusente: there is no reachable ssh-agent. A normal
+	// situation, reported because it changes what will be tried.
 	CodigoAvisoSSHAgentAusente = "NGX-0212"
 
-	// CodigoAvisoChaveIndisponivel: a chave apontada existe na configuracao
-	// mas nao pode ser usada — arquivo ausente, formato invalido, ou
-	// passphrase que nao ha como obter.
+	// CodigoAvisoChaveIndisponivel: the key that was pointed at exists in
+	// the configuration but cannot be used — missing file, invalid format,
+	// or a passphrase there is no way to obtain.
 	CodigoAvisoChaveIndisponivel = "NGX-0213"
 )
 
-// Nomes dos metodos de autenticacao, na ordem em que sao tentados. Aparecem em
-// Autenticacao.Nomes para que quem consome a saida saiba o que foi oferecido ao
-// servidor sem ter que inferir a partir de uma falha.
+// Names of the authentication methods, in the order they are tried. They show
+// up in Autenticacao.Nomes so that whoever consumes the output knows what was
+// offered to the server without having to infer it from a failure.
 const (
 	MetodoSSHAgent = "ssh-agent"
-	MetodoChave    = "chave"
-	MetodoSenha    = "senha"
+	MetodoChave    = "key"
+	MetodoSenha    = "password"
 )
 
-// Variaveis de ambiente de onde os segredos podem vir.
+// Environment variables the secrets may come from.
 //
-// Segredo nunca vem de flag. Flag aparece em `ps`, no historico do shell e no
-// log de qualquer CI: quem passa uma senha por flag ja a vazou. As duas
-// entradas aceitas sao o ambiente e o prompt em terminal — nesta ordem — e
-// qualquer flag de senha adicionada aqui deve ser reprovada em review.
+// A secret never comes from a flag. A flag shows up in `ps`, in the shell
+// history and in the log of any CI: whoever passes a password by flag has
+// already leaked it. The two accepted inputs are the environment and a
+// terminal prompt — in that order — and any password flag added here must be
+// rejected in review.
 const (
-	// EnvSenhaSSH carrega a senha do usuario no host remoto.
+	// EnvSenhaSSH carries the password of the user on the remote host.
 	EnvSenhaSSH = "NGX_SSH_PASSWORD"
 
-	// EnvPassphraseChaveSSH carrega a passphrase que abre a chave privada.
+	// EnvPassphraseChaveSSH carries the passphrase that unlocks the private
+	// key.
 	EnvPassphraseChaveSSH = "NGX_SSH_KEY_PASSPHRASE"
 
-	// EnvSocketSSHAgent e a variavel padrao do OpenSSH que aponta o canal do
-	// ssh-agent. E honrada em toda plataforma; no Windows, quando vazia, ha
-	// um named pipe padrao (ver agent_windows.go).
+	// EnvSocketSSHAgent is the standard OpenSSH variable pointing at the
+	// ssh-agent channel. It is honored on every platform; on Windows, when
+	// empty, there is a default named pipe (see agent_windows.go).
 	EnvSocketSSHAgent = "SSH_AUTH_SOCK"
 )
 
-// errSSHAgentAusente marca as falhas de conexao com o ssh-agent que nao sao
-// erro do ngx: nao ha agente, ou ele nao responde. Existir como sentinela
-// deixa explicito, em agent_unix.go e agent_windows.go, que o caminho de
-// insucesso ali e esperado.
-var errSSHAgentAusente = errors.New("ssh-agent indisponivel")
+// errSSHAgentAusente marks the ssh-agent connection failures that are not an
+// ngx error: there is no agent, or it does not answer. Having it as a sentinel
+// makes it explicit, in agent_unix.go and agent_windows.go, that the failure
+// path there is expected.
+var errSSHAgentAusente = errors.New("ssh-agent unavailable")
 
-// Autenticacao e a lista de metodos que o ngx oferece ao servidor, na ordem
-// da DR2: ssh-agent, chave em arquivo, senha.
+// Autenticacao is the list of methods ngx offers the server, in DR2 order:
+// ssh-agent, key file, password.
 //
-// A ordem e o produto principal deste tipo. O ssh-agent vem primeiro porque
-// com ele a chave privada nunca e lida pelo ngx — ele manda o desafio e recebe
-// a assinatura —, e menos codigo nosso tocando material de chave e menos
-// superficie para errar.
+// The order is the main product of this type. The ssh-agent comes first
+// because with it the private key is never read by ngx — it sends the
+// challenge and gets back the signature —, and less of our code touching key
+// material is less surface to get wrong.
 //
-// Metodos e Nomes sao paralelos: Nomes[i] descreve Metodos[i]. Nenhum dos dois
-// e nil.
+// Metodos and Nomes are parallel: Nomes[i] describes Metodos[i]. Neither is
+// nil.
 type Autenticacao struct {
 	Metodos []ssh.AuthMethod
 	Nomes   []string
@@ -84,9 +87,9 @@ type Autenticacao struct {
 	fechar []func() error
 }
 
-// Close libera os recursos abertos na montagem — hoje, a conexao com o
-// ssh-agent. Chamar depois do handshake, e nunca antes: o metodo do ssh-agent
-// consulta as chaves durante a autenticacao. Chamar duas vezes e seguro.
+// Close releases the resources opened while assembling — today, the ssh-agent
+// connection. Call it after the handshake, and never before: the ssh-agent
+// method queries the keys during authentication. Calling it twice is safe.
 func (a *Autenticacao) Close() error {
 	if a == nil {
 		return nil
@@ -101,18 +104,20 @@ func (a *Autenticacao) Close() error {
 	return errors.Join(erros...)
 }
 
-// ambienteAuth reune as bordas do sistema que a montagem toca: o ssh-agent, o
-// ambiente, e o terminal. Ficam atras de campos para que os testes exercitem a
-// ordem dos metodos sem socket, sem variavel de ambiente real e — o que mais
-// importa — sem nenhum caminho que possa parar esperando alguem digitar.
+// ambienteAuth gathers the system edges the assembly touches: the ssh-agent,
+// the environment, and the terminal. They sit behind fields so that the tests
+// exercise the order of the methods with no socket, no real environment
+// variable and — what matters most — no path that could block waiting for
+// someone to type.
 type ambienteAuth struct {
 	conectarAgente  func() (net.Conn, error)
 	lerEnv          func(string) string
 	stdinEhTerminal func() bool
 	lerSegredo      func(prompt string) (string, error)
-	// home existe injetado para o teste nao depender do HOME de quem roda a
-	// suite: a busca por chave padrao le ~/.ssh, e um teste que enxergasse a
-	// chave real do desenvolvedor passaria na maquina dele e falharia no CI.
+	// home is injected so the test does not depend on the HOME of whoever
+	// runs the suite: the search for default keys reads ~/.ssh, and a test
+	// that could see the developer's real key would pass on their machine
+	// and fail in CI.
 	home func() (string, error)
 }
 
@@ -126,15 +131,16 @@ func ambienteAuthPadrao() ambienteAuth {
 	}
 }
 
-// MontarAutenticacao monta os metodos de autenticacao para as opcoes dadas.
+// MontarAutenticacao assembles the authentication methods for the given
+// options.
 //
-// Devolve tres coisas pelo mesmo motivo que VerificadorHostKey: a lista, os
-// diagnosticos do que ficou de fora, e o erro de quando nada sobrou. Um metodo
-// que nao pode ser montado nao derruba a conexao — ele so nao entra na lista,
-// com um diagnostico dizendo por que. Sem ssh-agent nao e falha; sem nenhum
-// metodo e.
+// It returns three things for the same reason VerificadorHostKey does: the
+// list, the diagnostics of what was left out, and the error for when nothing
+// was left. A method that cannot be assembled does not bring the connection
+// down — it just does not enter the list, with a diagnostic saying why. No
+// ssh-agent is not a failure; no method at all is.
 //
-// A lista de diagnosticos nunca e nil.
+// The list of diagnostics is never nil.
 func MontarAutenticacao(opts SSHOptions) (*Autenticacao, []output.Diagnostic, error) {
 	return montarAutenticacao(opts, ambienteAuthPadrao())
 }
@@ -153,35 +159,35 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 		}
 	}
 
-	// Ordem da DR2 -- ssh-agent antes de arquivo de chave -- com uma
-	// excecao medida contra servidor real: quando o usuario NOMEIA a chave
-	// em --key, ela vem primeiro.
+	// DR2 order -- ssh-agent before key file -- with one exception measured
+	// against a real server: when the user NAMES the key in --key, it comes
+	// first.
 	//
-	// O motivo e o MaxAuthTries do sshd, 6 por padrao. Cada chave do
-	// ssh-agent gasta uma tentativa, e um desenvolvedor costuma ter varias
-	// carregadas. Com o agente na frente, a chave explicitamente pedida
-	// simplesmente nunca chega a ser oferecida, e o servidor derruba a
-	// conexao com "no supported methods remain" -- mensagem que nao aponta
-	// para a causa. E o mesmo problema que o IdentitiesOnly=yes do ssh
-	// resolve.
+	// The reason is the sshd MaxAuthTries, 6 by default. Each ssh-agent key
+	// spends one attempt, and a developer usually has several loaded. With
+	// the agent in front, the explicitly requested key simply never gets
+	// offered, and the server drops the connection with "no supported
+	// methods remain" -- a message that does not point at the cause. It is
+	// the same problem that ssh's IdentitiesOnly=yes solves.
 	//
-	// Sem --key a ordem original vale: o agente e preferivel justamente
-	// porque a chave privada nunca e lida pelo ngx.
+	// Without --key the original order holds: the agent is preferable
+	// precisely because the private key is never read by ngx.
 	chaveExplicita := opts.KeyPath != ""
 
-	// TODAS as chaves entram num UNICO metodo de chave publica, e a ordem
-	// dentro dele e que decide a preferencia.
+	// ALL keys go into a SINGLE public key method, and the order inside it
+	// is what decides preference.
 	//
-	// Medido contra um servidor real: com o ssh-agent carregado, oferecer
-	// agente e arquivo como metodos SEPARADOS falhava, enquanto o `ssh`
-	// conectava com as mesmas chaves. Assim que o primeiro metodo de chave
-	// publica se esgota sem autenticar, o seguinte nao salva. O OpenSSH nao
-	// sofre disso porque oferece tudo num metodo so -- e agora o ngx tambem.
+	// Measured against a real server: with the ssh-agent loaded, offering
+	// agent and file as SEPARATE methods failed, while `ssh` connected with
+	// the same keys. As soon as the first public key method is exhausted
+	// without authenticating, the next one does not save the day. OpenSSH
+	// does not suffer from this because it offers everything in a single
+	// method -- and now ngx does too.
 	//
-	// A ordem: chave nomeada em --key primeiro, porque o usuario a nomeou;
-	// depois o ssh-agent, preferivel porque a chave privada nunca e lida por
-	// nos; e por fim as chaves padrao do ~/.ssh, que sao o que faz
-	// `ngx --host web1` funcionar para quem ja tem `ssh web1`.
+	// The order: the key named in --key first, because the user named it;
+	// then the ssh-agent, preferable because the private key is never read
+	// by us; and finally the default keys in ~/.ssh, which are what makes
+	// `ngx --host web1` work for whoever already has `ssh web1`.
 	assinantes := []func() ([]ssh.Signer, error){}
 
 	if chaveExplicita {
@@ -225,9 +231,9 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 			for _, fonte := range assinantes {
 				ss, err := fonte()
 				if err != nil {
-					// Uma fonte que falha nao derruba as outras: um
-					// ssh-agent que morreu no meio nao pode impedir a
-					// chave do disco de ser oferecida.
+					// One source failing does not bring the others
+					// down: an ssh-agent that died halfway cannot
+					// keep the on-disk key from being offered.
 					continue
 				}
 				todos = append(todos, ss...)
@@ -246,15 +252,16 @@ func montarAutenticacao(opts SSHOptions, amb ambienteAuth) (*Autenticacao, []out
 	return auth, diags, nil
 }
 
-// metodoSSHAgent conecta no ssh-agent do sistema e transforma o cliente num
-// metodo de autenticacao.
+// assinantesDoAgente connects to the system ssh-agent and turns the client
+// into an authentication method.
 //
-// Usa PublicKeysCallback, e nao PublicKeys: com o callback a lista de chaves e
-// pedida ao agente no momento da autenticacao, entao uma chave adicionada com
-// `ssh-add` depois que o ngx comecou ainda e vista.
+// It uses PublicKeysCallback, not PublicKeys: with the callback the key list
+// is asked of the agent at authentication time, so a key added with `ssh-add`
+// after ngx started is still seen.
 //
-// Nao alcancar o ssh-agent devolve (nil, nil, aviso). E o caso mais comum em
-// maquina sem agente rodando e nao tem nada de errado.
+// Not reaching the ssh-agent returns (nil, nil, warning). That is the most
+// common case on a machine with no agent running and there is nothing wrong
+// with it.
 func assinantesDoAgente(amb ambienteAuth) (fonteAssinantes, func() error, *output.Diagnostic) {
 	conn, err := amb.conectarAgente()
 	if err != nil {
@@ -265,31 +272,28 @@ func assinantesDoAgente(amb ambienteAuth) (fonteAssinantes, func() error, *outpu
 	return cliente.Signers, conn.Close, nil
 }
 
-// metodoChave le a chave privada apontada por opts.KeyPath.
+// metodoChave reads the private key pointed at by opts.KeyPath.
 //
-// Chave cifrada tem tres desfechos, nesta ordem: a passphrase esta no
-// ambiente, e a chave e aberta agora; a entrada padrao e um terminal, e o
-// prompt fica adiado para o momento da autenticacao — assim quem ja autenticou
-// pelo ssh-agent nunca chega a ser perguntado; ou nao ha de onde tirar a
-// passphrase, e o metodo sai da lista com um aviso que nomeia a variavel de
-// ambiente.
+// An encrypted key has three outcomes, in this order: the passphrase is in the
+// environment, and the key is unlocked right away; standard input is a
+// terminal, and the prompt is deferred to authentication time — so whoever
+// already authenticated through the ssh-agent is never asked; or there is
+// nowhere to get the passphrase from, and the method leaves the list with a
+// warning naming the environment variable.
 //
-// O terceiro caso e o que mantem o ngx utilizavel por um agente de IA: rodando
-// sob pipe, ele falha rapido em vez de parar esperando uma digitacao que nunca
-// vira.
-// ChavesPadrao sao os arquivos de identidade que o OpenSSH tenta quando
-// ninguem indica um. A ordem e a dele. O `ssh` procurar por conta propria e
-// justamente o que faz `ssh web1` funcionar sem configuracao, e a DR2 promete
-// que `ngx --host web1` funcione para quem ja tem isso — entao o ngx procura
-// tambem.
+// The third case is what keeps ngx usable by an AI agent: running under a
+// pipe, it fails fast instead of blocking on a keystroke that will never come.
+// ChavesPadrao are the identity files OpenSSH tries when nobody points at one.
+// The order is its own. `ssh` searching on its own is exactly what makes
+// `ssh web1` work with no configuration, and DR2 promises that
+// `ngx --host web1` works for whoever already has that — so ngx searches too.
 //
-// Medido contra um servidor real: a chave que autenticava era ~/.ssh/id_rsa,
-// fora do ~/.ssh/config e fora do ssh-agent, que so tinha certificados de
-// outro sistema. Sem esta busca o ngx falhava onde o ssh conectava.
+// Measured against a real server: the key that authenticated was ~/.ssh/id_rsa,
+// outside ~/.ssh/config and outside the ssh-agent, which only had certificates
+// from another system. Without this search ngx failed where ssh connected.
 //
-// Nao entra id_dsa: o OpenSSH desabilitou DSA por padrao, e oferecer uma
-// chave que o servidor recusa so gasta uma das poucas tentativas do
-// MaxAuthTries.
+// id_dsa is left out: OpenSSH disabled DSA by default, and offering a key the
+// server refuses only spends one of the few MaxAuthTries attempts.
 var ChavesPadrao = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
 
 func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
@@ -299,7 +303,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 
 	pem, err := os.ReadFile(opts.KeyPath)
 	if err != nil {
-		d := avisoChaveIndisponivel(opts.KeyPath, fmt.Sprintf("nao foi possivel ler o arquivo (%v)", err))
+		d := avisoChaveIndisponivel(opts.KeyPath, fmt.Sprintf("the file could not be read (%v)", err))
 		return nil, &d
 	}
 
@@ -311,7 +315,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 	var faltaPassphrase *ssh.PassphraseMissingError
 	if !errors.As(err, &faltaPassphrase) {
 		d := avisoChaveIndisponivel(opts.KeyPath,
-			fmt.Sprintf("o arquivo nao e uma chave privada valida (%v)", err))
+			fmt.Sprintf("the file is not a valid private key (%v)", err))
 		return nil, &d
 	}
 
@@ -319,7 +323,7 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(pem, []byte(passphrase))
 		if err != nil {
 			d := avisoChaveIndisponivel(opts.KeyPath,
-				fmt.Sprintf("a passphrase de %s nao abre a chave (%v)", EnvPassphraseChaveSSH, err))
+				fmt.Sprintf("the passphrase in %s does not unlock the key (%v)", EnvPassphraseChaveSSH, err))
 			return nil, &d
 		}
 		return assinantesFixos(signer), nil
@@ -327,34 +331,35 @@ func metodoChave(opts SSHOptions, amb ambienteAuth) (fonteAssinantes, *output.Di
 
 	if !amb.stdinEhTerminal() {
 		d := avisoChaveIndisponivel(opts.KeyPath, fmt.Sprintf(
-			"a chave esta protegida por passphrase e a entrada padrao nao e um terminal, "+
-				"entao nao ha como perguntar; defina %s no ambiente para usar esta chave",
+			"the key is protected by a passphrase and standard input is not a terminal, "+
+				"so there is no way to ask; set %s in the environment to use this key",
 			EnvPassphraseChaveSSH))
 		return nil, &d
 	}
 
 	return func() ([]ssh.Signer, error) {
-		passphrase, err := amb.lerSegredo(fmt.Sprintf("passphrase da chave %s: ", opts.KeyPath))
+		passphrase, err := amb.lerSegredo(fmt.Sprintf("passphrase for key %s: ", opts.KeyPath))
 		if err != nil {
-			return nil, fmt.Errorf("nao foi possivel ler a passphrase de %s: %w", opts.KeyPath, err)
+			return nil, fmt.Errorf("could not read the passphrase for %s: %w", opts.KeyPath, err)
 		}
 		signer, err := ssh.ParsePrivateKeyWithPassphrase(pem, []byte(passphrase))
 		if err != nil {
-			return nil, fmt.Errorf("a passphrase informada nao abre a chave %s: %w", opts.KeyPath, err)
+			return nil, fmt.Errorf("the passphrase provided does not unlock the key %s: %w", opts.KeyPath, err)
 		}
 		return []ssh.Signer{signer}, nil
 	}, nil
 }
 
-// metodoSenha e o ultimo recurso da ordem.
+// metodoSenha is the last resort in the order.
 //
-// A senha vem de opts.Password — preenchida pelo ambiente por quem montou as
-// opcoes, nunca por flag —, do ambiente, ou de um prompt. O prompt so existe
-// quando a entrada padrao e um terminal, e mesmo ai fica adiado para o momento
-// da autenticacao: se o servidor aceitar a chave, ninguem e perguntado.
+// The password comes from opts.Password — filled in from the environment by
+// whoever assembled the options, never from a flag —, from the environment, or
+// from a prompt. The prompt only exists when standard input is a terminal, and
+// even then it is deferred to authentication time: if the server accepts the
+// key, nobody is asked.
 //
-// Sem terminal e sem segredo no ambiente o metodo simplesmente nao existe.
-// Nunca ha bloqueio esperando digitacao.
+// With no terminal and no secret in the environment the method simply does not
+// exist. There is never a block waiting for typing.
 func metodoSenha(opts SSHOptions, amb ambienteAuth) ssh.AuthMethod {
 	if opts.Password != "" {
 		return ssh.Password(opts.Password)
@@ -366,18 +371,18 @@ func metodoSenha(opts SSHOptions, amb ambienteAuth) ssh.AuthMethod {
 		return nil
 	}
 	return ssh.PasswordCallback(func() (string, error) {
-		return amb.lerSegredo(fmt.Sprintf("senha de %s: ", destinoLegivel(opts)))
+		return amb.lerSegredo(fmt.Sprintf("password for %s: ", destinoLegivel(opts)))
 	})
 }
 
-// lerSegredoDoTerminal pergunta um segredo sem eco.
+// lerSegredoDoTerminal asks for a secret with echo turned off.
 //
-// O prompt sai em stderr porque stdout carrega o envelope JSON: escrever o
-// texto do prompt ali corromperia a saida que outro programa esta parseando.
+// The prompt goes to stderr because stdout carries the JSON envelope: writing
+// the prompt text there would corrupt the output another program is parsing.
 func lerSegredoDoTerminal(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return "", fmt.Errorf("a entrada padrao nao e um terminal; defina %s no ambiente", EnvSenhaSSH)
+		return "", fmt.Errorf("standard input is not a terminal; set %s in the environment", EnvSenhaSSH)
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	segredo, err := term.ReadPassword(fd)
@@ -388,46 +393,47 @@ func lerSegredoDoTerminal(prompt string) (string, error) {
 	return string(segredo), nil
 }
 
-// avisoSSHAgentAusente informa que o ssh-agent ficou de fora.
+// avisoSSHAgentAusente reports that the ssh-agent was left out.
 //
-// Severidade info, e nao warning: nao ha nada a corrigir. O diagnostico existe
-// porque a lista de metodos oferecidos mudou, e quem le a saida precisa poder
-// explicar uma recusa do servidor sem adivinhar.
+// Info severity, not warning: there is nothing to fix. The diagnostic exists
+// because the list of offered methods changed, and whoever reads the output
+// needs to be able to explain a refusal by the server without guessing.
 func avisoSSHAgentAusente(causa error) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityInfo,
 		Code:     CodigoAvisoSSHAgentAusente,
 		Message: fmt.Sprintf(
-			"ssh-agent nao esta disponivel (%v); a autenticacao por ssh-agent nao sera tentada. "+
-				"Isto nao e um erro: se voce quer usa-la, inicie o ssh-agent e registre a chave "+
-				"com `ssh-add`",
+			"ssh-agent is not available (%v); ssh-agent authentication will not be tried. "+
+				"This is not an error: if you want to use it, start the ssh-agent and register "+
+				"the key with `ssh-add`",
 			causa),
 	}
 }
 
-// avisoChaveIndisponivel informa que a chave apontada nao entrou na lista.
+// avisoChaveIndisponivel reports that the key pointed at did not enter the
+// list.
 //
-// Severidade warning, e nao info: alguem apontou uma chave — por --key ou pelo
-// IdentityFile do ~/.ssh/config — e ela nao esta sendo usada. Cair calado para
-// a senha faria um caminho errado parecer certo.
+// Warning severity, not info: someone pointed at a key — through --key or
+// through IdentityFile in ~/.ssh/config — and it is not being used. Falling
+// back to the password silently would make a wrong path look right.
 func avisoChaveIndisponivel(caminho, motivo string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
 		Code:     CodigoAvisoChaveIndisponivel,
 		Message: fmt.Sprintf(
-			"a chave %s nao sera usada na autenticacao: %s", caminho, motivo),
+			"the key %s will not be used for authentication: %s", caminho, motivo),
 		File: caminho,
 	}
 }
 
-// erroSemMetodoAuth e o unico erro desta etapa: nao sobrou nada para oferecer
-// ao servidor.
+// erroSemMetodoAuth is the only error of this stage: nothing was left to offer
+// the server.
 //
-// Chegar aqui implica que a entrada padrao nao e um terminal — com terminal
-// sempre existe ao menos o metodo de senha —, entao a mensagem nomeia a
-// variavel de ambiente. E exatamente o caso de um agente de IA rodando o ngx
-// sob pipe: em vez de parar esperando uma digitacao que nao vem, ele recebe a
-// instrucao do que definir.
+// Getting here implies that standard input is not a terminal — with a terminal
+// there is always at least the password method —, so the message names the
+// environment variable. This is exactly the case of an AI agent running ngx
+// under a pipe: instead of blocking on a keystroke that never comes, it gets
+// the instruction of what to set.
 func erroSemMetodoAuth(opts SSHOptions) error {
 	return &output.Error{
 		Code: output.ExitInternal,
@@ -435,18 +441,20 @@ func erroSemMetodoAuth(opts SSHOptions) error {
 			Severity: output.SeverityError,
 			Code:     CodigoSemMetodoAuth,
 			Message: fmt.Sprintf(
-				"nenhum metodo de autenticacao disponivel para %s: o ssh-agent nao respondeu, "+
-					"nenhuma chave utilizavel foi indicada, e a entrada padrao nao e um terminal, "+
-					"entao o ngx nao tem como perguntar a senha. Escolha um: inicie o ssh-agent e "+
-					"registre a chave com `ssh-add`; aponte uma chave sem passphrase com --key (ou "+
-					"defina %s); ou coloque a senha em %s. A senha nunca e aceita por flag, porque "+
-					"flag aparece em `ps`, no historico do shell e no log de CI",
+				"no authentication method available for %s: the ssh-agent did not answer, "+
+					"no usable key was provided, and standard input is not a terminal, "+
+					"so ngx has no way to ask for the password. Pick one: start the ssh-agent "+
+					"and register the key with `ssh-add`; point at a key without a passphrase "+
+					"using --key (or set %s); or put the password in %s. The password is never "+
+					"accepted by flag, because a flag shows up in `ps`, in the shell history "+
+					"and in the CI log",
 				destinoLegivel(opts), EnvPassphraseChaveSSH, EnvSenhaSSH),
 		},
 	}
 }
 
-// destinoLegivel descreve o alvo como o usuario o reconhece, "user@host".
+// destinoLegivel describes the target the way the user recognizes it,
+// "user@host".
 func destinoLegivel(opts SSHOptions) string {
 	switch {
 	case opts.User != "" && opts.Host != "":
@@ -454,18 +462,18 @@ func destinoLegivel(opts SSHOptions) string {
 	case opts.Host != "":
 		return opts.Host
 	default:
-		return "o destino"
+		return "the target"
 	}
 }
 
-// metodoChavesPadrao monta um metodo com as chaves padrao que existem no
-// disco e abrem sem passphrase.
+// metodoChavesPadrao assembles a method with the default keys that exist on
+// disk and open without a passphrase.
 //
-// Sem passphrase de proposito: aqui o usuario nao pediu chave nenhuma, entao
-// perguntar senha de um arquivo que ele nem citou seria intrusivo, e sob pipe
-// — que e como um agente de IA roda isto — nao ha a quem perguntar. Chave
-// protegida por passphrase continua acessivel pelo ssh-agent, que e o
-// caminho recomendado, ou por --key explicito.
+// Without a passphrase on purpose: here the user did not ask for any key, so
+// prompting for the password of a file they never mentioned would be
+// intrusive, and under a pipe — which is how an AI agent runs this — there is
+// nobody to ask. A key protected by a passphrase remains reachable through the
+// ssh-agent, which is the recommended path, or through an explicit --key.
 func metodoChavesPadrao(amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) {
 	if amb.home == nil {
 		return nil, nil
@@ -494,10 +502,10 @@ func metodoChavesPadrao(amb ambienteAuth) (fonteAssinantes, *output.Diagnostic) 
 	return assinantesFixos(signers...), nil
 }
 
-// fonteAssinantes entrega chaves para o handshake. E uma funcao, e nao uma
-// lista pronta, porque o ssh-agent pode ganhar chaves depois de o ngx comecar
-// e porque uma chave com passphrase so deve pedir a senha se realmente chegar
-// a vez dela.
+// fonteAssinantes hands keys to the handshake. It is a function, and not a
+// ready-made list, because the ssh-agent may gain keys after ngx started and
+// because a key with a passphrase should only ask for it if its turn actually
+// comes.
 type fonteAssinantes func() ([]ssh.Signer, error)
 
 func assinantesFixos(ss ...ssh.Signer) fonteAssinantes {

@@ -15,66 +15,67 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// Codigos de diagnostico da politica de host key (DR1).
+// Diagnostic codes for the host key policy (DR1).
 //
-// Os codigos NGX-000N espelham exit codes e nao distinguem casos dentro de um
-// mesmo codigo de saida. A recusa de host key precisa de identidade mais fina
-// que isso — quem consome a saida tem de separar "primeiro acesso a este host"
-// de "a chave do servidor mudou" sem interpretar texto —, entao os erros desta
-// politica usam a faixa NGX-E###, e o aviso usa a faixa NGX-W### ja adotada
-// pelo aviso de ~/.ssh/config.
+// The NGX-000N codes mirror exit codes and do not distinguish cases within the
+// same exit code. A host key refusal needs a finer identity than that —
+// whoever consumes the output has to separate "first access to this host" from
+// "the server key changed" without interpreting text —, so the errors of this
+// policy use the NGX-E### range, and the warning uses the NGX-W### range
+// already adopted by the ~/.ssh/config warning.
 //
-// Os quatro codigos de erro sao mutuamente exclusivos e cada um tem uma
-// mensagem propria. Colapsar dois deles apaga exatamente a informacao que
-// justifica a politica existir.
+// The four error codes are mutually exclusive and each one has its own
+// message. Collapsing two of them erases exactly the information that
+// justifies the policy existing.
 const (
-	// CodigoHostDesconhecido: o host nao esta no known_hosts. Atrito normal
-	// de primeiro acesso.
+	// CodigoHostDesconhecido: the host is not in known_hosts. Normal
+	// first-access friction.
 	CodigoHostDesconhecido = "NGX-0201"
 
-	// CodigoHostKeyAlterada: o host esta no known_hosts com outra chave.
-	// Possivel interceptacao.
+	// CodigoHostKeyAlterada: the host is in known_hosts with another key.
+	// Possible interception.
 	CodigoHostKeyAlterada = "NGX-0202"
 
-	// CodigoHostKeyRevogada: a chave apresentada esta marcada @revoked.
+	// CodigoHostKeyRevogada: the presented key is marked @revoked.
 	CodigoHostKeyRevogada = "NGX-0203"
 
-	// CodigoKnownHostsAusente: o arquivo known_hosts nao existe.
+	// CodigoKnownHostsAusente: the known_hosts file does not exist.
 	CodigoKnownHostsAusente = "NGX-0204"
 
-	// CodigoAlgoritmoNaoRegistrado: o host esta no known_hosts, mas so com
-	// chaves de outro tipo. Nao e ataque nem primeiro acesso -- e negociacao
-	// de algoritmo. Merece codigo proprio justamente para nao ser confundido
-	// com NGX-0202, cuja mensagem fala em interceptacao.
+	// CodigoAlgoritmoNaoRegistrado: the host is in known_hosts, but only
+	// with keys of another type. This is neither an attack nor a first
+	// access -- it is algorithm negotiation. It gets its own code precisely
+	// so it is not confused with NGX-0202, whose message talks about
+	// interception.
 	CodigoAlgoritmoNaoRegistrado = "NGX-0207"
 
-	// CodigoAvisoHostKeyInsegura: --insecure-host-key foi usado e a
-	// verificacao foi pulada.
+	// CodigoAvisoHostKeyInsegura: --insecure-host-key was used and the
+	// verification was skipped.
 	CodigoAvisoHostKeyInsegura = "NGX-0211"
 )
 
-// VerificadorHostKey monta o ssh.HostKeyCallback do ngx conforme a DR1: a
-// chave do servidor e conferida contra o known_hosts do usuario e qualquer
-// divergencia recusa a conexao.
+// VerificadorHostKey builds the ngx ssh.HostKeyCallback according to DR1: the
+// server key is checked against the user's known_hosts and any divergence
+// refuses the connection.
 //
-// Devolve tres coisas porque ha tres momentos distintos:
-//   - o callback, que classifica o que acontece durante o handshake;
-//   - diagnosticos de construcao — hoje so o aviso de --insecure-host-key;
-//   - erro de construcao, quando o known_hosts nao pode ser lido. O
-//     knownhosts.New abre os arquivos na construcao, entao "arquivo ausente"
-//     nunca chega ao callback: e erro aqui.
+// It returns three things because there are three distinct moments:
+//   - the callback, which classifies what happens during the handshake;
+//   - construction diagnostics — today only the --insecure-host-key warning;
+//   - a construction error, when known_hosts cannot be read. knownhosts.New
+//     opens the files at construction time, so "missing file" never reaches
+//     the callback: it is an error here.
 //
-// O aviso do modo inseguro sai na construcao, e nao dentro do callback, por
-// duas razoes: ele nao depende de qual chave o servidor apresenta, e um
-// callback que escrevesse numa lista compartilhada seria disputa de dados com
-// handshakes concorrentes.
+// The insecure-mode warning is emitted at construction, and not inside the
+// callback, for two reasons: it does not depend on which key the server
+// presents, and a callback writing into a shared list would be a data race
+// with concurrent handshakes.
 func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	if opts.InsecureHostKey {
 		diags = append(diags, avisoHostKeyInsegura(opts.Host))
-		// Aceita qualquer chave. O escape existe (DR1), mas nunca em
-		// silencio: o aviso acima e a contrapartida de usa-lo.
+		// Accepts any key. The escape hatch exists (DR1), but never in
+		// silence: the warning above is the price of using it.
 		return func(string, net.Addr, ssh.PublicKey) error { return nil }, diags, nil
 	}
 
@@ -87,8 +88,8 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 				Diag: output.Diagnostic{
 					Severity: output.SeverityError,
 					Code:     CodigoKnownHostsAusente,
-					Message: "nao foi possivel localizar o diretorio do usuario para achar o " +
-						"known_hosts; passe --known-hosts com o caminho do arquivo",
+					Message: "could not locate the user's home directory to find " +
+						"known_hosts; pass --known-hosts with the path to the file",
 				},
 				Err: err,
 			}
@@ -109,24 +110,25 @@ func VerificadorHostKey(opts SSHOptions) (ssh.HostKeyCallback, []output.Diagnost
 	}, diags, nil
 }
 
-// CaminhoKnownHostsPadrao devolve ~/.ssh/known_hosts. O filepath.Join usa o
-// separador nativo, entao o mesmo codigo produz /home/x/.ssh/known_hosts e
+// CaminhoKnownHostsPadrao returns ~/.ssh/known_hosts. filepath.Join uses the
+// native separator, so the same code produces /home/x/.ssh/known_hosts and
 // C:\Users\x\.ssh\known_hosts.
 func CaminhoKnownHostsPadrao() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("nao foi possivel localizar o diretorio do usuario: %w", err)
+		return "", fmt.Errorf("could not locate the user's home directory: %w", err)
 	}
 	return filepath.Join(home, ".ssh", "known_hosts"), nil
 }
 
-// classificarErroHostKey traduz o erro do knownhosts num dos desfechos da DR1.
+// classificarErroHostKey translates the knownhosts error into one of the DR1
+// outcomes.
 //
-// A distincao entre host desconhecido e chave alterada nao esta em dois tipos
-// de erro: esta no campo Want de um unico *knownhosts.KeyError. Want vazio e
-// "nunca vi este host"; Want preenchido e "ja vi, e a chave era outra". O
-// segundo caso e o unico que descreve um ataque, e por isso nao pode sair com
-// a mesma cara do primeiro.
+// The distinction between unknown host and changed key is not in two error
+// types: it is in the Want field of a single *knownhosts.KeyError. An empty
+// Want means "I have never seen this host"; a filled Want means "I have seen
+// it, and the key was another one". The second case is the only one that
+// describes an attack, and that is why it cannot look like the first.
 func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err error) error {
 	var revogada *knownhosts.RevokedError
 	if errors.As(err, &revogada) {
@@ -136,10 +138,10 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 				Severity: output.SeverityError,
 				Code:     CodigoHostKeyRevogada,
 				Message: fmt.Sprintf(
-					"a chave de host de %s esta REVOGADA em %s:%d — a marcacao @revoked diz "+
-						"que esta chave e conhecidamente comprometida. O ngx recusa a conexao. "+
-						"Nao remova a marcacao sem saber por que ela foi colocada ali; a chave "+
-						"apresentada foi %s",
+					"the host key of %s is REVOKED in %s:%d — the @revoked mark says "+
+						"this key is known to be compromised. ngx refuses the connection. "+
+						"Do not remove the mark without knowing why it was put there; the "+
+						"key presented was %s",
 					endereco, revogada.Revoked.Filename, revogada.Revoked.Line, serializarChave(key)),
 				File: revogada.Revoked.Filename,
 				Line: revogada.Revoked.Line,
@@ -151,20 +153,21 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 	var chave *knownhosts.KeyError
 	if errors.As(err, &chave) {
 		if len(chave.Want) > 0 {
-			// Want preenchido nao significa, sozinho, que a chave mudou.
+			// A filled Want does not, on its own, mean the key changed.
 			//
-			// Um servidor costuma oferecer varios tipos de chave de host
-			// (ed25519, ecdsa, rsa) e o cliente negocia um deles. Se o
-			// known_hosts registrou o host por OUTRO tipo, a biblioteca ve
-			// uma chave que nao consta e devolve o mesmo KeyError de chave
-			// alterada -- e o ngx acusaria ataque de interceptacao onde nao
-			// houve nada. Medido contra um servidor real: known_hosts com
-			// ssh-ed25519, servidor negociando ecdsa-sha2-nistp256.
+			// A server usually offers several host key types (ed25519,
+			// ecdsa, rsa) and the client negotiates one of them. If
+			// known_hosts recorded the host under ANOTHER type, the
+			// library sees a key that is not on record and returns the
+			// same KeyError as a changed key -- and ngx would accuse an
+			// interception attack where nothing happened. Measured
+			// against a real server: known_hosts with ssh-ed25519,
+			// server negotiating ecdsa-sha2-nistp256.
 			//
-			// A distincao e o TIPO. Se nenhuma chave registrada tem o tipo
-			// da apresentada, o que houve foi escolha de algoritmo, nao
-			// troca de chave. Se ha registro do mesmo tipo e os bytes
-			// diferem, ai sim mudou.
+			// The distinction is the TYPE. If no recorded key has the
+			// type of the presented one, what happened was algorithm
+			// choice, not a key swap. If there is a record of the same
+			// type and the bytes differ, then it really did change.
 			if !registraTipo(chave.Want, key.Type()) {
 				return erroAlgoritmoNaoRegistrado(caminho, endereco, key, chave, err)
 			}
@@ -173,16 +176,16 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 		return erroHostDesconhecido(caminho, endereco, key, err)
 	}
 
-	// Qualquer outra falha do verificador — endereco malformado, por exemplo.
-	// Nao vira nenhum dos quatro desfechos: inventar um deles seria afirmar
-	// algo que nao se apurou.
+	// Any other failure of the verifier — a malformed address, for example.
+	// It does not become any of the four outcomes: inventing one of them
+	// would be asserting something that was not established.
 	return &output.Error{
 		Code: output.ExitInternal,
 		Diag: output.Diagnostic{
 			Severity: output.SeverityError,
 			Code:     "NGX-0001",
 			Message: fmt.Sprintf(
-				"nao foi possivel verificar a chave de host de %s contra %s: %v",
+				"could not verify the host key of %s against %s: %v",
 				endereco, caminho, err),
 			File: caminho,
 		},
@@ -190,10 +193,10 @@ func classificarErroHostKey(caminho, endereco string, key ssh.PublicKey, err err
 	}
 }
 
-// erroHostDesconhecido monta o desfecho de primeiro acesso. A mensagem entrega
-// a linha pronta para o known_hosts porque essa e a acao que resolve, e diz de
-// forma inequivoca que o host nunca foi visto — o oposto do caso de chave
-// alterada, onde ele ja era conhecido.
+// erroHostDesconhecido builds the first-access outcome. The message hands over
+// the ready-made known_hosts line because that is the action that resolves it,
+// and says unambiguously that the host has never been seen — the opposite of
+// the changed key case, where it was already known.
 func erroHostDesconhecido(caminho, endereco string, key ssh.PublicKey, causa error) error {
 	linha := knownhosts.Line([]string{knownhosts.Normalize(endereco)}, key)
 	return &output.Error{
@@ -202,10 +205,10 @@ func erroHostDesconhecido(caminho, endereco string, key ssh.PublicKey, causa err
 			Severity: output.SeverityError,
 			Code:     CodigoHostDesconhecido,
 			Message: fmt.Sprintf(
-				"host desconhecido: %s nao aparece em %s, entao o ngx nao tem com o que "+
-					"comparar a chave apresentada e recusa a conexao. Este e o atrito normal "+
-					"de primeiro acesso. Se voce confia nesta chave, acrescente a linha ao "+
-					"arquivo: %s",
+				"unknown host: %s does not appear in %s, so ngx has nothing to compare "+
+					"the presented key against and refuses the connection. This is the "+
+					"normal friction of a first access. If you trust this key, append the "+
+					"line to the file: %s",
 				endereco, caminho, linha),
 			File: caminho,
 		},
@@ -213,9 +216,10 @@ func erroHostDesconhecido(caminho, endereco string, key ssh.PublicKey, causa err
 	}
 }
 
-// erroChaveAlterada monta o desfecho de possivel interceptacao. A mensagem diz
-// "pode ser um ataque" com todas as letras, mostra a chave apresentada ao lado
-// das registradas, e aponta o arquivo e a linha do registro que diverge.
+// erroChaveAlterada builds the possible-interception outcome. The message says
+// "this may be an attack" in so many words, shows the presented key next to
+// the recorded ones, and points at the file and line of the record that
+// diverges.
 func erroChaveAlterada(
 	caminho, endereco string,
 	key ssh.PublicKey,
@@ -233,13 +237,13 @@ func erroChaveAlterada(
 			Severity: output.SeverityError,
 			Code:     CodigoHostKeyAlterada,
 			Message: fmt.Sprintf(
-				"ATENCAO: a chave de host de %s MUDOU. Isto pode ser um ataque de "+
-					"interceptacao (man-in-the-middle): alguem no caminho pode estar se "+
-					"passando pelo servidor. O host ja era conhecido e a chave apresentada "+
-					"(%s) nao corresponde a nenhuma das registradas em %s: %s. O ngx recusa "+
-					"a conexao. Se a troca for legitima (servidor reinstalado, por exemplo), "+
-					"confirme a chave nova por um canal fora deste, remova a antiga com "+
-					"`ssh-keygen -R %s` e registre a nova",
+				"WARNING: the host key of %s has CHANGED. This may be an interception "+
+					"attack (man-in-the-middle): someone on the path may be impersonating "+
+					"the server. The host was already known and the presented key (%s) "+
+					"does not match any of the ones recorded in %s: %s. ngx refuses the "+
+					"connection. If the change is legitimate (a reinstalled server, for "+
+					"example), confirm the new key through a channel other than this one, "+
+					"remove the old one with `ssh-keygen -R %s` and record the new one",
 				endereco, serializarChave(key), caminho,
 				strings.Join(registradas, "; "), endereco),
 			File: chave.Want[0].Filename,
@@ -249,14 +253,14 @@ func erroChaveAlterada(
 	}
 }
 
-// erroAoAbrirKnownHosts separa "o arquivo nao existe" de "o arquivo existe mas
-// nao pode ser lido". Sao problemas com solucoes diferentes, e o segundo nao
-// pode se disfarcar de primeiro acesso.
+// erroAoAbrirKnownHosts separates "the file does not exist" from "the file
+// exists but cannot be read". They are different problems with different
+// solutions, and the second one cannot disguise itself as a first access.
 func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		alvo := host
 		if alvo == "" {
-			alvo = "o destino"
+			alvo = "the target"
 		}
 		return &output.Error{
 			Code: output.ExitInternal,
@@ -264,10 +268,10 @@ func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 				Severity: output.SeverityError,
 				Code:     CodigoKnownHostsAusente,
 				Message: fmt.Sprintf(
-					"%s nao existe: o ngx nao tem nenhuma chave registrada para comparar com "+
-						"a de %s. Rode `ssh %s` uma vez para registrar o host, aponte outro "+
-						"arquivo com --known-hosts, ou aceite qualquer chave com "+
-						"--insecure-host-key (inseguro)",
+					"%s does not exist: ngx has no recorded key to compare with the one "+
+						"from %s. Run `ssh %s` once to record the host, point at another "+
+						"file with --known-hosts, or accept any key with "+
+						"--insecure-host-key (insecure)",
 					caminho, alvo, alvo),
 				File: caminho,
 			},
@@ -281,8 +285,8 @@ func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 			Severity: output.SeverityError,
 			Code:     "NGX-0001",
 			Message: fmt.Sprintf(
-				"%s existe mas nao pode ser usado (%v); o ngx nao verifica host key sem ele "+
-					"e recusa a conexao",
+				"%s exists but cannot be used (%v); ngx does not verify host keys without "+
+					"it and refuses the connection",
 				caminho, err),
 			File: caminho,
 		},
@@ -290,28 +294,28 @@ func erroAoAbrirKnownHosts(caminho, host string, err error) error {
 	}
 }
 
-// avisoHostKeyInsegura e a contrapartida de --insecure-host-key. O texto diz o
-// que se perdeu, nao apenas que uma flag foi usada: quem le a saida precisa
-// saber que a conexao deixou de estar protegida.
+// avisoHostKeyInsegura is the counterpart of --insecure-host-key. The text
+// says what was lost, not merely that a flag was used: whoever reads the
+// output needs to know the connection stopped being protected.
 func avisoHostKeyInsegura(host string) output.Diagnostic {
 	alvo := host
 	if alvo == "" {
-		alvo = "o destino"
+		alvo = "the target"
 	}
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
 		Code:     CodigoAvisoHostKeyInsegura,
 		Message: fmt.Sprintf(
-			"--insecure-host-key: a chave de host de %s sera aceita sem nenhuma verificacao. "+
-				"A conexao nao esta protegida contra interceptacao (man-in-the-middle) e "+
-				"qualquer maquina na rota pode se passar pelo servidor",
+			"--insecure-host-key: the host key of %s will be accepted with no verification "+
+				"at all. The connection is not protected against interception "+
+				"(man-in-the-middle) and any machine on the route can impersonate the server",
 			alvo),
 	}
 }
 
-// enderecoLegivel escolhe como o host aparece nas mensagens. O hostname e o
-// alvo que o usuario pediu e e o que ele reconhece; o endereco de rede so
-// entra quando nao ha hostname.
+// enderecoLegivel chooses how the host appears in the messages. The hostname
+// is the target the user asked for and is what they recognize; the network
+// address only shows up when there is no hostname.
 func enderecoLegivel(hostname string, remote net.Addr) string {
 	if hostname != "" {
 		return hostname
@@ -319,22 +323,21 @@ func enderecoLegivel(hostname string, remote net.Addr) string {
 	if remote != nil {
 		return remote.String()
 	}
-	return "o destino"
+	return "the target"
 }
 
-// serializarChave devolve a chave no formato de uma linha de known_hosts,
-// "ssh-ed25519 AAAA...", sem a quebra de linha que o MarshalAuthorizedKey
-// acrescenta.
+// serializarChave returns the key in the format of a known_hosts line,
+// "ssh-ed25519 AAAA...", without the newline MarshalAuthorizedKey appends.
 func serializarChave(key ssh.PublicKey) string {
 	if key == nil {
-		return "(nenhuma)"
+		return "(none)"
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 }
 
-// registraTipo diz se alguma das chaves conhecidas para o host usa o mesmo
-// algoritmo da apresentada. E o que separa "a chave mudou" de "negociamos um
-// algoritmo que voce nunca registrou".
+// registraTipo tells whether any of the known keys for the host uses the same
+// algorithm as the presented one. It is what separates "the key changed" from
+// "we negotiated an algorithm you never recorded".
 func registraTipo(want []knownhosts.KnownKey, tipo string) bool {
 	for i := range want {
 		if want[i].Key.Type() == tipo {
@@ -344,11 +347,11 @@ func registraTipo(want []knownhosts.KnownKey, tipo string) bool {
 	return false
 }
 
-// erroAlgoritmoNaoRegistrado cobre o host conhecido cuja chave apresentada e
-// de um tipo que o known_hosts nao registra. Recusar continua certo -- nao ha
-// como verificar o que nao se conhece --, mas dizer "pode ser ataque" seria
-// mentira, e mentira num aviso de seguranca gasta a credibilidade do aviso
-// que importa.
+// erroAlgoritmoNaoRegistrado covers the known host whose presented key is of a
+// type known_hosts does not record. Refusing is still right -- there is no way
+// to verify what is not known --, but saying "this may be an attack" would be
+// a lie, and a lie in a security warning spends the credibility of the warning
+// that matters.
 func erroAlgoritmoNaoRegistrado(
 	caminho, endereco string,
 	apresentada ssh.PublicKey,
@@ -371,10 +374,10 @@ func erroAlgoritmoNaoRegistrado(
 			Severity: output.SeverityError,
 			Code:     CodigoAlgoritmoNaoRegistrado,
 			Message: fmt.Sprintf(
-				"o host %s e conhecido, mas so com chave do tipo %s, e ele apresentou "+
-					"uma do tipo %s. Isto NAO indica ataque: o servidor oferece varios "+
-					"tipos de chave e o tipo negociado nao esta no seu known_hosts. "+
-					"Registre-o com: ssh-keyscan -t %s %s >> %s",
+				"the host %s is known, but only with a key of type %s, and it presented "+
+					"one of type %s. This does NOT indicate an attack: the server offers "+
+					"several key types and the negotiated type is not in your known_hosts. "+
+					"Record it with: ssh-keyscan -t %s %s >> %s",
 				endereco, strings.Join(tipos, ", "), apresentada.Type(),
 				apresentada.Type(), hostDe(endereco), caminho),
 			File: chave.Want[0].Filename,
@@ -384,8 +387,8 @@ func erroAlgoritmoNaoRegistrado(
 	}
 }
 
-// hostDe devolve so o host de um "host:porta", para montar a linha de
-// ssh-keyscan que a mensagem sugere.
+// hostDe returns only the host part of a "host:port", to build the ssh-keyscan
+// line the message suggests.
 func hostDe(endereco string) string {
 	if h, _, err := net.SplitHostPort(endereco); err == nil {
 		return h

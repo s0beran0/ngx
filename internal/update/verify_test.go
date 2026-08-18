@@ -14,13 +14,13 @@ func codigoDe(t *testing.T, err error) string {
 	t.Helper()
 	require.Error(t, err)
 	e, ok := err.(*output.Error)
-	require.Truef(t, ok, "erro %T nao carrega diagnostico", err)
+	require.Truef(t, ok, "error %T carries no diagnostic", err)
 	return e.Diag.Code
 }
 
 func TestVerifyAceitaAssinaturaEChecksumCorretos(t *testing.T) {
 	pub, priv := parDeChaves(t)
-	artefato := []byte("binario do ngx v9")
+	artefato := []byte("ngx binary v9")
 	somas := checksumsPara(map[string][]byte{"ngx_9_linux_amd64.tar.gz": artefato})
 	sig := minisign.Sign(priv, somas)
 
@@ -29,18 +29,18 @@ func TestVerifyAceitaAssinaturaEChecksumCorretos(t *testing.T) {
 }
 
 func TestVerifyAceitaChaveComComentario(t *testing.T) {
-	// A chave publica em arquivo tem duas linhas, a primeira sendo o
-	// comentario nao confiavel. As duas formas precisam funcionar, porque a
-	// pessoa que preencher o -ldflags pode copiar o arquivo inteiro.
+	// The public key stored in a file has two lines, the first one being the
+	// untrusted comment. Both shapes need to work, because whoever fills in
+	// the -ldflags may copy the whole file.
 	pub, priv := parDeChaves(t)
 	comComentario, err := pub.MarshalText()
 	require.NoError(t, err)
 
-	artefato := []byte("binario")
-	somas := checksumsPara(map[string][]byte{"artefato.tar.gz": artefato})
+	artefato := []byte("binary")
+	somas := checksumsPara(map[string][]byte{"artifact.tar.gz": artefato})
 	sig := minisign.Sign(priv, somas)
 
-	assert.NoError(t, Verify(artefato, somas, sig, string(comComentario), "artefato.tar.gz"))
+	assert.NoError(t, Verify(artefato, somas, sig, string(comComentario), "artifact.tar.gz"))
 }
 
 func TestVerifyRecusaChecksumDivergente(t *testing.T) {
@@ -48,41 +48,43 @@ func TestVerifyRecusaChecksumDivergente(t *testing.T) {
 	somas := checksumsPara(map[string][]byte{"ngx_linux_amd64.tar.gz": []byte("original")})
 	sig := minisign.Sign(priv, somas)
 
-	err := Verify([]byte("trocado"), somas, sig, textoDaChave(t, pub), "ngx_linux_amd64.tar.gz")
+	err := Verify([]byte("swapped"), somas, sig, textoDaChave(t, pub), "ngx_linux_amd64.tar.gz")
 
 	assert.Equal(t, CodigoChecksumDivergente, codigoDe(t, err))
 	assert.Contains(t, err.Error(), "ngx_linux_amd64.tar.gz")
 }
 
 func TestVerifyRecusaAssinaturaInvalidaAntesDeOlharOChecksum(t *testing.T) {
-	// A ordem e o ponto do teste: conferir hash contra um checksums.txt nao
-	// autenticado nao prova nada. Aqui o checksums nem sequer menciona o
-	// arquivo — se o erro devolvido fosse "checksum ausente", a verificacao
-	// teria lido o conteudo antes de saber se podia confiar nele.
+	// The order is the point of the test: checking a hash against an
+	// unauthenticated checksums.txt proves nothing. Here the checksums does
+	// not even mention the file -- if the returned error were "missing
+	// checksum", verification would have read the content before knowing
+	// whether it could trust it.
 	pubOutra, _ := parDeChaves(t)
 	_, privAtacante := parDeChaves(t)
 
-	somas := []byte("linha que nao contem o artefato\n")
+	somas := []byte("a line that does not contain the artifact\n")
 	sig := minisign.Sign(privAtacante, somas)
 
-	err := Verify([]byte("qualquer"), somas, sig, textoDaChave(t, pubOutra), "ngx_linux_amd64.tar.gz")
+	err := Verify([]byte("anything"), somas, sig, textoDaChave(t, pubOutra), "ngx_linux_amd64.tar.gz")
 
 	assert.Equal(t, CodigoAssinaturaInvalida, codigoDe(t, err))
 }
 
 func TestVerifyRecusaAssinaturaDeOutroConteudo(t *testing.T) {
 	pub, priv := parDeChaves(t)
-	somas := checksumsPara(map[string][]byte{"a.tar.gz": []byte("conteudo")})
-	sig := minisign.Sign(priv, []byte("outro checksums.txt qualquer"))
+	somas := checksumsPara(map[string][]byte{"a.tar.gz": []byte("content")})
+	sig := minisign.Sign(priv, []byte("some other checksums.txt"))
 
-	err := Verify([]byte("conteudo"), somas, sig, textoDaChave(t, pub), "a.tar.gz")
+	err := Verify([]byte("content"), somas, sig, textoDaChave(t, pub), "a.tar.gz")
 
 	assert.Equal(t, CodigoAssinaturaInvalida, codigoDe(t, err))
 }
 
 func TestVerifyRecusaSemChavePublica(t *testing.T) {
-	// Build local, sem -ldflags: o binario nao sabe verificar nada. A unica
-	// resposta aceitavel e recusar; "seguir sem verificar" nao existe.
+	// A local build, without -ldflags: the binary does not know how to verify
+	// anything. The only acceptable answer is to refuse; "carry on without
+	// verifying" does not exist.
 	_, priv := parDeChaves(t)
 	somas := checksumsPara(map[string][]byte{"a.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, somas)
@@ -90,8 +92,8 @@ func TestVerifyRecusaSemChavePublica(t *testing.T) {
 	err := Verify([]byte("x"), somas, sig, "", "a.tar.gz")
 
 	assert.Equal(t, CodigoSemChavePublica, codigoDe(t, err))
-	assert.Contains(t, err.Error(), "sem chave publica")
-	assert.Contains(t, err.Error(), "nao pode se auto-atualizar")
+	assert.Contains(t, err.Error(), "without an embedded public verification key")
+	assert.Contains(t, err.Error(), "cannot update itself")
 }
 
 func TestVerifyRecusaSoComEspacosNaChave(t *testing.T) {
@@ -104,8 +106,8 @@ func TestVerifyRecusaSoComEspacosNaChave(t *testing.T) {
 }
 
 func TestVerifyRecusaChavePlaceholder(t *testing.T) {
-	// O placeholder existe justamente para falhar com mensagem propria em vez
-	// de virar um erro de parse obscuro.
+	// The placeholder exists precisely to fail with a message of its own
+	// instead of becoming an obscure parse error.
 	_, priv := parDeChaves(t)
 	somas := checksumsPara(map[string][]byte{"a.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, somas)
@@ -120,14 +122,14 @@ func TestVerifyRecusaChaveMalformada(t *testing.T) {
 	somas := checksumsPara(map[string][]byte{"a.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, somas)
 
-	err := Verify([]byte("x"), somas, sig, "isto nao e uma chave", "a.tar.gz")
+	err := Verify([]byte("x"), somas, sig, "this is not a key", "a.tar.gz")
 
 	assert.Equal(t, CodigoChaveInvalida, codigoDe(t, err))
 }
 
 func TestVerifyRecusaArquivoAusenteDoChecksums(t *testing.T) {
 	pub, priv := parDeChaves(t)
-	somas := checksumsPara(map[string][]byte{"outro.tar.gz": []byte("x")})
+	somas := checksumsPara(map[string][]byte{"other.tar.gz": []byte("x")})
 	sig := minisign.Sign(priv, somas)
 
 	err := Verify([]byte("x"), somas, sig, textoDaChave(t, pub), "ngx_linux_arm64.tar.gz")
@@ -139,7 +141,7 @@ func TestVerifyRecusaArquivoAusenteDoChecksums(t *testing.T) {
 func TestVerifyNaoAceitaChaveDeOutroPar(t *testing.T) {
 	_, priv := parDeChaves(t)
 	pubEstranha, _ := parDeChaves(t)
-	artefato := []byte("binario")
+	artefato := []byte("binary")
 	somas := checksumsPara(map[string][]byte{"a.tar.gz": artefato})
 	sig := minisign.Sign(priv, somas)
 
@@ -149,8 +151,8 @@ func TestVerifyNaoAceitaChaveDeOutroPar(t *testing.T) {
 }
 
 func TestChecksumDeFormatoDoGoreleaser(t *testing.T) {
-	// Formato confirmado no fonte do goreleaser: fmt.Sprintf("%v  %v\n",
-	// sha, nome) — dois espacos entre hash e nome.
+	// Format confirmed in the goreleaser source: fmt.Sprintf("%v  %v\n",
+	// sha, name) -- two spaces between hash and name.
 	somas := []byte(
 		"0000000000000000000000000000000000000000000000000000000000000001  ngx_1_linux_amd64.tar.gz\n" +
 			"0000000000000000000000000000000000000000000000000000000000000002  ngx_1_windows_amd64.zip\n")
@@ -168,15 +170,15 @@ func TestChecksumDeToleraMarcadorBinario(t *testing.T) {
 }
 
 func TestChecksumDeNaoCasaPorPrefixo(t *testing.T) {
-	// "ngx_linux_amd64.tar.gz" nao pode satisfazer um pedido por
-	// "ngx_linux_amd64.tar.gz.sig" nem vice-versa.
+	// "ngx_linux_amd64.tar.gz" must not satisfy a request for
+	// "ngx_linux_amd64.tar.gz.sig", nor the other way around.
 	somas := []byte("0000000000000000000000000000000000000000000000000000000000000004  ngx_linux_amd64.tar.gz\n")
 	_, ok := checksumDe(somas, "ngx_linux_amd64.tar")
 	assert.False(t, ok)
 }
 
 func TestChecksumDeRecusaHashMalformado(t *testing.T) {
-	somas := []byte("naoehexadecimal  ngx.tar.gz\n")
+	somas := []byte("notahexadecimal  ngx.tar.gz\n")
 	_, ok := checksumDe(somas, "ngx.tar.gz")
 	assert.False(t, ok)
 }

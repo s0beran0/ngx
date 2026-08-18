@@ -5,23 +5,23 @@ import (
 	"fmt"
 )
 
-// alinhar casa a arvore semantica vinda do crossplane com os tokens do
-// arquivo, anexando offsets de byte a cada no.
+// alinhar matches the semantic tree coming from crossplane against the tokens
+// of the file, attaching byte offsets to every node.
 //
-// O casamento e por sequencia, mas "o crossplane preserva a ordem do
-// documento" e falso para um caso: um comentario encontrado no meio dos
-// argumentos de uma diretiva (crossplane/parse.go:286-290, commentsInArgs)
-// nao entra em Args e nao fica onde apareceu no texto -- ele e anexado como
-// no "#" irmao DEPOIS da diretiva inteira, e depois do bloco dela se houver
-// (parse.go:435-445). O aligner drena esses tokens de comentario do meio dos
-// argumentos e os casa, em ordem, com esses nos "#" que aparecem depois --
-// ver drenarComentarios e o parametro pendentes.
+// The matching is by sequence, but "crossplane preserves document order" is
+// false in one case: a comment found in the middle of a directive's arguments
+// (crossplane/parse.go:286-290, commentsInArgs) does not go into Args and
+// does not stay where it appeared in the text -- it is attached as a sibling
+// "#" node AFTER the whole directive, and after its block if there is one
+// (parse.go:435-445). The aligner drains those comment tokens from the middle
+// of the arguments and matches them, in order, against those "#" nodes that
+// come later -- see drenarComentarios and the pendentes parameter.
 //
-// Dentro de um corpo map-like esse reanexo NAO acontece: o statement e
-// anexado em parse.go:318 e o laco faz continue em parse.go:319, antes do
-// laco de commentsInArgs de parse.go:436, entao os comentarios do meio dos
-// argumentos sao descartados pelo crossplane. Ali a fila precisa ser
-// descartada tambem -- ver ehCorpoMapLike.
+// Inside a map-like body this reattachment does NOT happen: the statement is
+// appended at parse.go:318 and the loop does continue at parse.go:319, before
+// the commentsInArgs loop of parse.go:436, so the comments from the middle of
+// the arguments are discarded by crossplane. There the queue has to be
+// discarded as well -- see ehCorpoMapLike.
 func alinhar(f *File) error {
 	toks, err := Tokenize(f.Source)
 	if err != nil {
@@ -35,7 +35,7 @@ func alinhar(f *File) error {
 				Token:   aspa.Aspa,
 			}}
 		}
-		return fmt.Errorf("ao tokenizar %s: %w", f.Path, err)
+		return fmt.Errorf("while tokenizing %s: %w", f.Path, err)
 	}
 
 	a := &aligner{file: f.Path, toks: toks}
@@ -47,7 +47,7 @@ func alinhar(f *File) error {
 		return ParseErrors{{
 			File:    f.Path,
 			Line:    sobrou.Line,
-			Message: fmt.Sprintf("sobraram %d tokens apos alinhar a arvore", len(a.toks)-a.pos),
+			Message: fmt.Sprintf("%d tokens left over after aligning the tree", len(a.toks)-a.pos),
 			Classe:  RecusaTokensSobrando,
 			Token:   sobrou.Raw,
 		}}
@@ -61,9 +61,9 @@ type aligner struct {
 	pos  int
 }
 
-// mapBodies replica, por nome, a tabela de mesmo nome do crossplane
-// (analyze_map.go:20-46). Um bloco desses nao tem seu corpo analisado como
-// diretiva: parse.go:304-321 anexa o statement e segue.
+// corposMapLike replicates, name by name, crossplane's table of the same name
+// (analyze_map.go:20-46). The body of such a block is not analyzed as
+// directives: parse.go:304-321 appends the statement and moves on.
 var corposMapLike = map[string]bool{
 	"charset_map":   true,
 	"geo":           true,
@@ -78,19 +78,20 @@ var corposMapLike = map[string]bool{
 func ehCorpoMapLike(diretiva string) bool { return corposMapLike[diretiva] }
 
 func (a *aligner) nos(nodes []*Node, corpoMapLike bool) error {
-	// pendentes e a fila de tokens de comentario drenados do meio dos
-	// argumentos de algum no deste MESMO nivel (irmaos), na ordem em que
-	// apareceram no texto. E local a esta chamada de nos() -- e nao um campo
-	// do aligner -- porque cada nivel de bloco tem sua propria sequencia de
-	// nos "#" apos as diretivas; se fosse compartilhada entre niveis, um
-	// comentario dos argumentos de um no com bloco furaria a ordem quando o
-	// bloco tivesse, por sua vez, diretivas com comentario nos argumentos.
+	// pendentes is the queue of comment tokens drained from the middle of
+	// the arguments of some node at this SAME level (siblings), in the order
+	// they appeared in the text. It is local to this call of nos() -- and not
+	// a field of the aligner -- because each block level has its own sequence
+	// of "#" nodes after the directives; were it shared between levels, a
+	// comment from the arguments of a node with a block would break the order
+	// whenever that block in turn had directives with comments in their
+	// arguments.
 	//
-	// fila == nil marca um corpo map-like: ali o crossplane descarta os
-	// comentarios do meio dos argumentos em vez de reanexa-los, entao nao ha
-	// no "#" nenhum para reclamar a fila. Enfileirar mesmo assim faria o
-	// proximo comentario avulso do mesmo nivel casar com o token errado --
-	// e recusaria uma config valida.
+	// fila == nil marks a map-like body: there crossplane discards the
+	// comments from the middle of the arguments instead of reattaching them,
+	// so there is no "#" node at all to claim the queue. Queueing them anyway
+	// would make the next standalone comment at the same level match the
+	// wrong token -- and would refuse a valid config.
 	var pendentes []Token
 	fila := &pendentes
 	if corpoMapLike {
@@ -135,22 +136,22 @@ func (a *aligner) no(n *Node, pendentes *[]Token) error {
 	a.drenarComentarios(pendentes, &comentariosDaCabeca)
 
 	if n.Directive == "if" {
-		// prepareIfArgs (crossplane/util.go:71-86) remove de Args os tokens
-		// "(" e ")" quando eles vem isolados (com espaco em volta), entao
-		// len(n.Args) nao conta os tokens-palavra reais entre o nome e o
-		// terminador -- ver defeito 2 da Task 9. Consome por posicao do
-		// terminador, nao por contagem de Args.
+		// prepareIfArgs (crossplane/util.go:71-86) removes the "(" and ")"
+		// tokens from Args when they come isolated (with whitespace around
+		// them), so len(n.Args) does not count the real word tokens between
+		// the name and the terminator -- see defect 2 of Task 9. Consume by
+		// the position of the terminator, not by the count of Args.
 		for {
 			proximo, err := a.espiar()
 			if err != nil {
 				return err
 			}
-			// TokenBlockEnd tambem encerra a coleta: o laco de argumentos do
-			// crossplane para em "}" (parse.go:285), entao "x { if (a) }" e
-			// um "if" sem terminador, nao um "if" com o "}" de argumento.
-			// Parar aqui e o que faz a recusa sair classificada como
-			// RecusaTerminadorAusente -- divergencia conhecida -- em vez de
-			// token inesperado, que e a classe de bug do aligner.
+			// A TokenBlockEnd also ends the collection: crossplane's
+			// argument loop stops at "}" (parse.go:285), so "x { if (a) }"
+			// is an "if" with no terminator, not an "if" with "}" as an
+			// argument. Stopping here is what makes the refusal come out
+			// classified as RecusaTerminadorAusente -- a known divergence --
+			// instead of an unexpected token, which is the aligner's bug class.
 			if proximo.Kind == TokenSemicolon || proximo.Kind == TokenBlockStart ||
 				proximo.Kind == TokenBlockEnd {
 				break
@@ -175,8 +176,9 @@ func (a *aligner) no(n *Node, pendentes *[]Token) error {
 	n.HeadSpan = Span{nome.Start, fimDaCabeca}
 	n.HeadComments = comentariosDentro(comentariosDaCabeca, n.HeadSpan)
 
-	// Olhar o proximo token e mais confiavel que inspecionar n.Block: um
-	// bloco vazio e indistinguivel de uma diretiva simples pelo campo Block.
+	// Looking at the next token is more reliable than inspecting n.Block: an
+	// empty block is indistinguishable from a plain directive by the Block
+	// field alone.
 	proximo, err := a.espiar()
 	if err != nil {
 		return err
@@ -208,17 +210,17 @@ func (a *aligner) no(n *Node, pendentes *[]Token) error {
 		return ParseErrors{{
 			File:    a.file,
 			Line:    proximo.Line,
-			Message: fmt.Sprintf("esperava ';' ou '{' apos %q, encontrei %q", n.Directive, proximo.Raw),
+			Message: fmt.Sprintf("expected ';' or '{' after %q, found %q", n.Directive, proximo.Raw),
 			Classe:  RecusaTerminadorAusente,
 			Token:   proximo.Raw,
 		}}
 	}
 }
 
-// comentariosDentro filtra os comentarios drenados, ficando so com os que
-// caem dentro da cabeca. O ultimo drenar de uma diretiva pode pegar
-// comentarios que estao DEPOIS do ultimo argumento ("a b # c\n;"): esses
-// ficam fora de HeadSpan, e registra-los seria mentir sobre o intervalo.
+// comentariosDentro filters the drained comments, keeping only the ones that
+// fall inside the head. The last drain of a directive may pick up comments
+// that sit AFTER the last argument ("a b # c\n;"): those fall outside
+// HeadSpan, and recording them would be lying about the range.
 func comentariosDentro(toks []Token, head Span) []Span {
 	var dentro []Span
 	for _, t := range toks {
@@ -229,18 +231,18 @@ func comentariosDentro(toks []Token, head Span) []Span {
 	return dentro
 }
 
-// drenarComentarios consome, da posicao atual, quantos TokenComment
-// estiverem em sequencia, guardando-os em pendentes na ordem em que
-// apareceram. Esses tokens nao entram em Args (crossplane/parse.go:286-290)
-// e reaparecem como nos "#" irmaos depois que a diretiva atual (e seu
-// bloco, se houver) termina -- e ali que no() os consome de volta da fila,
-// em vez de tentar ler um TokenComment novo da posicao atual do stream, que
-// nesse ponto ja avancou para alem deles.
+// drenarComentarios consumes, from the current position, as many TokenComment
+// as sit in a row, keeping them in pendentes in the order they appeared.
+// Those tokens do not go into Args (crossplane/parse.go:286-290) and reappear
+// as sibling "#" nodes once the current directive (and its block, if any)
+// ends -- that is where no() takes them back off the queue, instead of trying
+// to read a fresh TokenComment from the current stream position, which by
+// then has already moved past them.
 //
-// pendentes == nil e o corpo map-like: o crossplane descarta esses
-// comentarios (parse.go:319 faz continue antes de parse.go:436), entao aqui
-// eles tambem sao descartados. Descartados da fila, nao do arquivo: eles
-// continuam registrados em coletados, que vira Node.HeadComments.
+// pendentes == nil is the map-like body: crossplane discards those comments
+// (parse.go:319 does continue before parse.go:436), so here they are
+// discarded too. Discarded from the queue, not from the file: they stay
+// recorded in coletados, which becomes Node.HeadComments.
 func (a *aligner) drenarComentarios(pendentes *[]Token, coletados *[]Token) {
 	for a.pos < len(a.toks) && a.toks[a.pos].Kind == TokenComment {
 		tok := a.toks[a.pos]
@@ -256,7 +258,7 @@ func (a *aligner) espiar() (Token, error) {
 	if a.pos >= len(a.toks) {
 		return Token{}, ParseErrors{{
 			File:    a.file,
-			Message: "fim inesperado da configuracao",
+			Message: "unexpected end of configuration",
 			Classe:  RecusaFimInesperado,
 		}}
 	}
@@ -275,13 +277,14 @@ func (a *aligner) consumir(kind TokenKind) (Token, error) {
 	return tok, nil
 }
 
-// consumirNomeDeDiretiva le o token que abre um statement. E separado de
-// consumir so pela classe da recusa: o crossplane aceita QUALQUER valor de
-// token como nome de diretiva (parse.go:256-261 monta o Directive com
-// t.Value sem checar que e uma palavra; so "}" em parse.go:237 e comentario
-// em parse.go:264 sao tratados a parte), entao "{}" vira para ele uma
-// diretiva chamada "{". Nos recusamos, como o nginx, e a classe existe para
-// que o fuzz reconheca essa divergencia pela forma exata do token.
+// consumirNomeDeDiretiva reads the token that opens a statement. It is kept
+// apart from consumir only for the class of the refusal: crossplane accepts
+// ANY token value as a directive name (parse.go:256-261 builds the Directive
+// out of t.Value without checking that it is a word; only "}" at
+// parse.go:237 and comments at parse.go:264 are handled separately), so "{}"
+// becomes for it a directive named "{". We refuse it, as nginx does, and the
+// class exists so that the fuzz recognizes this divergence by the exact shape
+// of the token.
 func (a *aligner) consumirNomeDeDiretiva() (Token, error) {
 	tok, err := a.espiar()
 	if err != nil {
@@ -298,7 +301,7 @@ func (a *aligner) tokenInesperado(tok Token, classe ClasseRecusa) error {
 	return ParseErrors{{
 		File:    a.file,
 		Line:    tok.Line,
-		Message: fmt.Sprintf("coluna %d: token inesperado %q", tok.Column, tok.Raw),
+		Message: fmt.Sprintf("column %d: unexpected token %q", tok.Column, tok.Raw),
 		Classe:  classe,
 		Token:   tok.Raw,
 	}}

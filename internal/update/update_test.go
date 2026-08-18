@@ -12,8 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cenario monta uma release completa e servida por httptest: artefato,
-// checksums.txt e checksums.txt.minisig assinado com um par gerado na hora.
+// cenario assembles a complete release served by httptest: artifact,
+// checksums.txt and checksums.txt.minisig signed with a pair generated on the
+// spot.
 type cenario struct {
 	srv       *servidorFalso
 	chave     string
@@ -41,9 +42,10 @@ func novoCenario(t *testing.T, versao, conteudoBinario string, opcoes ...func(*c
 	somas := checksumsPara(map[string][]byte{c.nomeAsset: c.artefato})
 	sig := minisign.Sign(priv, somas)
 
-	// O checksums.txt cobre c.artefato; o servidor entrega c.servido quando o
-	// cenario pede adulteracao. Sao dois campos justamente porque calcular o
-	// checksum sobre os bytes adulterados provaria o contrario do pretendido.
+	// The checksums.txt covers c.artefato; the server delivers c.servido when
+	// the scenario asks for tampering. They are two fields precisely because
+	// computing the checksum over the tampered bytes would prove the opposite
+	// of what is intended.
 	servido := c.artefato
 	if c.servido != nil {
 		servido = c.servido
@@ -63,14 +65,14 @@ func novoCenario(t *testing.T, versao, conteudoBinario string, opcoes ...func(*c
 	return c
 }
 
-// corrompeArtefato entrega bytes diferentes daqueles cobertos pelo
-// checksums.txt assinado — o caso de download adulterado ou corrompido.
+// corrompeArtefato delivers bytes different from the ones covered by the
+// signed checksums.txt -- the tampered or corrupted download case.
 func corrompeArtefato(t *testing.T) func(*cenario) {
 	t.Helper()
 	return func(c *cenario) {
-		c.servido = tarGzCom(t, map[string][]byte{"ngx": []byte("BINARIO ADULTERADO")})
+		c.servido = tarGzCom(t, map[string][]byte{"ngx": []byte("TAMPERED BINARY")})
 		require.NotEqual(t, c.artefato, c.servido,
-			"o artefato servido tem que diferir do que o checksums.txt cobre")
+			"the served artifact has to differ from what the checksums.txt covers")
 	}
 }
 
@@ -101,12 +103,12 @@ func TestExecutarAtualizaNoCaminhoFeliz(t *testing.T) {
 }
 
 func TestExecutarComVerificacaoFalhandoPreservaOBinarioAtual(t *testing.T) {
-	// O teste que mais importa deste pacote: um artefato que nao bate com o
-	// checksums.txt assinado nao pode chegar perto do binario em uso. Depois
-	// da falha, o ngx atual precisa estar intacto byte a byte, com a mesma
-	// permissao, e sem arquivo temporario largado no diretorio.
+	// The test that matters most in this package: an artifact that does not
+	// match the signed checksums.txt must not come near the binary in use.
+	// After the failure, the current ngx has to be intact byte for byte, with
+	// the same permission, and with no temporary file left in the directory.
 	c := novoCenario(t, "0.3.0", "ngx v0.3.0", corrompeArtefato(t))
-	caminho := binarioDeTeste(t, "ngx v0.2.0 EM USO", 0o755)
+	caminho := binarioDeTeste(t, "ngx v0.2.0 IN USE", 0o755)
 	antes, err := os.Stat(caminho)
 	require.NoError(t, err)
 
@@ -114,7 +116,7 @@ func TestExecutarComVerificacaoFalhandoPreservaOBinarioAtual(t *testing.T) {
 
 	require.Nil(t, res)
 	assert.Equal(t, CodigoChecksumDivergente, codigoDe(t, err))
-	assert.Equal(t, "ngx v0.2.0 EM USO", conteudo(t, caminho))
+	assert.Equal(t, "ngx v0.2.0 IN USE", conteudo(t, caminho))
 
 	depois, err := os.Stat(caminho)
 	require.NoError(t, err)
@@ -123,7 +125,7 @@ func TestExecutarComVerificacaoFalhandoPreservaOBinarioAtual(t *testing.T) {
 
 	entradas, err := os.ReadDir(filepath.Dir(caminho))
 	require.NoError(t, err)
-	assert.Len(t, entradas, 1, "a falha de verificacao deixou lixo no diretorio")
+	assert.Len(t, entradas, 1, "the verification failure left junk in the directory")
 }
 
 func TestExecutarComAssinaturaDeOutraChavePreservaOBinarioAtual(t *testing.T) {
@@ -141,21 +143,21 @@ func TestExecutarComAssinaturaDeOutraChavePreservaOBinarioAtual(t *testing.T) {
 }
 
 func TestExecutarSemChavePublicaRecusaAntesDeBaixarQualquerCoisa(t *testing.T) {
-	// Binario construido sem -ldflags nao pode se auto-atualizar, e a recusa
-	// vem antes de qualquer requisicao: nao ha porque baixar o que nao se
-	// pode verificar.
+	// A binary built without -ldflags cannot update itself, and the refusal
+	// comes before any request: there is no reason to download what cannot be
+	// verified.
 	c := novoCenario(t, "0.3.0", "ngx v0.3.0")
 	caminho := binarioDeTeste(t, "ngx v0.2.0", 0o755)
 
 	opts := c.opcoes(caminho, "v0.2.0")
 	opts.ChavePublicaOverride = ""
-	// A chave do pacote tambem esta vazia por padrao (o par ainda nao existe).
-	require.Empty(t, ChavePublica, "ChavePublica deve nascer vazia ate a chave real existir")
+	// The package key is empty by default as well (the pair does not exist yet).
+	require.Empty(t, ChavePublica, "ChavePublica must be born empty until the real key exists")
 
 	_, err := Executar(context.Background(), opts)
 
 	assert.Equal(t, CodigoSemChavePublica, codigoDe(t, err))
-	assert.Empty(t, c.srv.visitados(), "nao deveria ter tocado a rede")
+	assert.Empty(t, c.srv.visitados(), "it should not have touched the network")
 	assert.Equal(t, "ngx v0.2.0", conteudo(t, caminho))
 }
 
@@ -190,8 +192,8 @@ func TestExecutarSomenteVerificarQuandoJaEstaAtualizado(t *testing.T) {
 }
 
 func TestExecutarNaoFazDowngradeSemPedido(t *testing.T) {
-	// Downgrade e possivel, nunca acidental: se a release do canal for mais
-	// antiga que a instalada, o update e no-op.
+	// A downgrade is possible, never accidental: if the channel's release is
+	// older than the installed one, the update is a no-op.
 	c := novoCenario(t, "0.2.0", "ngx v0.2.0")
 	caminho := binarioDeTeste(t, "ngx v0.9.0", 0o755)
 
@@ -219,7 +221,7 @@ func TestExecutarFazDowngradeQuandoAVersaoEhPedidaExplicitamente(t *testing.T) {
 }
 
 func TestExecutarComVersaoIgualAInstaladaNaoTrocaNada(t *testing.T) {
-	c := novoCenario(t, "0.3.0", "ngx v0.3.0 recompilado")
+	c := novoCenario(t, "0.3.0", "ngx v0.3.0 rebuilt")
 	caminho := binarioDeTeste(t, "ngx v0.3.0", 0o755)
 
 	opts := c.opcoes(caminho, "v0.3.0")
@@ -233,7 +235,7 @@ func TestExecutarComVersaoIgualAInstaladaNaoTrocaNada(t *testing.T) {
 }
 
 func TestExecutarNaoAtualizaQuandoJaEstaNaVersaoDoCanal(t *testing.T) {
-	c := novoCenario(t, "0.3.0", "ngx v0.3.0 outro build")
+	c := novoCenario(t, "0.3.0", "ngx v0.3.0 another build")
 	caminho := binarioDeTeste(t, "ngx v0.3.0", 0o755)
 
 	res, err := Executar(context.Background(), c.opcoes(caminho, "v0.3.0"))
@@ -244,12 +246,13 @@ func TestExecutarNaoAtualizaQuandoJaEstaNaVersaoDoCanal(t *testing.T) {
 }
 
 func TestExecutarComVersaoAtualIlegivelAindaAtualiza(t *testing.T) {
-	// Build local sem -ldflags tem versao que nao e semver. Travar o update
-	// justamente nesse caso seria travar quem mais precisa dele.
+	// A local build without -ldflags has a version that is not semver.
+	// Blocking the update in exactly that case would block whoever needs it
+	// most.
 	c := novoCenario(t, "0.3.0", "ngx v0.3.0")
 	caminho := binarioDeTeste(t, "ngx dev", 0o755)
 
-	res, err := Executar(context.Background(), c.opcoes(caminho, "dev-sem-versao"))
+	res, err := Executar(context.Background(), c.opcoes(caminho, "dev-no-version"))
 
 	require.NoError(t, err)
 	assert.True(t, res.Atualizado)
@@ -282,7 +285,7 @@ func TestExecutarRecusaCanalDesconhecido(t *testing.T) {
 	_, err := Executar(context.Background(), opts)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "canal desconhecido")
+	assert.Contains(t, err.Error(), "unknown channel")
 	assert.Equal(t, "ngx v0.2.0", conteudo(t, caminho))
 }
 
@@ -302,7 +305,7 @@ func TestExecutarSemArtefatoParaAPlataformaPreservaOBinario(t *testing.T) {
 func TestExecutarComDownloadInterrompidoPreservaOBinario(t *testing.T) {
 	c := novoCenario(t, "0.3.0", "ngx v0.3.0")
 	caminho := binarioDeTeste(t, "ngx v0.2.0", 0o755)
-	// O artefato deixa de ser servido no meio do caminho.
+	// The artifact stops being served midway.
 	c.srv.responde("/dl/"+c.nomeAsset, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	})
@@ -314,21 +317,21 @@ func TestExecutarComDownloadInterrompidoPreservaOBinario(t *testing.T) {
 }
 
 func TestExtrairBinarioDoTarGz(t *testing.T) {
-	arq := tarGzCom(t, map[string][]byte{"ngx": []byte("executavel"), "LICENSE": []byte("MIT")})
+	arq := tarGzCom(t, map[string][]byte{"ngx": []byte("executable"), "LICENSE": []byte("MIT")})
 
 	bin, err := ExtrairBinario("ngx_1_linux_amd64.tar.gz", arq, "linux")
 
 	require.NoError(t, err)
-	assert.Equal(t, "executavel", string(bin))
+	assert.Equal(t, "executable", string(bin))
 }
 
 func TestExtrairBinarioDoZipDoWindows(t *testing.T) {
-	arq := zipCom(t, map[string][]byte{"ngx.exe": []byte("executavel"), "LICENSE": []byte("MIT")})
+	arq := zipCom(t, map[string][]byte{"ngx.exe": []byte("executable"), "LICENSE": []byte("MIT")})
 
 	bin, err := ExtrairBinario("ngx_1_windows_amd64.zip", arq, "windows")
 
 	require.NoError(t, err)
-	assert.Equal(t, "executavel", string(bin))
+	assert.Equal(t, "executable", string(bin))
 }
 
 func TestExtrairBinarioSemOExecutavelDentro(t *testing.T) {
@@ -349,9 +352,9 @@ func TestMaisNovaSegueSemver(t *testing.T) {
 	assert.True(t, maisNova("v0.3.0", "v0.2.9"))
 	assert.False(t, maisNova("v0.2.0", "v0.3.0"))
 	assert.False(t, maisNova("v0.3.0", "v0.3.0"))
-	// Pre-lancamento e anterior ao lancamento de mesma versao.
+	// A prerelease comes before the release of the same version.
 	assert.False(t, maisNova("v0.3.0-rc.1", "v0.3.0"))
 	assert.True(t, maisNova("v0.3.0", "v0.3.0-rc.1"))
-	// Versao remota ilegivel nunca conta como mais nova.
-	assert.False(t, maisNova("lixo", "v0.1.0"))
+	// An unreadable remote version never counts as newer.
+	assert.False(t, maisNova("junk", "v0.1.0"))
 }

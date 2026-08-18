@@ -7,28 +7,28 @@ import (
 	"path/filepath"
 )
 
-// sufixoAntigo e o nome que o binario em uso recebe no Windows enquanto o
-// novo toma o lugar dele (DD5). Fica aqui, e nao no arquivo com build tag,
-// porque LimparResiduo roda em todos os sistemas.
+// sufixoAntigo is the name the binary in use receives on Windows while the
+// new one takes its place (DD5). It lives here, and not in the file with the
+// build tag, because LimparResiduo runs on every system.
 const sufixoAntigo = ".old"
 
-// permPadrao e a permissao aplicada quando o binario atual nao existe (caso
-// de instalacao nova num diretorio vazio). Executavel para todos, gravavel so
-// pelo dono.
+// permPadrao is the permission applied when the current binary does not exist
+// (the case of a fresh install into an empty directory). Executable by
+// everyone, writable only by the owner.
 const permPadrao os.FileMode = 0o755
 
-// Apply substitui o binario em caminho pelo conteudo de novo.
+// Apply replaces the binary at caminho with the contents of novo.
 //
-// A troca acontece depois da verificacao, nunca antes, e nunca escreve por
-// cima do arquivo em uso: em Unix o novo binario vai para um temporario no
-// mesmo diretorio e entra por rename; no Windows o atual e renomeado para
-// .old e o novo toma o lugar (DD5). Nos dois casos, uma falha no meio deixa
-// um ngx funcional em caminho.
+// The swap happens after verification, never before, and it never writes over
+// the file in use: on Unix the new binary goes to a temporary file in the
+// same directory and comes in through a rename; on Windows the current one is
+// renamed to .old and the new one takes its place (DD5). In both cases, a
+// failure midway leaves a working ngx at caminho.
 func Apply(caminho string, novo []byte) error {
 	if len(novo) == 0 {
 		return erro(CodigoArtefatoInvalido,
-			"o binario novo veio vazio; a substituicao foi abortada e o ngx atual "+
-				"continua no lugar")
+			"the new binary came out empty; the replacement was aborted and the "+
+				"current ngx stays in place")
 	}
 	perm := permPadrao
 	if info, err := os.Stat(caminho); err == nil {
@@ -37,12 +37,12 @@ func Apply(caminho string, novo []byte) error {
 	return aplicar(caminho, novo, perm)
 }
 
-// LimparResiduo remove o binario .old deixado por uma atualizacao anterior no
-// Windows, onde o executavel em uso nao pode ser apagado (DD5). Deve ser
-// chamada na inicializacao do ngx e falha em silencio de proposito: um
-// arquivo orfao nao e problema do usuario, e um erro aqui nao tem nada a ver
-// com o comando que ele pediu. Sem esta limpeza, cada atualizacao deixa um
-// binario orfao no diretorio para sempre.
+// LimparResiduo removes the .old binary left behind by a previous update on
+// Windows, where the executable in use cannot be deleted (DD5). It should be
+// called at ngx startup and fails silently on purpose: an orphan file is not
+// the user's problem, and an error here has nothing to do with the command
+// they asked for. Without this cleanup, every update leaves an orphan binary
+// in the directory forever.
 func LimparResiduo(caminho string) {
 	if caminho == "" {
 		return
@@ -50,10 +50,10 @@ func LimparResiduo(caminho string) {
 	_ = os.Remove(caminho + sufixoAntigo)
 }
 
-// opsArquivo abstrai as operacoes de arquivo da troca por renomeio. Existe
-// para que a sequencia do Windows — a parte cujo modo de falha e "usuario
-// sem ngx.exe" — seja testavel em qualquer sistema, inclusive com falhas
-// injetadas em cada passo.
+// opsArquivo abstracts the file operations of the rename-based swap. It
+// exists so that the Windows sequence -- the part whose failure mode is "user
+// left without ngx.exe" -- is testable on any system, including with failures
+// injected at each step.
 type opsArquivo struct {
 	escrever func(caminho string, dados []byte, perm os.FileMode) error
 	renomear func(de, para string) error
@@ -68,24 +68,25 @@ func opsReais() opsArquivo {
 	}
 }
 
-// trocaComRenomeio implementa a sequencia do Windows (DD5), onde o executavel
-// em uso pode ser renomeado mas nao deletado nem sobrescrito:
+// trocaComRenomeio implements the Windows sequence (DD5), where the
+// executable in use can be renamed but neither deleted nor overwritten:
 //
-//  1. escreve o novo como <caminho>.new;
-//  2. renomeia <caminho> para <caminho>.old;
-//  3. renomeia <caminho>.new para <caminho>;
-//  4. tenta remover o .old e IGNORA a falha — o arquivo ainda esta em uso
-//     pelo processo que esta rodando, e a remocao fica para a proxima
-//     execucao, via LimparResiduo.
+//  1. writes the new one as <caminho>.new;
+//  2. renames <caminho> to <caminho>.old;
+//  3. renames <caminho>.new to <caminho>;
+//  4. tries to remove the .old and IGNORES the failure -- the file is still
+//     in use by the running process, and its removal is left for the next
+//     run, via LimparResiduo.
 //
-// Se o passo 3 falhar depois de o 2 ter dado certo, o .old volta ao lugar.
-// Deixar o usuario sem binario e o pior desfecho possivel desta funcao —
-// pior que nao atualizar.
+// If step 3 fails after step 2 succeeded, the .old goes back into place.
+// Leaving the user without a binary is the worst possible outcome of this
+// function -- worse than not updating.
 func trocaComRenomeio(ops opsArquivo, caminho string, novo []byte, perm os.FileMode) error {
 	novoTmp := caminho + ".new"
 	antigo := caminho + sufixoAntigo
 
-	// Um .new remanescente de uma tentativa anterior atrapalharia o rename.
+	// A .new left over from a previous attempt would get in the way of the
+	// rename.
 	_ = ops.remover(novoTmp)
 
 	if err := ops.escrever(novoTmp, novo, perm); err != nil {
@@ -95,28 +96,29 @@ func trocaComRenomeio(ops opsArquivo, caminho string, novo []byte, perm os.FileM
 	if err := ops.renomear(caminho, antigo); err != nil {
 		_ = ops.remover(novoTmp)
 		return erroCausa(err, CodigoTrocaFalhou,
-			"nao foi possivel mover o binario atual %s para %s; nada foi trocado e "+
-				"o ngx atual continua funcionando", caminho, antigo)
+			"could not move the current binary %s to %s; nothing was swapped and "+
+				"the current ngx keeps working", caminho, antigo)
 	}
 
 	if err := ops.renomear(novoTmp, caminho); err != nil {
-		// Restaura antes de qualquer outra coisa: neste ponto o caminho esta
-		// vazio, e e o unico estado em que o usuario ficaria sem ngx.
+		// Restore before anything else: at this point caminho is empty,
+		// and this is the only state in which the user would be left
+		// without ngx.
 		if errRestauro := ops.renomear(antigo, caminho); errRestauro != nil {
 			_ = ops.remover(novoTmp)
 			return erroCausa(err, CodigoTrocaFalhou,
-				"a troca do binario falhou no meio e a restauracao tambem: o binario "+
-					"anterior esta em %s e precisa ser renomeado de volta para %s a mao",
+				"the binary swap failed midway and the restore failed too: the previous "+
+					"binary is at %s and needs to be renamed back to %s by hand",
 				antigo, caminho)
 		}
 		_ = ops.remover(novoTmp)
 		return erroCausa(err, CodigoTrocaFalhou,
-			"nao foi possivel colocar o binario novo em %s; o anterior foi restaurado "+
-				"e continua funcionando", caminho)
+			"could not put the new binary at %s; the previous one was restored "+
+				"and keeps working", caminho)
 	}
 
-	// Falha esperada enquanto o processo atual segue rodando a partir do
-	// arquivo renomeado. LimparResiduo cuida disso na proxima execucao.
+	// An expected failure while the current process keeps running from the
+	// renamed file. LimparResiduo takes care of it on the next run.
 	_ = ops.remover(antigo)
 	return nil
 }
@@ -131,8 +133,9 @@ func escreverArquivo(caminho string, dados []byte, perm os.FileMode) error {
 		_ = os.Remove(caminho)
 		return err
 	}
-	// fsync antes do rename: sem ele, um corte de energia entre os dois pode
-	// deixar no lugar do binario um arquivo de tamanho certo e conteudo nulo.
+	// fsync before the rename: without it, a power cut between the two can
+	// leave, in place of the binary, a file of the right size and null
+	// content.
 	if err := f.Sync(); err != nil {
 		f.Close()
 		_ = os.Remove(caminho)
@@ -142,23 +145,23 @@ func escreverArquivo(caminho string, dados []byte, perm os.FileMode) error {
 		_ = os.Remove(caminho)
 		return err
 	}
-	// O modo pedido pode ter sido reduzido pelo umask na criacao.
+	// The requested mode may have been reduced by the umask at creation.
 	return os.Chmod(caminho, perm)
 }
 
-// erroDeEscrita distingue falta de permissao de qualquer outra falha de IO.
-// O ngx nao tenta escalar privilegio sozinho: ele diz qual diretorio precisa
-// ser gravavel e para.
+// erroDeEscrita tells a missing permission apart from any other IO failure.
+// ngx does not try to escalate privilege on its own: it says which directory
+// needs to be writable and stops.
 func erroDeEscrita(causa error, caminho string) error {
 	dir := filepath.Dir(caminho)
 	if errors.Is(causa, fs.ErrPermission) {
 		return erroCausa(causa, CodigoPermissao,
-			"sem permissao para escrever em %s, que e onde o binario do ngx vive. "+
-				"A atualizacao precisa de privilegio de escrita nesse diretorio: "+
-				"repita o comando com privilegio ou instale o ngx num diretorio do "+
-				"seu usuario. Nada foi trocado", dir)
+			"no permission to write to %s, which is where the ngx binary lives. "+
+				"The update needs write privilege on that directory: "+
+				"retry the command with privilege or install ngx into a directory "+
+				"of your own user. Nothing was swapped", dir)
 	}
 	return erroCausa(causa, CodigoTrocaFalhou,
-		"nao foi possivel escrever o binario novo em %s; nada foi trocado e o ngx "+
-			"atual continua funcionando", dir)
+		"could not write the new binary to %s; nothing was swapped and the current "+
+			"ngx keeps working", dir)
 }

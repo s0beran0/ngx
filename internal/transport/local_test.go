@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHelperProcess nao e um teste: e o programa auxiliar que os testes de
-// Run executam. Reexecutar o proprio binario de teste evita depender de
-// utilitarios do sistema, que variam entre Linux, macOS e Windows, e nao
-// exige shell.
+// TestHelperProcess is not a test: it is the helper program the Run tests
+// execute. Re-executing the test binary itself avoids depending on system
+// utilities, which vary between Linux, macOS and Windows, and requires no
+// shell.
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("NGX_TRANSPORT_HELPER") != "1" {
 		return
@@ -32,8 +32,8 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(code)
 }
 
-// helperArgv monta o argv que reexecuta este binario de teste em modo
-// auxiliar, saindo com o codigo pedido.
+// helperArgv builds the argv that re-executes this test binary in helper mode,
+// exiting with the requested code.
 func helperArgv(t *testing.T, exitCode int, stdout, stderr string) []string {
 	t.Helper()
 	self, err := os.Executable()
@@ -68,7 +68,7 @@ func TestLocalOpenArquivoInexistente(t *testing.T) {
 
 	f, err := tr.Open(filepath.Join(t.TempDir(), "nao-existe.conf"))
 	require.Error(t, err)
-	assert.True(t, os.IsNotExist(err), "erro deveria ser de arquivo inexistente, veio %v", err)
+	assert.True(t, os.IsNotExist(err), "the error should be a missing-file one, got %v", err)
 	assert.Nil(t, f)
 }
 
@@ -95,13 +95,13 @@ func TestLocalGlobSemCorrespondencia(t *testing.T) {
 
 	matches, err := tr.Glob(filepath.Join(t.TempDir(), "*.conf"))
 	require.NoError(t, err)
-	// Lista vazia, nunca nil: uma lista nula viraria "null" no JSON.
+	// Empty list, never nil: a nil list would become "null" in the JSON.
 	assert.NotNil(t, matches)
 	assert.Empty(t, matches)
 }
 
 func TestLocalRunSaidaZero(t *testing.T) {
-	argv := helperArgv(t, 0, "tudo certo", "")
+	argv := helperArgv(t, 0, "all good", "")
 
 	tr := Local()
 	defer tr.Close()
@@ -109,13 +109,13 @@ func TestLocalRunSaidaZero(t *testing.T) {
 	stdout, stderr, exitCode, err := tr.Run(context.Background(), argv)
 	require.NoError(t, err)
 	assert.Equal(t, 0, exitCode)
-	assert.Equal(t, "tudo certo", string(stdout))
+	assert.Equal(t, "all good", string(stdout))
 	assert.Empty(t, string(stderr))
 }
 
-// TestLocalRunSaidaDiferenteDeZero e o teste que impede a inversao:
-// codigo de saida diferente de zero e resultado do comando, com err nil.
-// Se alguem transformar isso em erro, este teste falha.
+// TestLocalRunSaidaDiferenteDeZero is the test that prevents the inversion: a
+// non-zero exit code is the command's result, with a nil err. If somebody
+// turns that into an error, this test fails.
 func TestLocalRunSaidaDiferenteDeZero(t *testing.T) {
 	argv := helperArgv(t, 3, "", "nginx: configuration file test failed")
 
@@ -123,22 +123,22 @@ func TestLocalRunSaidaDiferenteDeZero(t *testing.T) {
 	defer tr.Close()
 
 	stdout, stderr, exitCode, err := tr.Run(context.Background(), argv)
-	require.NoError(t, err, "codigo de saida diferente de zero e resultado, nao erro de transporte")
+	require.NoError(t, err, "a non-zero exit code is a result, not a transport error")
 	assert.Equal(t, 3, exitCode)
 	assert.Empty(t, string(stdout))
 	assert.Equal(t, "nginx: configuration file test failed", string(stderr))
 }
 
-// TestLocalRunBinarioInexistente e a outra metade da distincao: aqui nao
-// houve comando nenhum, entao err precisa ser nao nulo. Se alguem
-// transformar erro de transporte em exitCode, este teste falha.
+// TestLocalRunBinarioInexistente is the other half of the distinction: here
+// there was no command at all, so err has to be non-nil. If somebody turns a
+// transport error into an exitCode, this test fails.
 func TestLocalRunBinarioInexistente(t *testing.T) {
 	tr := Local()
 	defer tr.Close()
 
 	argv := []string{filepath.Join(t.TempDir(), "binario-que-nao-existe"), "-t"}
 	_, _, _, err := tr.Run(context.Background(), argv)
-	require.Error(t, err, "binario inexistente e erro de transporte, nao veredito do comando")
+	require.Error(t, err, "a missing binary is a transport error, not the command's verdict")
 }
 
 func TestLocalRunArgvVazio(t *testing.T) {
@@ -149,9 +149,9 @@ func TestLocalRunArgvVazio(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestLocalRunContextoCancelado garante que cancelamento vira erro de
-// transporte, e nao um codigo de saida qualquer: o processo morto por
-// sinal tambem devolve ExitError.
+// TestLocalRunContextoCancelado makes sure cancellation becomes a transport
+// error, and not just any exit code: a process killed by a signal also returns
+// an ExitError.
 func TestLocalRunContextoCancelado(t *testing.T) {
 	argv := helperArgv(t, 0, "", "")
 
@@ -176,7 +176,7 @@ func TestLocalCloseIdempotente(t *testing.T) {
 	require.NoError(t, tr.Close())
 }
 
-// Guarda contra tempo infinito de suite caso o helper trave.
+// Guards against an infinite suite runtime if the helper hangs.
 func TestMain(m *testing.M) {
 	done := make(chan int, 1)
 	go func() { done <- m.Run() }()
@@ -184,7 +184,7 @@ func TestMain(m *testing.M) {
 	case code := <-done:
 		os.Exit(code)
 	case <-time.After(60 * time.Second):
-		fmt.Fprintln(os.Stderr, "transport: suite excedeu 60s")
+		fmt.Fprintln(os.Stderr, "transport: suite exceeded 60s")
 		os.Exit(1)
 	}
 }

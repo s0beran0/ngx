@@ -1,23 +1,23 @@
-// Package runtime opera o nginx do alvo: descobre qual binario existe e como
-// foi compilado, roda `nginx -t` de forma estruturada e le a configuracao
-// efetiva com `nginx -T`.
+// Package runtime operates the nginx of the target: it discovers which binary
+// exists and how it was compiled, runs `nginx -t` in a structured way and
+// reads the effective configuration with `nginx -T`.
 //
-// Nada aqui executa nada por conta propria. Toda invocacao passa por um
-// transport.Transport, entao o mesmo codigo — e o mesmo teste — vale para a
-// maquina local e para um host remoto por SSH. Os parsers deste pacote nao
-// sabem de onde os bytes vieram, e essa ignorancia e deliberada: e o que
-// garante que a leitura remota nao seja um segundo caminho de codigo, com um
-// segundo conjunto de defeitos.
+// Nothing here executes anything on its own. Every invocation goes through a
+// transport.Transport, so the same code -- and the same test -- holds for the
+// local machine and for a remote host over SSH. The parsers in this package
+// do not know where the bytes came from, and that ignorance is deliberate: it
+// is what guarantees that a remote read is not a second code path, with a
+// second set of defects.
 //
-// Duas invariantes atravessam o pacote:
+// Two invariants run through the package:
 //
-//   - Codigo de saida diferente de zero e resultado, nao erro. Um `nginx -t`
-//     que reprova a configuracao devolve um TestResult com OK false e err
-//     nulo. Erro e o binario nao existir, a conexao cair ou o comando exigir
-//     privilegio que nao foi concedido.
+//   - A non-zero exit code is a result, not an error. A `nginx -t` that
+//     rejects the configuration returns a TestResult with OK false and a nil
+//     err. An error is the binary not existing, the connection dropping or
+//     the command requiring privilege that was not granted.
 //
-//   - Campo indisponivel e omitido, nunca estimado. Quem consome trata a
-//     ausencia de um campo muito melhor que um numero errado.
+//   - An unavailable field is omitted, never estimated. Consumers handle a
+//     missing field far better than a wrong number.
 package runtime
 
 import (
@@ -33,60 +33,62 @@ import (
 	"github.com/s0beran0/ngx/internal/transport"
 )
 
-// Codigos de diagnostico do runtime. A faixa 0200-0299 e do transporte e do
-// SSH; o runtime usa 0220 em diante, dentro dela, porque tudo que ele reporta
-// nasce de um comando executado no alvo.
+// Runtime diagnostic codes. The 0200-0299 range belongs to the transport and
+// to SSH; the runtime uses 0220 onwards, inside that range, because
+// everything it reports is born from a command executed on the target.
 //
-// A severidade nunca entra no codigo: o Diagnostic ja tem o campo severity, e
-// repeti-la no prefixo criaria duas fontes de verdade.
+// Severity never goes into the code: the Diagnostic already has a severity
+// field, and repeating it in the prefix would create two sources of truth.
 const (
-	// CodigoNginxAusente: nao ha binario nginx no alvo, ou ele nao e
-	// executavel. Distinto de "o nginx rodou e reprovou".
+	// CodigoNginxAusente: there is no nginx binary on the target, or it is
+	// not executable. Distinct from "nginx ran and rejected".
 	CodigoNginxAusente = "NGX-0220"
 
-	// CodigoPrivilegioNecessario: o comando existe e rodou, mas o nginx
-	// nao conseguiu ler o que precisava por falta de permissao. Sem --sudo
-	// o ngx reporta e para — nao repete o comando com sudo (DR5).
+	// CodigoPrivilegioNecessario: the command exists and ran, but nginx
+	// could not read what it needed for lack of permission. Without --sudo
+	// ngx reports and stops -- it does not retry the command with sudo
+	// (DR5).
 	CodigoPrivilegioNecessario = "NGX-0221"
 
-	// CodigoSudoIndisponivel: --sudo foi pedido, mas o sudo do alvo exige
-	// senha, exige terminal ou nao existe. Como o ngx executa sem shell e
-	// sem TTY, nao ha para onde mandar a senha.
+	// CodigoSudoIndisponivel: --sudo was requested, but the target's sudo
+	// requires a password, requires a terminal or does not exist. Since ngx
+	// runs with no shell and no TTY, there is nowhere to send the password.
 	CodigoSudoIndisponivel = "NGX-0222"
 
-	// CodigoSaidaNaoReconhecida: o comando rodou, mas a saida nao tem o
-	// formato esperado. Inventar campos a partir de uma saida que nao se
-	// entendeu e pior que admitir que nao se entendeu.
+	// CodigoSaidaNaoReconhecida: the command ran, but the output does not
+	// have the expected format. Inventing fields out of output that was not
+	// understood is worse than admitting it was not understood.
 	CodigoSaidaNaoReconhecida = "NGX-0223"
 
-	// CodigoTesteConfig: diagnostico traduzido de uma linha de `nginx -t`
-	// ou `nginx -T`. Um unico codigo para todos os niveis: o nivel vira
-	// severity, nao vira codigo.
+	// CodigoTesteConfig: a diagnostic translated from a line of `nginx -t`
+	// or `nginx -T`. A single code for every level: the level becomes
+	// severity, it does not become a code.
 	CodigoTesteConfig = "NGX-0224"
 
-	// CodigoEstadoProcesso: algo sobre o estado do processo — a evidencia
-	// de que ele nao esta rodando, ou a razao pela qual nao deu para saber.
-	// Campo omitido sem este diagnostico junto seria degradar em silencio.
+	// CodigoEstadoProcesso: something about the state of the process -- the
+	// evidence that it is not running, or the reason why it could not be
+	// determined. An omitted field without this diagnostic alongside it
+	// would be degrading in silence.
 	CodigoEstadoProcesso = "NGX-0225"
 )
 
-// BinarioPadrao e o que o ngx executa quando ninguem diz outra coisa. Nome
-// simples, resolvido pelo PATH do alvo: um caminho absoluto chutado aqui
-// estaria errado na metade das distribuicoes.
+// BinarioPadrao is what ngx executes when nobody says otherwise. A plain
+// name, resolved by the target's PATH: an absolute path guessed here would be
+// wrong on half of the distributions.
 const BinarioPadrao = "nginx"
 
-// Runtime executa o nginx de um alvo atraves de um Transport.
+// Runtime executes the nginx of a target through a Transport.
 type Runtime struct {
 	tr      transport.Transport
 	binario string
 	sudo    bool
 }
 
-// Opcao configura um Runtime na construcao.
+// Opcao configures a Runtime at construction time.
 type Opcao func(*Runtime)
 
-// ComBinario troca o binario invocado. Util quando o nginx nao esta no PATH
-// do alvo ou quando ha mais de uma instalacao.
+// ComBinario swaps the invoked binary. Useful when nginx is not on the
+// target's PATH or when there is more than one installation.
 func ComBinario(caminho string) Opcao {
 	return func(r *Runtime) {
 		if caminho != "" {
@@ -95,13 +97,13 @@ func ComBinario(caminho string) Opcao {
 	}
 }
 
-// ComSudo liga a escalada explicita de privilegio (DR5). Sem ela, um comando
-// que precise de privilegio e reportado, nunca repetido com sudo.
+// ComSudo turns on the explicit privilege escalation (DR5). Without it, a
+// command that needs privilege is reported, never retried with sudo.
 func ComSudo(ativo bool) Opcao {
 	return func(r *Runtime) { r.sudo = ativo }
 }
 
-// New monta o runtime sobre um transporte.
+// New assembles the runtime on top of a transport.
 func New(tr transport.Transport, opcoes ...Opcao) *Runtime {
 	r := &Runtime{tr: tr, binario: BinarioPadrao}
 	for _, o := range opcoes {
@@ -110,15 +112,17 @@ func New(tr transport.Transport, opcoes ...Opcao) *Runtime {
 	return r
 }
 
-// Alvo identifica contra o que este runtime opera, para o meta do envelope.
+// Alvo identifies what this runtime operates against, for the envelope's
+// meta.
 func (r *Runtime) Alvo() string { return r.tr.Describe() }
 
-// argv monta a linha de comando. Sem shell, sem interpolacao: cada argumento
-// e um elemento da lista.
+// argv assembles the command line. No shell, no interpolation: each argument
+// is one element of the list.
 //
-// O sudo vai com -n (nao interativo) porque o ngx executa sem TTY. Um sudo
-// que resolvesse pedir senha ficaria pendurado ate o timeout do contexto, e o
-// operador veria uma lentidao inexplicavel em vez de uma recusa clara.
+// sudo goes with -n (non-interactive) because ngx runs with no TTY. A sudo
+// that decided to ask for a password would hang until the context timed out,
+// and the operator would see an unexplainable slowness instead of a clear
+// refusal.
 func (r *Runtime) argv(args ...string) []string {
 	var out []string
 	if r.sudo {
@@ -128,7 +132,7 @@ func (r *Runtime) argv(args ...string) []string {
 	return append(out, args...)
 }
 
-// execucao e o resultado bruto de uma invocacao do nginx que chegou ao fim.
+// execucao is the raw result of an nginx invocation that ran to completion.
 type execucao struct {
 	argv   []string
 	stdout string
@@ -136,9 +140,9 @@ type execucao struct {
 	exit   int
 }
 
-// saida devolve stderr concatenado com stdout. O nginx escreve diagnostico em
-// stderr, mas transportes que juntam os dois canais existem, e um parser que
-// so olha um deles falharia silenciosamente nesses casos.
+// saida returns stderr concatenated with stdout. nginx writes diagnostics to
+// stderr, but transports that merge both channels exist, and a parser that
+// only looked at one of them would fail silently in those cases.
 func (e *execucao) saida() string {
 	if e.stderr == "" {
 		return e.stdout
@@ -149,10 +153,10 @@ func (e *execucao) saida() string {
 	return e.stderr + "\n" + e.stdout
 }
 
-// executar roda o nginx com os argumentos dados e classifica o que impede o
-// resultado de existir: binario ausente, sudo indisponivel, privilegio
-// faltando e falha de transporte. Codigo de saida diferente de zero por
-// qualquer outra razao volta como execucao, com err nulo — e resultado.
+// executar runs nginx with the given arguments and classifies what prevents a
+// result from existing: missing binary, sudo unavailable, missing privilege
+// and transport failure. A non-zero exit code for any other reason comes back
+// as an execucao, with a nil err -- it is a result.
 func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, error) {
 	argv := r.argv(args...)
 	stdout, stderr, exit, err := r.tr.Run(ctx, argv)
@@ -169,7 +173,7 @@ func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, erro
 			return nil, erroNginxAusente(r, e, err)
 		}
 		return nil, output.Internal(err,
-			"falha ao executar %s em %s", strings.Join(argv, " "), r.tr.Describe())
+			"failed to execute %s on %s", strings.Join(argv, " "), r.tr.Describe())
 	}
 
 	if exit == 0 {
@@ -191,16 +195,16 @@ func (r *Runtime) executar(ctx context.Context, args ...string) (*execucao, erro
 	return e, nil
 }
 
-// binarioAusente reconhece a falha de transporte de "esse programa nao existe".
-// O transporte local devolve exec.ErrNotFound para um nome do PATH e um
-// fs.ErrNotExist para um caminho absoluto.
+// binarioAusente recognizes the transport failure meaning "that program does
+// not exist". The local transport returns exec.ErrNotFound for a PATH name
+// and an fs.ErrNotExist for an absolute path.
 func binarioAusente(err error) bool {
 	return errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist)
 }
 
-// naoEncontradoNaSaida reconhece o mesmo caso vindo de um shell remoto, onde
-// o binario inexistente nao e erro de transporte: o ssh executa, o shell do
-// alvo responde 127 e escreve a queixa em stderr.
+// naoEncontradoNaSaida recognizes the same case coming from a remote shell,
+// where a missing binary is not a transport error: ssh executes, the target's
+// shell answers 127 and writes the complaint to stderr.
 func naoEncontradoNaSaida(exit int, texto string) bool {
 	if exit != 127 {
 		return false
@@ -219,10 +223,10 @@ var padroesPrivilegio = []string{
 	"are you root",
 }
 
-// exigePrivilegio decide se a saida diz "faltou permissao". E deliberadamente
-// conservador: reconhecer de menos faz o usuario ver a mensagem crua do nginx,
-// que ainda e verdade; reconhecer demais transformaria um erro de sintaxe em
-// pedido de privilegio, que e mentira.
+// exigePrivilegio decides whether the output says "permission was missing".
+// It is deliberately conservative: recognizing too little makes the user see
+// the raw nginx message, which is still the truth; recognizing too much would
+// turn a syntax error into a privilege request, which is a lie.
 func exigePrivilegio(texto string) bool {
 	t := strings.ToLower(texto)
 	for _, p := range padroesPrivilegio {
@@ -252,10 +256,10 @@ func sudoIndisponivel(texto string) bool {
 	return false
 }
 
-// comandoPrivilegiado devolve a linha exata que o operador teria de autorizar.
-// A DR5 exige dizer qual e o comando: "precisa de privilegio" sem o comando
-// obriga quem le a adivinhar, e adivinhar em producao e como se escala
-// privilegio por engano.
+// comandoPrivilegiado returns the exact line the operator would have to
+// authorize. DR5 requires saying what the command is: "needs privilege"
+// without the command forces the reader to guess, and guessing in production
+// is how privilege gets escalated by mistake.
 func comandoPrivilegiado(argv []string) string {
 	if len(argv) > 0 && argv[0] == "sudo" {
 		return strings.Join(argv, " ")
@@ -267,13 +271,13 @@ func erroPrivilegio(r *Runtime, e *execucao) error {
 	var msg string
 	if r.sudo {
 		msg = fmt.Sprintf(
-			"o comando `%s` foi executado com --sudo em %s e ainda assim nao teve "+
-				"permissao para ler a configuracao. Saida do nginx: %s",
+			"the command `%s` ran with --sudo on %s and still did not have "+
+				"permission to read the configuration. nginx output: %s",
 			strings.Join(e.argv, " "), r.tr.Describe(), resumo(e.saida()))
 	} else {
 		msg = fmt.Sprintf(
-			"o comando `%s` exige privilegio em %s e o ngx nao escala sozinho: "+
-				"repita com --sudo, que executa `%s`. Saida do nginx: %s",
+			"the command `%s` requires privilege on %s and ngx does not escalate on "+
+				"its own: retry with --sudo, which runs `%s`. nginx output: %s",
 			strings.Join(e.argv, " "), r.tr.Describe(),
 			comandoPrivilegiado(e.argv), resumo(e.saida()))
 	}
@@ -294,10 +298,10 @@ func erroSudoIndisponivel(r *Runtime, e *execucao) error {
 			Severity: output.SeverityError,
 			Code:     CodigoSudoIndisponivel,
 			Message: fmt.Sprintf(
-				"--sudo foi pedido, mas o sudo de %s nao pode ser usado sem interacao: %s. "+
-					"O ngx executa sem shell e sem terminal, entao nao ha onde digitar senha; "+
-					"libere o comando no sudoers ou rode o ngx como um usuario que ja tenha "+
-					"acesso de leitura a configuracao",
+				"--sudo was requested, but the sudo on %s cannot be used without interaction: %s. "+
+					"ngx runs with no shell and no terminal, so there is nowhere to type a password; "+
+					"allow the command in sudoers or run ngx as a user that already has "+
+					"read access to the configuration",
 				r.tr.Describe(), resumo(e.saida())),
 		},
 	}
@@ -310,8 +314,8 @@ func erroNginxAusente(r *Runtime, e *execucao, causa error) error {
 			Severity: output.SeverityError,
 			Code:     CodigoNginxAusente,
 			Message: fmt.Sprintf(
-				"nao ha nginx executavel em %s: `%s` nao pode ser executado. "+
-					"Se o binario existe com outro nome ou fora do PATH, informe o caminho",
+				"there is no executable nginx on %s: `%s` cannot be executed. "+
+					"If the binary exists under another name or outside the PATH, give the path",
 				r.tr.Describe(), strings.Join(e.argv, " ")),
 		},
 		Err: causa,
@@ -326,7 +330,7 @@ func erroSaidaNaoReconhecida(r *Runtime, e *execucao, oQue string) error {
 			Severity: output.SeverityError,
 			Code:     CodigoSaidaNaoReconhecida,
 			Message: fmt.Sprintf(
-				"a saida de `%s` em %s nao tem o formato esperado (%s): %s",
+				"the output of `%s` on %s does not have the expected format (%s): %s",
 				strings.Join(e.argv, " "), r.tr.Describe(), oQue, resumo(e.saida())),
 		},
 	}
@@ -334,12 +338,12 @@ func erroSaidaNaoReconhecida(r *Runtime, e *execucao, oQue string) error {
 
 var espacos = regexp.MustCompile(`\s+`)
 
-// resumo condensa uma saida multilinha numa linha curta, para caber numa
-// mensagem de diagnostico sem destruir a legibilidade do JSON.
+// resumo condenses a multi-line output into a short single line, so it fits
+// in a diagnostic message without destroying the readability of the JSON.
 func resumo(texto string) string {
 	t := strings.TrimSpace(espacos.ReplaceAllString(texto, " "))
 	if t == "" {
-		return "(sem saida)"
+		return "(no output)"
 	}
 	const limite = 300
 	if len(t) > limite {

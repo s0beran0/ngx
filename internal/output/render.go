@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-// Format seleciona o renderizador. FormatAuto decide por TTY.
+// Format selects the renderer. FormatAuto decides by TTY.
 type Format string
 
 const (
@@ -15,52 +15,53 @@ const (
 	FormatHuman Format = "human"
 )
 
-// HumanRenderable e implementado por dados que sabem se apresentar a um
-// humano. Dados que nao implementam caem para JSON indentado, que e mais
-// util que imprimir a struct crua do Go.
+// HumanRenderable is implemented by data that knows how to present itself to
+// a human. Data that does not implement it falls back to indented JSON, which
+// is more useful than printing the raw Go struct.
 type HumanRenderable interface {
 	RenderHuman(w io.Writer) error
 }
 
-// Renderer serializa o envelope. E a unica camada que escreve saida.
+// Renderer serializes the envelope. It is the only layer that writes output.
 //
-// A redacao cobre apenas o campo Data do envelope. Diagnostics e Meta nunca
-// passam pela redacao: Diagnostic.Message e texto livre e nao ha como saber
-// qual pedaco e sensivel, entao a mitigacao e de politica, nao de codigo — e
-// responsabilidade de quem produz um Diagnostic nunca embutir valor de
-// diretiva na mensagem.
+// Redaction covers only the envelope's Data field. Diagnostics and Meta never
+// go through redaction: Diagnostic.Message is free text and there is no way
+// to know which part of it is sensitive, so the mitigation is one of policy,
+// not of code -- it is the responsibility of whoever produces a Diagnostic to
+// never embed a directive value in the message.
 type Renderer struct {
 	Out    io.Writer
 	Format Format
 	IsTTY  bool
-	// Redact e o conjunto de regras ativas. A redacao alcanca somente o
-	// Redactable de Data no nivel mais alto: se Data implementa Redactable,
-	// Render troca Data pelo resultado de Redacted antes de serializar. A
-	// redacao NAO e recursiva — nao desce em campos, slices ou mapas dentro
-	// de Data por conta propria. Qualquer tipo usado em Data que possa
-	// carregar um valor sensivel (por exemplo, uma arvore de configuracao
-	// inteira) precisa implementar Redactable e, dentro do proprio metodo,
-	// propagar a redacao para os seus filhos. Um Data que nao implemente
-	// Redactable sai integro, sem erro e sem aviso, mesmo com Redact
-	// preenchido.
+	// Redact is the set of active rules. Redaction reaches only the
+	// top-level Redactable in Data: if Data implements Redactable, Render
+	// swaps Data for the result of Redacted before serializing. Redaction
+	// is NOT recursive -- it does not descend into fields, slices or maps
+	// inside Data on its own. Any type used in Data that may carry a
+	// sensitive value (for example, a whole configuration tree) needs to
+	// implement Redactable and, inside its own method, propagate redaction
+	// to its children. Data that does not implement Redactable comes out
+	// intact, with no error and no warning, even with Redact filled in.
 	Redact   RedactSet
 	NoRedact bool
 	Quiet    bool
 }
 
-// Render escreve o envelope no formato resolvido. Nao muta o Data do
-// envelope recebido: a versao redigida (quando houver) e usada apenas para
-// a escrita, e o chamador continua vendo o dado original depois da chamada.
+// Render writes the envelope in the resolved format. It does not mutate the
+// Data of the envelope it receives: the redacted version (when there is one)
+// is used only for writing, and the caller keeps seeing the original data
+// after the call.
 func (r *Renderer) Render(env *Envelope) error {
 	if r.NoRedact && !r.IsTTY {
-		return Usage("--no-redact so e aceito quando a saida e um terminal")
+		return Usage("--no-redact is only accepted when the output is a terminal")
 	}
 
-	// --quiet suprime o sucesso, nao o aviso. Um envelope ok=true pode
-	// carregar diagnostico de seguranca -- host key aceita sem verificacao,
-	// chave recusada com queda calada para senha -- e engoli-lo faria o
-	// escape virar silencioso, que e exatamente o que a DR1 proibe. Quem
-	// pede --quiet quer menos ruido, nao menos alerta.
+	// --quiet suppresses success, not warnings. An ok=true envelope may
+	// carry a security diagnostic -- a host key accepted without
+	// verification, a key rejected with a silent fallback to password --
+	// and swallowing it would turn the escape silent, which is exactly what
+	// DR1 forbids. Whoever asks for --quiet wants less noise, not fewer
+	// alerts.
 	if r.Quiet && env.OK && !temAvisoOuPior(env.Diagnostics) {
 		return nil
 	}
@@ -77,8 +78,8 @@ func (r *Renderer) Render(env *Envelope) error {
 		}
 	}
 
-	// out e uma copia local do envelope com o Data (possivelmente redigido)
-	// substituido; env.Data do chamador permanece intocado.
+	// out is a local copy of the envelope with the (possibly redacted) Data
+	// swapped in; the caller's env.Data stays untouched.
 	out := *env
 	out.Data = data
 
@@ -90,10 +91,10 @@ func (r *Renderer) Render(env *Envelope) error {
 	}
 }
 
-// resolveFormat decide o formato efetivo. FormatAuto (ou o zero value) decide
-// por IsTTY. Qualquer valor fora de auto/json/human e erro de uso: Format
-// costuma vir de output.format no arquivo de configuracao, que e string
-// livre, e um valor invalido nao pode virar JSON em silencio.
+// resolveFormat decides the effective format. FormatAuto (or the zero value)
+// decides by IsTTY. Any value outside auto/json/human is a usage error:
+// Format usually comes from output.format in the configuration file, which is
+// free-form string, and an invalid value must not silently become JSON.
 func (r *Renderer) resolveFormat() (Format, error) {
 	switch r.Format {
 	case FormatAuto, "":
@@ -104,7 +105,7 @@ func (r *Renderer) resolveFormat() (Format, error) {
 	case FormatJSON, FormatHuman:
 		return r.Format, nil
 	default:
-		return "", Usage("formato de saida invalido: %q", string(r.Format))
+		return "", Usage("invalid output format: %q", string(r.Format))
 	}
 }
 
@@ -114,7 +115,7 @@ func (r *Renderer) renderJSON(env *Envelope) error {
 		enc.SetIndent("", "  ")
 	}
 	if err := enc.Encode(env); err != nil {
-		return Internal(err, "falha ao serializar a saida")
+		return Internal(err, "failed to serialize the output")
 	}
 	return nil
 }
@@ -123,8 +124,9 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 	for _, d := range env.Diagnostics {
 		loc := ""
 		if d.File != "" {
-			// Line e Column sao opcionais por design (omitempty): sem uma
-			// linha valida, anexar ":0:0" seria uma coordenada falsa.
+			// Line and Column are optional by design (omitempty):
+			// without a valid line, appending ":0:0" would be a fake
+			// coordinate.
 			if d.Line > 0 {
 				switch {
 				case d.Line > 0 && d.Column > 0:
@@ -132,8 +134,9 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 				case d.Line > 0:
 					loc = fmt.Sprintf(" %s:%d", d.File, d.Line)
 				default:
-					// Sem posicao conhecida: so o arquivo. `arquivo:0:0`
-					// aparenta defeito e nao aponta lugar nenhum.
+					// No known position: the file alone.
+					// `file:0:0` looks like a defect and points
+					// nowhere.
 					loc = fmt.Sprintf(" %s", d.File)
 				}
 			} else {
@@ -141,13 +144,13 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 			}
 		}
 		if _, err := fmt.Fprintf(r.Out, "%s: %s%s\n", d.Severity, d.Message, loc); err != nil {
-			return Internal(err, "falha ao escrever diagnostico")
+			return Internal(err, "failed to write the diagnostic")
 		}
 	}
 
 	if hr, ok := env.Data.(HumanRenderable); ok {
 		if err := hr.RenderHuman(r.Out); err != nil {
-			return Internal(err, "falha ao renderizar saida humana")
+			return Internal(err, "failed to render the human output")
 		}
 		return nil
 	}
@@ -157,17 +160,17 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 	}
 	b, err := json.MarshalIndent(env.Data, "", "  ")
 	if err != nil {
-		return Internal(err, "falha ao serializar a saida")
+		return Internal(err, "failed to serialize the output")
 	}
 	if _, err := fmt.Fprintln(r.Out, string(b)); err != nil {
-		return Internal(err, "falha ao escrever saida")
+		return Internal(err, "failed to write the output")
 	}
 	return nil
 }
 
-// temAvisoOuPior diz se ha diagnostico que nao pode ser suprimido por
-// --quiet. Severidade info e informativa e cai no silencio; warning e error
-// sao sinal, e sinal suprimido e sinal inexistente.
+// temAvisoOuPior reports whether there is a diagnostic that --quiet must not
+// suppress. Info severity is informational and falls into silence; warning
+// and error are signal, and suppressed signal is nonexistent signal.
 func temAvisoOuPior(diags []Diagnostic) bool {
 	for _, d := range diags {
 		if d.Severity == SeverityWarning || d.Severity == SeverityError {

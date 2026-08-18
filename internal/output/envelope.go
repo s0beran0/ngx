@@ -1,12 +1,12 @@
-// Package output define o envelope de saida do ngx, os diagnosticos e a
-// traducao de erro para exit code. E a unica camada que serializa.
+// Package output defines the ngx output envelope, the diagnostics and the
+// translation from error to exit code. It is the only layer that serializes.
 package output
 
-// Version e a versao do ngx. Sobrescrita no build via -ldflags.
+// Version is the ngx version. Overridden at build time via -ldflags.
 var Version = "0.1.0-dev"
 
-// Severity classifica um diagnostico. Apenas SeverityError derruba o ok
-// do envelope.
+// Severity classifies a diagnostic. Only SeverityError brings down the
+// envelope's ok.
 type Severity string
 
 const (
@@ -15,8 +15,8 @@ const (
 	SeverityInfo    Severity = "info"
 )
 
-// Diagnostic e um achado localizado. Os campos selector e id existem para
-// que o agente aja sobre o achado sem reparsear a configuracao.
+// Diagnostic is a located finding. The selector and id fields exist so that
+// the agent can act on the finding without reparsing the configuration.
 type Diagnostic struct {
 	Severity Severity `json:"severity"`
 	Code     string   `json:"code"`
@@ -29,14 +29,15 @@ type Diagnostic struct {
 	Docs     string   `json:"docs,omitempty"`
 }
 
-// Meta carrega dados sobre a execucao. ConfigHash ancora os IDs devolvidos
-// nesta resposta: um ID so e valido contra o hash que veio junto com ele.
+// Meta carries data about the execution. ConfigHash anchors the IDs returned
+// in this response: an ID is only valid against the hash that came with it.
 //
-// Target e o Describe() do transporte — "local" ou "ssh://user@host:porta".
-// Quem consome a saida precisa saber contra o que a ferramenta operou: a
-// mesma resposta, vinda de outra maquina, e outro fato. E omitido, nunca
-// estimado, quando o transporte nem chegou a existir (falha antes de
-// conectar): ausencia e informacao, alvo errado e mentira.
+// Target is the transport's Describe() -- "local" or "ssh://user@host:port".
+// Whoever consumes the output needs to know what the tool operated against:
+// the same response, coming from another machine, is a different fact. It is
+// omitted, never estimated, when the transport never even came to exist
+// (failure before connecting): absence is information, the wrong target is a
+// lie.
 type Meta struct {
 	DurationMS   int64  `json:"duration_ms"`
 	NginxVersion string `json:"nginx_version,omitempty"`
@@ -44,21 +45,22 @@ type Meta struct {
 	Target       string `json:"target,omitempty"`
 }
 
-// Envelope e o formato unico de toda saida JSON do ngx.
+// Envelope is the single format of every JSON output from ngx.
 type Envelope struct {
 	OK         bool   `json:"ok"`
 	Command    string `json:"command"`
 	NgxVersion string `json:"ngx_version"`
 	Data       any    `json:"data"`
-	// Diagnostics nunca e nil: uma lista nula serializaria "diagnostics":null
-	// e quebraria o `.diagnostics.length` de quem consome a saida. Construa
-	// o envelope com New, que inicializa a lista vazia; nao monte um
-	// Envelope{} literal sem preencher este campo.
+	// Diagnostics is never nil: a null list would serialize as
+	// "diagnostics":null and would break the `.diagnostics.length` of
+	// whoever consumes the output. Build the envelope with New, which
+	// initializes the empty list; do not assemble a literal Envelope{}
+	// without filling this field.
 	Diagnostics []Diagnostic `json:"diagnostics"`
 	Meta        Meta         `json:"meta"`
 }
 
-// New cria um envelope de sucesso para o comando dado.
+// New creates a success envelope for the given command.
 func New(command string) *Envelope {
 	return &Envelope{
 		OK:          true,
@@ -68,7 +70,7 @@ func New(command string) *Envelope {
 	}
 }
 
-// AddDiagnostic anexa um diagnostico, derrubando ok se for um erro.
+// AddDiagnostic appends a diagnostic, bringing ok down if it is an error.
 func (e *Envelope) AddDiagnostic(d Diagnostic) {
 	e.Diagnostics = append(e.Diagnostics, d)
 	if d.Severity == SeverityError {

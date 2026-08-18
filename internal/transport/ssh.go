@@ -24,74 +24,78 @@ import (
 )
 
 const (
-	// CodigoConexaoSSH marca a falha de estabelecer a sessao SSH: DNS, rede,
-	// timeout, ou o servidor recusando todos os metodos de autenticacao.
+	// CodigoConexaoSSH marks the failure to establish the SSH session: DNS,
+	// network, timeout, or the server refusing every authentication method.
 	CodigoConexaoSSH = "NGX-0206"
 
-	// CodigoSessaoSFTP marca o caso em que a conexao SSH sobe mas o
-	// subsistema SFTP nao. Sao problemas diferentes com solucoes diferentes:
-	// o primeiro e rede ou credencial, o segundo e configuracao do sshd.
+	// CodigoSessaoSFTP marks the case where the SSH connection comes up but
+	// the SFTP subsystem does not. They are different problems with
+	// different solutions: the first is network or credentials, the second
+	// is sshd configuration.
 	CodigoSessaoSFTP = "NGX-0207"
 )
 
-// TimeoutSSHPadrao limita o handshake quando SSHOptions.Timeout nao diz nada.
-// Sem timeout, um host que aceita a conexao TCP e nunca responde ao handshake
-// deixa o ngx pendurado para sempre — e quem espera a saida nao tem como saber
-// se o comando esta lento ou morto.
+// TimeoutSSHPadrao caps the handshake when SSHOptions.Timeout says nothing.
+// Without a timeout, a host that accepts the TCP connection and never answers
+// the handshake leaves ngx hanging forever — and whoever is waiting for the
+// output has no way of knowing whether the command is slow or dead.
 const TimeoutSSHPadrao = 30 * time.Second
 
-// metacaracteresGlob sao os caracteres que fazem um padrao ser padrao. A barra
-// invertida entra porque path.Match a trata como escape: um padrao que a
-// contenha precisa passar pela expansao, nao pelo atalho do Lstat.
+// metacaracteresGlob are the characters that make a pattern a pattern. The
+// backslash is in there because path.Match treats it as an escape: a pattern
+// containing one has to go through expansion, not through the Lstat shortcut.
 const metacaracteresGlob = `*?[\`
 
-// leitorRemoto e o subconjunto de *sftp.Client que a expansao de padrao usa.
+// leitorRemoto is the subset of *sftp.Client that pattern expansion uses.
 //
-// Existe como interface por uma razao so: o glob proprio da DR6 e a parte
-// desta camada que precisa de teste de verdade, e um teste que precisa de um
-// servidor SFTP de pe nao exercita o caso que importa — o erro de I/O no meio
-// da listagem. Com a interface, esse erro e injetado direto.
+// It exists as an interface for one reason only: the DR6 home-grown glob is
+// the part of this layer that needs real testing, and a test that requires a
+// live SFTP server does not exercise the case that matters — an I/O error in
+// the middle of the listing. With the interface, that error is injected
+// directly.
 type leitorRemoto interface {
 	ReadDir(p string) ([]os.FileInfo, error)
 	Lstat(p string) (os.FileInfo, error)
 }
 
-// sshTransport opera um host remoto: arquivos por SFTP, comandos por sessao
-// exec. Nada e instalado no destino (DR3) — o ngx le o que ja esta la e roda
-// o binario que ja existe.
+// sshTransport operates a remote host: files over SFTP, commands over an exec
+// session. Nothing is installed on the target (DR3) — ngx reads what is
+// already there and runs the binary that already exists.
 type sshTransport struct {
 	cliente *ssh.Client
 	arquivo *sftp.Client
 
-	// destino e "user@host:porta", a forma que Describe publica no envelope.
+	// destino is "user@host:port", the form Describe publishes in the
+	// envelope.
 	destino string
 
 	umaVez     sync.Once
 	erroFechar error
 }
 
-// SSH conecta no host descrito por opts e devolve o transporte remoto.
+// SSH connects to the host described by opts and returns the remote transport.
 //
-// Descarta os diagnosticos da conexao. Use SSHComDiagnosticos em qualquer
-// caminho que monte envelope: o aviso de --insecure-host-key e o de
-// ssh-agent ausente explicam para quem le a saida contra o que o ngx operou,
-// e perde-los faz o escape da DR1 virar silencioso.
+// It discards the connection diagnostics. Use SSHComDiagnosticos in any path
+// that builds an envelope: the --insecure-host-key warning and the missing
+// ssh-agent one explain to whoever reads the output what ngx operated against,
+// and losing them makes the DR1 escape hatch silent.
 func SSH(opts SSHOptions) (Transport, error) {
 	tr, _, err := SSHComDiagnosticos(opts)
 	return tr, err
 }
 
-// SSHComDiagnosticos conecta e devolve tambem o que a montagem observou pelo
-// caminho: host key aceita sem verificacao, ssh-agent indisponivel, chave
-// ilegivel. Nenhum desses derruba a conexao, e nenhum pode sumir.
+// SSHComDiagnosticos connects and also returns what the assembly observed
+// along the way: host key accepted without verification, ssh-agent
+// unavailable, unreadable key. None of these brings the connection down, and
+// none of them may disappear.
 //
-// A lista de diagnosticos nunca e nil.
+// The list of diagnostics is never nil.
 func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	host := strings.TrimSpace(opts.Host)
 	if host == "" {
-		return nil, diags, output.Usage("host de destino nao informado")
+		return nil, diags, output.Usage("no target host provided")
 	}
 
 	porta := opts.Port
@@ -133,16 +137,17 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 	}
 	cliente, err := ssh.Dial("tcp", endereco, conf)
 
-	// Um servidor costuma oferecer varios tipos de chave de host e o cliente
-	// escolhe um. Se o known_hosts registrou o host por outro tipo, a
-	// verificacao falha sem que nada esteja errado -- e o proprio `ssh`
-	// resolve isso restringindo a negociacao aos tipos que ja conhece.
+	// A server usually offers several host key types and the client picks
+	// one. If known_hosts recorded the host under another type, the
+	// verification fails without anything being wrong -- and `ssh` itself
+	// solves this by restricting the negotiation to the types it already
+	// knows.
 	//
-	// Nao da para restringir antes de saber quais sao, e descobrir exige o
-	// erro. Entao a segunda tentativa acontece so aqui, so quando o
-	// desfecho foi exatamente esse, e so uma vez. Nao ha afrouxamento: a
-	// mesma verificacao roda de novo, apenas sobre um algoritmo que o
-	// known_hosts cobre.
+	// There is no way to restrict before knowing which ones those are, and
+	// finding out requires the error. So the second attempt happens only
+	// here, only when the outcome was exactly that, and only once. Nothing
+	// is loosened: the same verification runs again, just over an algorithm
+	// that known_hosts covers.
 	if err != nil {
 		if tipos := tiposRegistrados(err); len(tipos) > 0 {
 			conf.HostKeyAlgorithms = tipos
@@ -150,17 +155,19 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 		}
 	}
 
-	// A conexao com o ssh-agent so serve durante o handshake; depois dele e
-	// um socket aberto sem uso. O erro de fechar nao vira diagnostico porque
-	// nao muda nada para quem chamou: o handshake ja aconteceu ou ja falhou.
+	// The ssh-agent connection is only useful during the handshake; after
+	// it, it is an open socket with no use. The error from closing does not
+	// become a diagnostic because it changes nothing for the caller: the
+	// handshake has either already happened or already failed.
 	_ = auth.Close()
 
 	if err != nil {
-		// O erro de host key ja vem tipado do callback (DR1). Reembrulha-lo
-		// em CodigoConexaoSSH apagaria a distincao entre primeiro acesso e
-		// chave alterada — que e exatamente o que quem consome a saida tem
-		// de separar sem interpretar texto —, e transformaria uma recusa de
-		// verificacao numa falha generica de rede ou credencial.
+		// The host key error already comes typed from the callback (DR1).
+		// Rewrapping it in CodigoConexaoSSH would erase the distinction
+		// between first access and changed key — which is exactly what
+		// whoever consumes the output has to separate without interpreting
+		// text —, and would turn a verification refusal into a generic
+		// network or credential failure.
 		var tipado *output.Error
 		if errors.As(err, &tipado) {
 			return nil, diags, tipado
@@ -182,9 +189,9 @@ func SSHComDiagnosticos(opts SSHOptions) (Transport, []output.Diagnostic, error)
 }
 
 func (t *sshTransport) Open(caminho string) (io.ReadCloser, error) {
-	// Sem `return t.arquivo.Open(...)` direto: no caminho de erro isso
-	// devolveria uma interface nao-nula guardando um *sftp.File nulo, e quem
-	// checa `rc != nil` antes de `err` levaria panico.
+	// No direct `return t.arquivo.Open(...)`: on the error path that would
+	// return a non-nil interface holding a nil *sftp.File, and whoever
+	// checks `rc != nil` before `err` would panic.
 	f, err := t.arquivo.Open(caminho)
 	if err != nil {
 		return nil, err
@@ -198,7 +205,7 @@ func (t *sshTransport) Glob(padrao string) ([]string, error) {
 
 func (t *sshTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, int, error) {
 	if len(argv) == 0 {
-		return nil, nil, 0, errors.New("transport: argv vazio")
+		return nil, nil, 0, errors.New("transport: empty argv")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, err
@@ -206,8 +213,8 @@ func (t *sshTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, 
 
 	sessao, err := t.cliente.NewSession()
 	if err != nil {
-		// Abrir canal falha quando a conexao ja caiu: transporte, nao
-		// veredito do comando.
+		// Opening a channel fails when the connection is already down:
+		// transport, not the command's verdict.
 		return nil, nil, 0, err
 	}
 	defer func() { _ = sessao.Close() }()
@@ -225,12 +232,13 @@ func (t *sshTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, 
 	case err := <-fim:
 		return classificarSaidaSSH(stdout.Bytes(), stderr.Bytes(), err)
 	case <-ctx.Done():
-		// Melhor esforco: pede ao servidor para matar o processo e derruba o
-		// canal, que e o que solta o Run.
+		// Best effort: ask the server to kill the process and tear down
+		// the channel, which is what releases Run.
 		_ = sessao.Signal(ssh.SIGKILL)
 		_ = sessao.Close()
-		// Espera a goroutine antes de tocar nos buffers. Le-los enquanto a
-		// copia da sessao ainda escreve seria disputa de dados.
+		// Wait for the goroutine before touching the buffers. Reading
+		// them while the session copy is still writing would be a data
+		// race.
 		<-fim
 		return stdout.Bytes(), stderr.Bytes(), 0, ctx.Err()
 	}
@@ -258,17 +266,17 @@ func (t *sshTransport) Describe() string {
 	return "ssh://" + t.destino
 }
 
-// classificarSaidaSSH aplica a regra central do Transport ao desfecho de uma
-// sessao remota.
+// classificarSaidaSSH applies the central Transport rule to the outcome of a
+// remote session.
 //
-// *ssh.ExitError e o servidor reportando o codigo de saida do comando: ele
-// rodou ate o fim e reprovou, o que e resultado e nao erro. Um `nginx -t` que
-// reprova a configuracao vem por aqui.
+// *ssh.ExitError is the server reporting the command's exit code: it ran to
+// completion and rejected, which is a result and not an error. An `nginx -t`
+// that rejects the configuration comes through here.
 //
-// *ssh.ExitMissingError e o oposto: a sessao terminou sem que o servidor
-// dissesse como. E o que acontece quando a conexao cai no meio, e nesse caso
-// nao existe codigo de saida — devolver zero com err nil faria um comando
-// interrompido parecer sucesso. Erro de I/O tem a mesma leitura.
+// *ssh.ExitMissingError is the opposite: the session ended without the server
+// saying how. That is what happens when the connection drops halfway, and in
+// that case there is no exit code — returning zero with a nil err would make
+// an interrupted command look like success. An I/O error reads the same way.
 func classificarSaidaSSH(stdout, stderr []byte, err error) ([]byte, []byte, int, error) {
 	if err == nil {
 		return stdout, stderr, 0, nil
@@ -282,14 +290,14 @@ func classificarSaidaSSH(stdout, stderr []byte, err error) ([]byte, []byte, int,
 	return stdout, stderr, 0, err
 }
 
-// montarLinhaDeComando transforma argv na string que o canal exec do SSH
-// aceita.
+// montarLinhaDeComando turns argv into the string the SSH exec channel
+// accepts.
 //
-// O protocolo SSH nao tem forma de mandar argv: o pedido "exec" carrega uma
-// string, e o servidor a entrega ao shell de login do usuario. Como a string e
-// inevitavel, o que impede injecao e o escape por argumento — cada elemento de
-// argv vira um token que o shell nao pode reinterpretar. Concatenar argv com
-// espacos, sem aspas, seria o mesmo que rodar shell com entrada do usuario.
+// The SSH protocol has no way of sending an argv: the "exec" request carries a
+// string, and the server hands it to the user's login shell. Since the string
+// is unavoidable, what prevents injection is escaping per argument — each argv
+// element becomes a token the shell cannot reinterpret. Joining argv with
+// spaces, unquoted, would be the same as running a shell with user input.
 func montarLinhaDeComando(argv []string) string {
 	partes := make([]string, 0, len(argv))
 	for _, arg := range argv {
@@ -298,45 +306,46 @@ func montarLinhaDeComando(argv []string) string {
 	return strings.Join(partes, " ")
 }
 
-// escaparArgumento envolve o argumento em aspas simples, a unica citacao do
-// shell POSIX que nao interpreta absolutamente nada por dentro — nem $, nem
-// crase, nem barra invertida.
+// escaparArgumento wraps the argument in single quotes, the only POSIX shell
+// quoting that interprets absolutely nothing inside — no $, no backtick, no
+// backslash.
 //
-// A propria aspa simples e o unico caractere que nao pode aparecer dentro
-// dela: ela e fechada, escapada fora das aspas com barra invertida, e a
-// citacao e reaberta. Argumento vazio vira um par de aspas vazio e continua
-// sendo um argumento, em vez de desaparecer da linha.
+// The single quote itself is the only character that cannot appear inside it:
+// the quoting is closed, the quote is escaped outside with a backslash, and
+// the quoting is reopened. An empty argument becomes an empty pair of quotes
+// and remains an argument, instead of vanishing from the line.
 func escaparArgumento(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
-// globRemoto expande um padrao de caminho no host remoto sobre ReadDir e
-// path.Match, propagando erro de I/O como erro (DR6).
+// globRemoto expands a path pattern on the remote host over ReadDir and
+// path.Match, propagating I/O errors as errors (DR6).
 //
-// O sftp.Client tem um Glob, e ele nao serve: o proprio comentario do fonte
-// diz que ignora erro de sistema de arquivos e que o unico erro possivel e
-// ErrBadPattern. No caminho sem metacaractere ele e literal — se o Lstat
-// falhar, devolve (nil, nil). Num link instavel, `include conf.d/*.conf`
-// devolveria zero arquivos sem nenhum sinal, e o ngx apresentaria a
-// configuracao do servidor sem os arquivos que ela tem. Uma ferramenta lida
-// por agente de IA nao pode ser confiantemente incompleta: o consumidor nao
-// tem como desconfiar.
+// sftp.Client has a Glob, and it does not serve: the comment in its own source
+// says it ignores filesystem errors and that the only possible error is
+// ErrBadPattern. On the path without metacharacters it is literal — if Lstat
+// fails, it returns (nil, nil). Over an unstable link, `include conf.d/*.conf`
+// would return zero files with no signal at all, and ngx would present the
+// server configuration without the files it actually has. A tool read by an AI
+// agent cannot be confidently incomplete: the consumer has no way to suspect
+// it.
 //
-// A unica falha que nao vira erro e a ausencia: um diretorio que nao existe
-// significa que o padrao nao casa com nada, e isso e resposta legitima. Falta
-// de permissao vira erro, porque "nao consegui ler" nao e "nao existe".
+// The only failure that does not become an error is absence: a directory that
+// does not exist means the pattern matches nothing, and that is a legitimate
+// answer. Lack of permission becomes an error, because "I could not read" is
+// not "it does not exist".
 //
-// Caminho remoto e sempre POSIX: usa path, nunca filepath. Com filepath, o
-// ngx rodando em Windows expandiria conf.d\*.conf contra um servidor Linux.
+// A remote path is always POSIX: it uses path, never filepath. With filepath,
+// ngx running on Windows would expand conf.d\*.conf against a Linux server.
 //
-// A estrutura acompanha a do filepath.Glob da stdlib de proposito — mesma
-// ordem de resolucao, mesma protecao contra recursao infinita, mesma
-// semantica de casamento. O que muda e o tratamento do erro.
+// The structure deliberately follows the one in the stdlib filepath.Glob --
+// same resolution order, same protection against infinite recursion, same
+// matching semantics. What changes is the error handling.
 //
-// Sem correspondencia devolve lista vazia e err nil, nunca nil.
+// With no match it returns an empty list and a nil err, never nil.
 func globRemoto(remoto leitorRemoto, padrao string) ([]string, error) {
-	// Valida a sintaxe antes de tocar na rede: padrao malformado e erro de
-	// uso, nao motivo para uma viagem ate o servidor.
+	// Validate the syntax before touching the network: a malformed pattern
+	// is a usage error, not a reason for a round trip to the server.
 	if _, err := path.Match(padrao, ""); err != nil {
 		return nil, err
 	}
@@ -358,8 +367,8 @@ func globRemoto(remoto leitorRemoto, padrao string) ([]string, error) {
 		return globNoDiretorio(remoto, dir, arquivo, []string{})
 	}
 
-	// Protege contra recursao infinita: um padrao que se reduz a si mesmo
-	// (o que a barra invertida solta consegue produzir) nunca convergiria.
+	// Protects against infinite recursion: a pattern that reduces to itself
+	// (which a loose backslash can produce) would never converge.
 	if dir == padrao {
 		return nil, path.ErrBadPattern
 	}
@@ -379,17 +388,19 @@ func globRemoto(remoto leitorRemoto, padrao string) ([]string, error) {
 	return achados, nil
 }
 
-// globNoDiretorio acrescenta a achados as entradas de dir que casam o padrao.
+// globNoDiretorio appends to achados the entries of dir that match the
+// pattern.
 //
-// A ordenacao e deliberada: o ReadDir do SFTP entrega o que o servidor mandar,
-// na ordem que ele quiser, e a lista de arquivos de include alimenta o hash
-// canonico da configuracao. Ordem instavel viraria hash instavel.
+// The sorting is deliberate: the SFTP ReadDir hands back whatever the server
+// sends, in whatever order it likes, and the list of include files feeds the
+// canonical hash of the configuration. An unstable order would become an
+// unstable hash.
 func globNoDiretorio(remoto leitorRemoto, dir, padrao string, achados []string) ([]string, error) {
 	entradas, err := remoto.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// Diretorio inexistente e ausencia de correspondencia, nao
-			// falha: o padrao simplesmente nao casa com nada.
+			// A nonexistent directory is absence of matches, not a
+			// failure: the pattern simply matches nothing.
 			return achados, nil
 		}
 		return nil, err
@@ -417,9 +428,9 @@ func temMetacaractereGlob(p string) bool {
 	return strings.ContainsAny(p, metacaracteresGlob)
 }
 
-// limparDirGlob normaliza a metade de diretorio devolvida por path.Split, que
-// sempre vem com a barra final. Padrao relativo tem diretorio vazio e vira ".",
-// que e o que o ReadDir espera.
+// limparDirGlob normalizes the directory half returned by path.Split, which
+// always comes with a trailing slash. A relative pattern has an empty
+// directory and becomes ".", which is what ReadDir expects.
 func limparDirGlob(dir string) string {
 	switch dir {
 	case "":
@@ -431,15 +442,16 @@ func limparDirGlob(dir string) string {
 	}
 }
 
-// erroConexaoSSH descreve a falha de handshake nomeando os metodos de
-// autenticacao oferecidos.
+// erroConexaoSSH describes the handshake failure naming the authentication
+// methods that were offered.
 //
-// A lista de metodos e o que separa "a rede nao chega la" de "a rede chega e
-// o servidor nao aceitou nada do que eu tinha". Sem ela, uma recusa por falta
-// de chave no ssh-agent fica indistinguivel de host fora do ar, e quem le a
-// saida nao tem como escolher o que corrigir.
+// The list of methods is what separates "the network does not reach it" from
+// "the network reaches it and the server accepted nothing I had". Without it,
+// a refusal caused by a missing key in the ssh-agent is indistinguishable from
+// a host that is down, and whoever reads the output has no way of choosing
+// what to fix.
 func erroConexaoSSH(usuario, endereco string, metodos []string, causa error) error {
-	oferecidos := "nenhum"
+	oferecidos := "none"
 	if len(metodos) > 0 {
 		oferecidos = strings.Join(metodos, ", ")
 	}
@@ -450,17 +462,17 @@ func erroConexaoSSH(usuario, endereco string, metodos []string, causa error) err
 			Severity: output.SeverityError,
 			Code:     CodigoConexaoSSH,
 			Message: fmt.Sprintf(
-				"nao foi possivel conectar em %s@%s: %v. Metodos de autenticacao "+
-					"oferecidos: %s",
+				"could not connect to %s@%s: %v. Authentication methods "+
+					"offered: %s",
 				usuario, endereco, causa, oferecidos),
 		},
 		Err: causa,
 	}
 }
 
-// erroSessaoSFTP descreve o caso em que o SSH sobe e o SFTP nao. A distincao
-// importa porque a correcao mora no sshd do servidor, nao na credencial de
-// quem chamou.
+// erroSessaoSFTP describes the case where SSH comes up and SFTP does not. The
+// distinction matters because the fix lives in the server's sshd, not in the
+// caller's credentials.
 func erroSessaoSFTP(usuario, endereco string, causa error) error {
 	return &output.Error{
 		Code: output.ExitInternal,
@@ -468,19 +480,20 @@ func erroSessaoSFTP(usuario, endereco string, causa error) error {
 			Severity: output.SeverityError,
 			Code:     CodigoSessaoSFTP,
 			Message: fmt.Sprintf(
-				"a conexao com %s@%s foi estabelecida, mas o subsistema SFTP nao "+
-					"respondeu: %v. O ngx le a configuracao por SFTP; verifique se o "+
-					"sshd do servidor tem o subsistema habilitado",
+				"the connection to %s@%s was established, but the SFTP subsystem did "+
+					"not answer: %v. ngx reads the configuration over SFTP; check whether "+
+					"the server's sshd has the subsystem enabled",
 				usuario, endereco, causa),
 		},
 		Err: causa,
 	}
 }
 
-// tiposRegistrados devolve os tipos de chave que o known_hosts tem para o
-// host, e apenas quando a falha foi "apresentou um tipo que nao consta".
-// Devolve nada para chave genuinamente alterada ou host desconhecido: nesses
-// casos repetir o handshake seria contornar a verificacao, nao ajusta-la.
+// tiposRegistrados returns the key types known_hosts has for the host, and
+// only when the failure was "it presented a type that is not on record". It
+// returns nothing for a genuinely changed key or an unknown host: in those
+// cases repeating the handshake would be bypassing the verification, not
+// adjusting it.
 func tiposRegistrados(err error) []string {
 	var chave *knownhosts.KeyError
 	if !errors.As(err, &chave) || len(chave.Want) == 0 {

@@ -8,47 +8,48 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// DumpFile e um arquivo da configuracao efetiva, como o proprio nginx a
-// enumera. Path e o caminho no alvo.
+// DumpFile is one file of the effective configuration, as nginx itself
+// enumerates it. Path is the path on the target.
 type DumpFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
-// Dump e a configuracao efetiva devolvida por `nginx -T`: o conjunto de
-// arquivos que o nginx de fato leria, ja com os includes resolvidos por ele.
+// Dump is the effective configuration returned by `nginx -T`: the set of
+// files nginx would actually read, with the includes already resolved by it.
 //
-// Medido num nginx de producao real, isso da 132 arquivos — o `-T` responde
-// numa viagem so o que a leitura arquivo a arquivo responderia em 132.
+// Measured on a real production nginx, that comes to 132 files -- `-T`
+// answers in a single round trip what a file-by-file read would answer in
+// 132.
 type Dump struct {
-	// OK espelha o codigo de saida: `nginx -T` testa antes de despejar, e
-	// uma configuracao invalida sai diferente de zero e sem despejo algum.
+	// OK mirrors the exit code: `nginx -T` tests before dumping, and an
+	// invalid configuration exits non-zero and with no dump at all.
 	OK bool `json:"ok"`
 
-	// ConfigFile e o arquivo de topo, quando o nginx o nomeia.
+	// ConfigFile is the top-level file, when nginx names it.
 	ConfigFile string `json:"config_file,omitempty"`
 
-	// Files nunca e nil.
+	// Files is never nil.
 	Files []DumpFile `json:"files"`
 
-	// Diagnostics traz o que o nginx escreveu em stderr durante o teste que
-	// precede o despejo. Nunca e nil.
+	// Diagnostics carries what nginx wrote to stderr during the test that
+	// precedes the dump. Never nil.
 	Diagnostics []output.Diagnostic `json:"diagnostics"`
 }
 
-// reMarcadorArquivo casa o cabecalho que o nginx emite antes de cada arquivo:
+// reMarcadorArquivo matches the header nginx emits before each file:
 // "# configuration file /etc/nginx/nginx.conf:".
 //
-// O marcador so e reconhecido no inicio da linha e com o dois-pontos final,
-// porque uma linha de comentario dentro de uma configuracao pode conter o
-// mesmo texto e nao deve partir o arquivo em dois.
+// The marker is only recognized at the start of the line and with the
+// trailing colon, because a comment line inside a configuration may contain
+// the same text and must not split the file in two.
 var reMarcadorArquivo = regexp.MustCompile(`^# configuration file (.+):$`)
 
-// DumpConfig executa `nginx -T` no alvo e separa a saida em arquivos.
+// DumpConfig runs `nginx -T` on the target and splits the output into files.
 //
-// Este e o comando que, medido num host real, falha para usuario comum e so
-// funciona com sudo. Sem --sudo o ngx nao escala: executar devolve o erro de
-// privilegio dizendo qual e o comando (DR5).
+// This is the command that, measured on a real host, fails for an ordinary
+// user and only works with sudo. Without --sudo ngx does not escalate:
+// executar returns the privilege error saying what the command is (DR5).
 func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 	e, err := r.executar(ctx, "-T")
 	if err != nil {
@@ -57,9 +58,9 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 
 	d := &Dump{
 		OK: e.exit == 0,
-		// O despejo vai para stdout; os diagnosticos, para stderr. Aqui os
-		// canais sao separados de proposito: misturar poria linhas de
-		// diagnostico dentro do conteudo de um arquivo.
+		// The dump goes to stdout; the diagnostics, to stderr. Here the
+		// channels are kept apart on purpose: mixing them would put
+		// diagnostic lines inside the content of a file.
 		Files:       DividirDump(e.stdout),
 		Diagnostics: ParseDiagnosticos(e.stderr),
 		ConfigFile:  arquivoTestado(e.stderr),
@@ -70,13 +71,13 @@ func (r *Runtime) DumpConfig(ctx context.Context) (*Dump, error) {
 	return d, nil
 }
 
-// DividirDump separa o stdout de `nginx -T` nos arquivos que o compoem.
+// DividirDump splits the stdout of `nginx -T` into the files that compose it.
 //
-// Como ParseDiagnosticos, recebe so o texto: o mesmo teste vale para bytes
-// vindos de um pipe local ou de uma sessao SSH.
+// Like ParseDiagnosticos, it takes only the text: the same test holds for
+// bytes coming from a local pipe or from an SSH session.
 //
-// Conteudo que apareca antes do primeiro marcador e descartado — nao pertence
-// a arquivo nenhum, e atribui-lo ao primeiro seria inventar procedencia.
+// Content that appears before the first marker is discarded -- it belongs to
+// no file, and attributing it to the first one would be inventing provenance.
 func DividirDump(texto string) []DumpFile {
 	arquivos := []DumpFile{}
 	if strings.TrimSpace(texto) == "" {
@@ -94,9 +95,10 @@ func DividirDump(texto string) []DumpFile {
 		conteudo.Reset()
 	}
 
-	// Uma quebra final e artefato do proprio despejo, nao linha em branco do
-	// ultimo arquivo: sem tirar aqui, o conteudo do ultimo arquivo sairia com
-	// uma linha vazia a mais que os demais.
+	// A trailing newline is an artifact of the dump itself, not a blank
+	// line of the last file: without stripping it here, the content of the
+	// last file would come out with one extra empty line compared to the
+	// others.
 	for _, linha := range strings.Split(strings.TrimSuffix(texto, "\n"), "\n") {
 		sem := strings.TrimRight(linha, "\r")
 		if m := reMarcadorArquivo.FindStringSubmatch(sem); m != nil {

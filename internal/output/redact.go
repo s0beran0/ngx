@@ -6,50 +6,52 @@ import (
 	"strings"
 )
 
-// nomeDeDiretivaValido casa o alfabeto real de nomes de diretiva do nginx:
-// letras, digitos e underscore. Qualquer coisa fora disso (ponto-e-virgula
-// copiado do .conf, "*", ".", "/") indica uma regra digitada errado, e e
-// melhor falhar alto no parse do que deixar uma regra morta que nunca casa
-// nada silenciosamente.
+// nomeDeDiretivaValido matches the real alphabet of nginx directive names:
+// letters, digits and underscore. Anything outside that (a semicolon copied
+// from the .conf, "*", ".", "/") means the rule was typed wrong, and it is
+// better to fail loudly at parse time than to leave a dead rule that silently
+// never matches anything.
 var nomeDeDiretivaValido = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
-// RedactedValue substitui o valor de uma diretiva sensivel. A diretiva, o id
-// e a linha permanecem visiveis: sumir com o no inteiro faria o agente
-// concluir que a diretiva nao existe, o que e pior que esconder o valor.
+// RedactedValue replaces the value of a sensitive directive. The directive,
+// the id and the line stay visible: making the whole node disappear would
+// lead the agent to conclude the directive does not exist, which is worse
+// than hiding the value.
 const RedactedValue = "***"
 
-// Redactable e implementado por qualquer dado que saiba produzir uma copia
-// redigida de si mesmo. A redacao acontece na serializacao, nunca na arvore
-// em memoria: se a arvore fosse redigida no parse, fmt gravaria *** dentro
-// do .conf do usuario.
+// Redactable is implemented by any data that knows how to produce a redacted
+// copy of itself. Redaction happens at serialization time, never on the
+// in-memory tree: if the tree were redacted at parse time, fmt would write
+// *** inside the user's .conf.
 type Redactable interface {
 	Redacted(rs RedactSet) any
 }
 
-// RedactRule casa uma diretiva pelo nome, opcionalmente exigindo um prefixo
-// de argumentos.
+// RedactRule matches a directive by name, optionally requiring a prefix of
+// arguments.
 type RedactRule struct {
 	Directive string
 	ArgPrefix []string
 }
 
-// ParseRedactRule le uma entrada de output.redact. Aceita os tres formatos
-// que a spec usa: nome de diretiva, nome com prefixo de argumentos, e o
-// prefixo de contexto "**." — que e redundante, porque regras ja valem em
-// qualquer contexto, mas e aceito para nao quebrar configuracoes escritas a
-// partir da spec.
+// ParseRedactRule reads an output.redact entry. It accepts the three formats
+// the spec uses: directive name, name with an argument prefix, and the
+// context prefix "**." -- which is redundant, because rules already apply in
+// any context, but is accepted so configurations written from the spec do not
+// break.
 //
-// Cada campo pode vir envolto num unico par de aspas simples ou duplas (ex.:
-// proxy_set_header "X-Api-Key"); esse par e removido antes de validar. O
-// nome da diretiva (primeiro campo, ja sem aspas e sem o prefixo "**.") e
-// validado contra o alfabeto real de nomes de diretiva do nginx — qualquer
-// coisa fora de letras/digitos/underscore e erro, nao regra morta.
+// Each field may come wrapped in a single pair of single or double quotes
+// (e.g. proxy_set_header "X-Api-Key"); that pair is stripped before
+// validation. The directive name (first field, already unquoted and without
+// the "**." prefix) is validated against the real alphabet of nginx directive
+// names -- anything outside letters/digits/underscore is an error, not a dead
+// rule.
 func ParseRedactRule(s string) (RedactRule, error) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "**.")
 
 	brutos := strings.Fields(s)
 	if len(brutos) == 0 {
-		return RedactRule{}, fmt.Errorf("regra de redacao vazia")
+		return RedactRule{}, fmt.Errorf("empty redaction rule")
 	}
 
 	campos := make([]string, len(brutos))
@@ -58,7 +60,7 @@ func ParseRedactRule(s string) (RedactRule, error) {
 	}
 
 	if !nomeDeDiretivaValido.MatchString(campos[0]) {
-		return RedactRule{}, fmt.Errorf("nome de diretiva invalido: %q", campos[0])
+		return RedactRule{}, fmt.Errorf("invalid directive name: %q", campos[0])
 	}
 
 	r := RedactRule{Directive: campos[0]}
@@ -68,10 +70,10 @@ func ParseRedactRule(s string) (RedactRule, error) {
 	return r, nil
 }
 
-// semAspasCircundantes remove um unico par de aspas simples ou duplas que
-// envolva o campo inteiro. strings.Fields nao entende aspas, entao um campo
-// como "X-Api-Key" chegaria aqui com as aspas literais e nunca casaria um
-// argumento real.
+// semAspasCircundantes strips a single pair of single or double quotes
+// wrapping the whole field. strings.Fields does not understand quotes, so a
+// field like "X-Api-Key" would arrive here with the literal quotes and would
+// never match a real argument.
 func semAspasCircundantes(campo string) string {
 	if len(campo) < 2 {
 		return campo
@@ -83,15 +85,14 @@ func semAspasCircundantes(campo string) string {
 	return campo
 }
 
-// Matches informa se a diretiva dada deve ter seu valor redigido. O nome da
-// diretiva e comparado exatamente, porque diretivas nginx sao sempre
-// minusculas. Os argumentos sao comparados sem diferenciar caixa, porque
-// nomes de header HTTP sao case-insensitive e o nginx propaga a caixa como
-// foi escrita no .conf: uma regra "proxy_set_header Authorization" precisa
-// casar tambem "authorization" ou "AUTHORIZATION", senao o token vaza
-// inteiro. O custo e redigir demais se um prefixo de argumento for, por
-// acaso, um caminho de arquivo que difere so na caixa — lado seguro do
-// trade-off.
+// Matches reports whether the given directive should have its value redacted.
+// The directive name is compared exactly, because nginx directives are always
+// lowercase. The arguments are compared case-insensitively, because HTTP
+// header names are case-insensitive and nginx propagates the case exactly as
+// written in the .conf: a "proxy_set_header Authorization" rule also needs to
+// match "authorization" or "AUTHORIZATION", otherwise the whole token leaks.
+// The cost is over-redacting if an argument prefix happens to be a file path
+// that differs only in case -- the safe side of the trade-off.
 func (r RedactRule) Matches(directive string, args []string) bool {
 	if r.Directive != directive {
 		return false
@@ -107,33 +108,33 @@ func (r RedactRule) Matches(directive string, args []string) bool {
 	return true
 }
 
-// RedactSet e o conjunto de regras ativas.
+// RedactSet is the set of active rules.
 type RedactSet struct {
 	rules []RedactRule
 }
 
-// NewRedactSet compila as entradas de output.redact. O erro deve ser tratado
-// como fatal, nao como aviso: no caminho de erro a funcao devolve um
-// RedactSet{} zero-value cujo Matches e sempre false, ou seja, ZERO
-// redacao — nao redacao parcial das regras validas ate ali. Um consumidor
-// que apenas logue o erro e siga adiante fica rodando sem nenhuma protecao
-// contra vazamento de segredo.
+// NewRedactSet compiles the output.redact entries. The error must be treated
+// as fatal, not as a warning: on the error path the function returns a
+// zero-value RedactSet{} whose Matches is always false, that is, ZERO
+// redaction -- not partial redaction of the rules that were valid up to that
+// point. A consumer that merely logs the error and carries on ends up running
+// with no protection at all against secret leakage.
 func NewRedactSet(entradas []string) (RedactSet, error) {
 	var set RedactSet
 	for _, e := range entradas {
 		r, err := ParseRedactRule(e)
 		if err != nil {
-			return RedactSet{}, fmt.Errorf("regra de redacao %q: %w", e, err)
+			return RedactSet{}, fmt.Errorf("redaction rule %q: %w", e, err)
 		}
 		set.rules = append(set.rules, r)
 	}
 	return set, nil
 }
 
-// Empty informa se nenhuma regra esta ativa.
+// Empty reports whether no rule is active.
 func (s RedactSet) Empty() bool { return len(s.rules) == 0 }
 
-// Matches informa se alguma regra casa a diretiva dada.
+// Matches reports whether some rule matches the given directive.
 func (s RedactSet) Matches(directive string, args []string) bool {
 	for _, r := range s.rules {
 		if r.Matches(directive, args) {

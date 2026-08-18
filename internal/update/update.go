@@ -1,12 +1,12 @@
-// Package update implementa a auto-atualizacao do ngx: resolve a release do
-// canal pedido, baixa o artefato, verifica assinatura e checksum, e so entao
-// troca o binario em disco.
+// Package update implements the self-update of ngx: it resolves the release
+// of the requested channel, downloads the artifact, verifies signature and
+// checksum, and only then swaps the binary on disk.
 //
-// A ordem acima e a garantia central do pacote. Nada e escrito por cima do
-// binario em uso antes de a verificacao passar: o download vai para um
-// arquivo temporario no mesmo diretorio e a troca e um rename. Um download
-// interrompido, um artefato adulterado ou um binario construido sem chave
-// publica embutida terminam com o ngx atual intacto.
+// The order above is the central guarantee of the package. Nothing is written
+// over the binary in use before verification passes: the download goes to a
+// temporary file in the same directory and the swap is a rename. An
+// interrupted download, a tampered artifact or a binary built without an
+// embedded public key all end with the current ngx intact.
 package update
 
 import (
@@ -22,8 +22,8 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// Codigos de diagnostico do update. Cada modo de falha tem o seu: um "falhou"
-// generico manda quem le procurar no lugar errado.
+// Update diagnostic codes. Each failure mode has its own: a generic "it
+// failed" sends the reader looking in the wrong place.
 const (
 	CodigoSemChavePublica    = "NGX-0301"
 	CodigoChavePlaceholder   = "NGX-0302"
@@ -42,48 +42,49 @@ const (
 	CodigoArtefatoInvalido   = "NGX-0315"
 )
 
-// ChavePublica e a chave publica minisign embutida no binario (DD2/DD3).
+// ChavePublica is the minisign public key embedded in the binary (DD2/DD3).
 //
-// ATENCAO — PLACEHOLDER: A CHAVE PUBLICA REAL AINDA NAO EXISTE.
+// WARNING -- PLACEHOLDER: THE REAL PUBLIC KEY DOES NOT EXIST YET.
 //
-// Nenhum par de chaves foi gerado para o projeto ate aqui, entao esta
-// variavel nasce VAZIA de proposito. Vazia significa "este binario nao sabe
-// verificar nada", e Verify RECUSA atualizar nesse estado — jamais segue sem
-// verificar. Nao preencha com um valor plausivel para "destravar o fluxo":
-// uma chave que parece real passa despercebida em review e vai para producao
-// dando falsa garantia de assinatura.
+// No key pair has been generated for the project so far, so this variable is
+// born EMPTY on purpose. Empty means "this binary does not know how to verify
+// anything", and Verify REFUSES to update in that state -- it never proceeds
+// without verifying. Do not fill it with a plausible value to "unblock the
+// flow": a key that looks real slips through review and goes to production
+// giving a false guarantee of signature.
 //
-// Quando o par existir, o valor entra no build via -ldflags -X (ver
-// .goreleaser.yaml). O ponto de injecao planejado e output.PublicKey (Task
-// D2), que ainda nao existe; enquanto nao existir, a fiacao do comando deve
-// atribuir o valor a esta variavel na inicializacao. A chave nunca e baixada
-// em tempo de execucao (DD3).
+// When the pair exists, the value goes in at build time via -ldflags -X (see
+// .goreleaser.yaml). The planned injection point is output.PublicKey (Task
+// D2), which does not exist yet; while it does not, the command wiring must
+// assign the value to this variable at initialization. The key is never
+// downloaded at runtime (DD3).
 var ChavePublica = ""
 
-// PlaceholderChavePublica e o texto que sinaliza "chave ainda nao gerada".
-// Existe para que um placeholder esquecido em algum lugar da cadeia de build
-// falhe com mensagem propria em vez de virar erro de parse obscuro.
+// PlaceholderChavePublica is the text that signals "key not generated yet".
+// It exists so that a placeholder forgotten somewhere in the build chain
+// fails with a message of its own instead of becoming an obscure parse error.
 const PlaceholderChavePublica = "CHAVE-MINISIGN-PENDENTE-NAO-GERADA"
 
-// Channel e o canal de atualizacao. Os canais sao derivados do semver da tag
-// (DD1), nao de branches: "v0.2.0" e stable, "v0.2.0-rc.1" e pre-lancamento.
-// EnvCanal e a variavel que o install.sh ja usa para escolher o canal. O
-// `ngx update` a honra pelo mesmo motivo: quem instalou pelo beta espera
-// continuar no beta sem repetir a flag a cada atualizacao.
+// Channel is the update channel. The channels are derived from the semver of
+// the tag (DD1), not from branches: "v0.2.0" is stable, "v0.2.0-rc.1" is a
+// prerelease. EnvCanal is the variable install.sh already uses to pick the
+// channel. `ngx update` honors it for the same reason: whoever installed
+// through the beta expects to stay on the beta without repeating the flag on
+// every update.
 const EnvCanal = "NGX_CHANNEL"
 
 type Channel string
 
 const (
-	// ChannelStable so aceita releases nao pre-lancamento.
+	// ChannelStable accepts only non-prerelease releases.
 	ChannelStable Channel = "stable"
-	// ChannelBeta aceita tambem pre-lancamentos.
+	// ChannelBeta accepts prereleases as well.
 	ChannelBeta Channel = "beta"
 )
 
-// ParseChannel converte texto em Channel. Canal desconhecido e erro de uso:
-// aceitar um valor qualquer silenciosamente colocaria o usuario num canal que
-// ele nao pediu.
+// ParseChannel converts text into a Channel. An unknown channel is a usage
+// error: silently accepting any value would put the user on a channel they
+// did not ask for.
 func ParseChannel(s string) (Channel, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", string(ChannelStable):
@@ -92,12 +93,12 @@ func ParseChannel(s string) (Channel, error) {
 		return ChannelBeta, nil
 	default:
 		return "", output.Usage(
-			"canal desconhecido %q: os canais validos sao \"stable\" e \"beta\"", s)
+			"unknown channel %q: the valid channels are \"stable\" and \"beta\"", s)
 	}
 }
 
-// CanalDoAmbiente le NGX_CHANNEL. Recebe a funcao de leitura para poder ser
-// testada sem mexer no ambiente do processo.
+// CanalDoAmbiente reads NGX_CHANNEL. It takes the reading function so it can
+// be tested without touching the process environment.
 func CanalDoAmbiente(getenv func(string) string) (Channel, error) {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -105,45 +106,47 @@ func CanalDoAmbiente(getenv func(string) string) (Channel, error) {
 	return ParseChannel(getenv("NGX_CHANNEL"))
 }
 
-// Opcoes descreve uma execucao de update.
+// Opcoes describes one update run.
 type Opcoes struct {
-	// Canal e o canal consultado quando Versao esta vazia.
+	// Canal is the channel consulted when Versao is empty.
 	Canal Channel
-	// Versao, quando preenchida, instala exatamente aquela versao — inclusive
-	// mais antiga que a atual. E o unico caminho para downgrade: sem ela, uma
-	// release mais antiga nunca e aplicada.
+	// Versao, when filled in, installs exactly that version -- including one
+	// older than the current one. It is the only path to a downgrade:
+	// without it, an older release is never applied.
 	Versao string
-	// VersaoAtual e a versao deste binario (output.Version).
+	// VersaoAtual is the version of this binary (output.Version).
 	VersaoAtual string
-	// CaminhoBinario e o executavel a ser substituido. Vazio usa
+	// CaminhoBinario is the executable to be replaced. Empty uses
 	// os.Executable().
 	CaminhoBinario string
-	// ChavePublica sobrescreve a chave embutida. Existe para teste; em
-	// producao fica vazia e o pacote usa ChavePublica.
+	// ChavePublica overrides the embedded key. It exists for testing; in
+	// production it stays empty and the package uses ChavePublica.
 	ChavePublicaOverride string
-	// Cliente e o cliente da API do GitHub. Vazio usa o padrao.
+	// Cliente is the GitHub API client. Empty uses the default one.
 	Cliente *Cliente
-	// SomenteVerificar nao baixa nem troca nada: so reporta se ha versao nova.
+	// SomenteVerificar downloads and swaps nothing: it only reports whether
+	// there is a new version.
 	SomenteVerificar bool
-	// SO e Arch selecionam o artefato. Vazios usam os do processo.
+	// SO and Arch select the artifact. Empty use the ones of the process.
 	SO   string
 	Arch string
 }
 
-// Resultado e o que o comando reporta. Os nomes JSON seguem o que a Task D4
-// especifica para o campo data do envelope.
+// Resultado is what the command reports. The JSON names follow what Task D4
+// specifies for the envelope's data field.
 type Resultado struct {
 	VersaoAtual  string  `json:"current_version"`
 	VersaoRemota string  `json:"latest_version"`
 	Canal        Channel `json:"channel"`
 	Atualizado   bool    `json:"updated"`
-	// Disponivel e verdadeiro quando ha versao mais nova que a atual. Com
-	// SomenteVerificar, e a unica informacao que interessa.
+	// Disponivel is true when there is a version newer than the current
+	// one. With SomenteVerificar, it is the only information that matters.
 	Disponivel bool `json:"update_available"`
 }
 
-// Executar resolve, baixa, verifica e troca o binario. E a funcao que o
-// comando `ngx update` chama; ela nao imprime nada e nao escolhe exit code.
+// Executar resolves, downloads, verifies and swaps the binary. It is the
+// function the `ngx update` command calls; it prints nothing and picks no
+// exit code.
 func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	canal := opts.Canal
 	if canal == "" {
@@ -151,7 +154,7 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	}
 	if canal != ChannelStable && canal != ChannelBeta {
 		return nil, output.Usage(
-			"canal desconhecido %q: os canais validos sao \"stable\" e \"beta\"", canal)
+			"unknown channel %q: the valid channels are \"stable\" and \"beta\"", canal)
 	}
 
 	cli := opts.Cliente
@@ -163,9 +166,9 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	if chave == "" {
 		chave = ChavePublica
 	}
-	// A chave e conferida ANTES de qualquer download: um binario que nao pode
-	// verificar nada nao deveria nem comecar a baixar. So --check escapa,
-	// porque ele nao troca binario nenhum.
+	// The key is checked BEFORE any download: a binary that cannot verify
+	// anything should not even start downloading. Only --check escapes,
+	// because it swaps no binary at all.
 	if !opts.SomenteVerificar {
 		if err := validarChave(chave); err != nil {
 			return nil, err
@@ -191,14 +194,15 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	}
 
 	if !explicita {
-		// Sem --version, so avanca. Nunca voltar de versao por acidente: se a
-		// release do canal for mais antiga (ou igual), o update e no-op.
+		// Without --version, it only moves forward. Never go back a
+		// version by accident: if the channel's release is older (or
+		// equal), the update is a no-op.
 		if !res.Disponivel {
 			return res, nil
 		}
 	} else if mesmaVersao(rel.Version, opts.VersaoAtual) {
-		// --version apontando para a versao ja instalada: nada a fazer, e nao
-		// e erro.
+		// --version pointing at the already installed version: nothing to
+		// do, and it is not an error.
 		return res, nil
 	}
 
@@ -207,7 +211,7 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 		caminho, err = os.Executable()
 		if err != nil {
 			return nil, output.Internal(err,
-				"nao foi possivel descobrir o caminho do proprio binario para substituir")
+				"could not find the path of our own binary in order to replace it")
 		}
 		if resolvido, errLink := filepath.EvalSymlinks(caminho); errLink == nil {
 			caminho = resolvido
@@ -265,23 +269,23 @@ func Executar(ctx context.Context, opts Opcoes) (*Resultado, error) {
 	return res, nil
 }
 
-// validarChave recusa explicitamente o binario sem chave. Nao existe caminho
-// de bypass: nenhuma variavel de ambiente, flag ou modo "sem verificacao".
+// validarChave explicitly refuses a binary with no key. There is no bypass
+// path: no environment variable, flag or "no verification" mode.
 func validarChave(chave string) error {
 	c := strings.TrimSpace(chave)
 	if c == "" {
 		return erro(CodigoSemChavePublica,
-			"este binario foi construido sem chave publica de verificacao embutida e "+
-				"por isso nao pode se auto-atualizar: nao ha como provar que a release "+
-				"baixada veio do projeto. Baixe a versao nova manualmente da pagina de "+
-				"releases e confira `checksums.txt` com o minisign, ou use um binario "+
-				"oficial, que ja vem com a chave embutida")
+			"this binary was built without an embedded public verification key and "+
+				"therefore cannot update itself: there is no way to prove the downloaded "+
+				"release came from the project. Download the new version manually from "+
+				"the releases page and check `checksums.txt` with minisign, or use an "+
+				"official binary, which already ships with the key embedded")
 	}
 	if c == PlaceholderChavePublica {
 		return erro(CodigoChavePlaceholder,
-			"a chave publica embutida ainda e o placeholder %q: nenhum par de chaves "+
-				"minisign foi gerado para o projeto. Atualizar sem verificacao real nao "+
-				"e uma opcao", PlaceholderChavePublica)
+			"the embedded public key is still the placeholder %q: no minisign key pair "+
+				"has been generated for the project. Updating without real verification "+
+				"is not an option", PlaceholderChavePublica)
 	}
 	return nil
 }
@@ -293,8 +297,8 @@ func resolverRelease(ctx context.Context, cli *Cliente, canal Channel, versao st
 	return cli.Latest(ctx, canal)
 }
 
-// normalizarVersao devolve a versao no formato que golang.org/x/mod/semver
-// espera (com "v"), ou "" se nao for semver valido.
+// normalizarVersao returns the version in the format golang.org/x/mod/semver
+// expects (with "v"), or "" if it is not valid semver.
 func normalizarVersao(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -309,9 +313,10 @@ func normalizarVersao(v string) string {
 	return v
 }
 
-// maisNova diz se remota e mais nova que atual. Versao atual ilegivel (build
-// local sem -ldflags, por exemplo) conta como "qualquer release e mais nova":
-// o contrario travaria o update de quem mais precisa dele.
+// maisNova reports whether remota is newer than atual. An unreadable current
+// version (a local build without -ldflags, for example) counts as "any
+// release is newer": the opposite would lock the update away from whoever
+// needs it most.
 func maisNova(remota, atual string) bool {
 	r := normalizarVersao(remota)
 	if r == "" {

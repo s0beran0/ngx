@@ -9,19 +9,19 @@ import (
 	"aead.dev/minisign"
 )
 
-// Verify prova que o artefato baixado e o que o projeto publicou.
+// Verify proves that the downloaded artifact is what the project published.
 //
-// A ordem e obrigatoria e nao tem atalho:
+// The order is mandatory and has no shortcut:
 //
-//  1. a chave publica embutida existe e e legivel;
-//  2. a assinatura minisign cobre os bytes do checksums.txt;
-//  3. so entao o checksums.txt e lido;
-//  4. o SHA256 do artefato bate com a linha do arquivo.
+//  1. the embedded public key exists and is readable;
+//  2. the minisign signature covers the bytes of checksums.txt;
+//  3. only then is checksums.txt read;
+//  4. the SHA256 of the artifact matches the line in the file.
 //
-// Conferir hash contra um checksums.txt nao autenticado nao prova nada — quem
-// consegue publicar um binario adulterado publica o checksum dele junto. Por
-// isso o passo 2 vem antes do 3, e uma assinatura invalida recusa sem sequer
-// olhar o conteudo do checksums.txt.
+// Checking a hash against an unauthenticated checksums.txt proves nothing --
+// whoever can publish a tampered binary publishes its checksum along with it.
+// That is why step 2 comes before step 3, and an invalid signature refuses
+// without even looking at the contents of checksums.txt.
 func Verify(dados, checksums, assinatura []byte, chavePublica, nomeArquivo string) error {
 	if err := validarChave(chavePublica); err != nil {
 		return err
@@ -30,22 +30,22 @@ func Verify(dados, checksums, assinatura []byte, chavePublica, nomeArquivo strin
 	var chave minisign.PublicKey
 	if err := chave.UnmarshalText([]byte(strings.TrimSpace(chavePublica))); err != nil {
 		return erroCausa(err, CodigoChaveInvalida,
-			"a chave publica embutida neste binario nao e uma chave minisign valida, "+
-				"entao nao ha como verificar a release baixada")
+			"the public key embedded in this binary is not a valid minisign key, "+
+				"so there is no way to verify the downloaded release")
 	}
 
 	if !minisign.Verify(chave, checksums, assinatura) {
 		return erro(CodigoAssinaturaInvalida,
-			"a assinatura de %s nao confere com a chave publica embutida: os "+
-				"arquivos foram baixados de uma origem que nao e o projeto, foram "+
-				"adulterados no caminho, ou a release foi assinada com outra chave. "+
-				"Nada foi instalado e o ngx atual continua no lugar", NomeChecksums)
+			"the signature of %s does not match the embedded public key: the "+
+				"files were downloaded from a source that is not the project, were "+
+				"tampered with along the way, or the release was signed with another key. "+
+				"Nothing was installed and the current ngx stays in place", NomeChecksums)
 	}
 
 	esperado, ok := checksumDe(checksums, nomeArquivo)
 	if !ok {
 		return erro(CodigoChecksumAusente,
-			"o arquivo %s nao aparece em %s, entao o download nao pode ser verificado",
+			"the file %s does not appear in %s, so the download cannot be verified",
 			nomeArquivo, NomeChecksums)
 	}
 
@@ -53,19 +53,19 @@ func Verify(dados, checksums, assinatura []byte, chavePublica, nomeArquivo strin
 	obtido := hex.EncodeToString(soma[:])
 	if subtle.ConstantTimeCompare([]byte(obtido), []byte(esperado)) != 1 {
 		return erro(CodigoChecksumDivergente,
-			"o SHA256 de %s nao bate com o publicado: esperado %s, obtido %s. O "+
-				"download veio corrompido ou adulterado; nada foi instalado e o ngx "+
-				"atual continua no lugar", nomeArquivo, esperado, obtido)
+			"the SHA256 of %s does not match the published one: expected %s, got %s. The "+
+				"download came corrupted or tampered with; nothing was installed and the "+
+				"current ngx stays in place", nomeArquivo, esperado, obtido)
 	}
 	return nil
 }
 
-// checksumDe procura a linha de nomeArquivo no checksums.txt.
+// checksumDe looks for the line of nomeArquivo in checksums.txt.
 //
-// O formato e o do sha256sum, que e o que o goreleaser escreve: hash em
-// hexadecimal, DOIS espacos, nome do arquivo ("%v  %v\n"). O prefixo "*" no
-// nome, que o sha256sum usa para modo binario, e tolerado porque outras
-// ferramentas o produzem.
+// The format is the sha256sum one, which is what goreleaser writes: the hash
+// in hexadecimal, TWO spaces, the file name ("%v  %v\n"). The "*" prefix on
+// the name, which sha256sum uses for binary mode, is tolerated because other
+// tools produce it.
 func checksumDe(checksums []byte, nomeArquivo string) (string, bool) {
 	for _, linha := range strings.Split(string(checksums), "\n") {
 		linha = strings.TrimSpace(linha)

@@ -12,46 +12,50 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// State e o que se consegue afirmar sobre o processo do nginx no alvo.
+// State is what can be asserted about the nginx process on the target.
 //
-// O que nao esta aqui e tao deliberado quanto o que esta. Nao ha campo de
-// numero de workers nem de horario em que o master carregou a configuracao:
-// os dois dependem de inspecao de processo, que diverge entre Linux e darwin
-// e e fragil por SSH. Um campo que so as vezes existe e pior que campo
-// nenhum, e um numero estimado e pior que os dois — um agente confia no que
-// le. Quando esses dados tiverem uma fonte confiavel, viram campos; ate la,
-// nao existem.
+// What is not here is as deliberate as what is. There is no field for the
+// number of workers nor for the time the master loaded the configuration:
+// both depend on process inspection, which diverges between Linux and darwin
+// and is fragile over SSH. A field that only sometimes exists is worse than
+// no field at all, and an estimated number is worse than both -- an agent
+// trusts what it reads. When that data has a trustworthy source, it becomes a
+// field; until then, it does not exist.
 type State struct {
-	// Running e ponteiro porque tem tres estados, nao dois: rodando, nao
-	// rodando, e "nao deu para saber" — que sai como campo ausente, nunca
-	// como false. Reportar false sem evidencia diria que o nginx caiu.
+	// Running is a pointer because it has three states, not two: running,
+	// not running, and "could not be determined" -- which comes out as a
+	// missing field, never as false. Reporting false without evidence would
+	// say that nginx went down.
 	Running *bool `json:"running,omitempty"`
 
-	// MasterPID e omitido quando o pidfile nao existe ou nao pode ser lido.
+	// MasterPID is omitted when the pidfile does not exist or cannot be
+	// read.
 	MasterPID int `json:"master_pid,omitempty"`
 
-	// PIDFile e o caminho consultado.
+	// PIDFile is the path that was consulted.
 	PIDFile string `json:"pid_file,omitempty"`
 
-	// Diagnostics explica toda indisponibilidade. A DR5 exige distinguir
-	// "nao consegui ler" de "nao existe", e nunca degradar em silencio:
-	// campo ausente sem diagnostico seria exatamente o silencio proibido.
-	// Nunca e nil.
+	// Diagnostics explains every unavailability. DR5 requires
+	// distinguishing "I could not read it" from "it does not exist", and
+	// never degrading in silence: a missing field with no diagnostic would
+	// be exactly the forbidden silence. Never nil.
 	Diagnostics []output.Diagnostic `json:"diagnostics"`
 }
 
-// State le o pidfile pelo transporte e confere se o processo existe.
+// State reads the pidfile through the transport and checks whether the
+// process exists.
 //
-// A leitura do pidfile passa pelo Open do transporte (SFTP no caso remoto), e
-// a verificacao de existencia usa `kill -0`, que nao envia sinal nenhum:
-// pergunta ao sistema se o processo esta la. E o unico jeito portavel de
-// separar um pidfile obsoleto de um master vivo sem depender de /proc.
+// Reading the pidfile goes through the transport's Open (SFTP in the remote
+// case), and the existence check uses `kill -0`, which sends no signal at
+// all: it asks the system whether the process is there. It is the only
+// portable way to tell a stale pidfile from a live master without depending
+// on /proc.
 func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 	s := &State{PIDFile: pidPath, Diagnostics: []output.Diagnostic{}}
 
 	if pidPath == "" {
 		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-			"o caminho do pidfile nao e conhecido, entao o estado do processo nao pode ser apurado")
+			"the pidfile path is not known, so the state of the process cannot be determined")
 		return s, nil
 	}
 
@@ -59,21 +63,22 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 	if err != nil {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			// Ausencia do pidfile e evidencia, nao suposicao: o nginx
-			// remove o arquivo ao parar. Por isso aqui Running vira
-			// false, e nos demais casos fica ausente.
+			// The absence of the pidfile is evidence, not an
+			// assumption: nginx removes the file when it stops. That
+			// is why Running becomes false here, and stays missing in
+			// the other cases.
 			naoRoda := false
 			s.Running = &naoRoda
 			s.diag(output.SeverityInfo, CodigoEstadoProcesso,
-				fmt.Sprintf("o pidfile %s nao existe, entao o master nao esta rodando", pidPath))
+				fmt.Sprintf("the pidfile %s does not exist, so the master is not running", pidPath))
 		case errors.Is(err, fs.ErrPermission):
 			s.diag(output.SeverityWarning, CodigoPrivilegioNecessario,
-				fmt.Sprintf("o pidfile %s existe mas nao pode ser lido por falta de permissao em %s; "+
-					"o estado do processo fica indisponivel ate o ngx rodar com acesso de leitura a esse arquivo",
+				fmt.Sprintf("the pidfile %s exists but cannot be read for lack of permission on %s; "+
+					"the state of the process stays unavailable until ngx runs with read access to that file",
 					pidPath, r.tr.Describe()))
 		default:
 			s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-				fmt.Sprintf("o pidfile %s nao pode ser lido em %s: %v", pidPath, r.tr.Describe(), err))
+				fmt.Sprintf("the pidfile %s cannot be read on %s: %v", pidPath, r.tr.Describe(), err))
 		}
 		return s, nil
 	}
@@ -82,25 +87,25 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 	conteudo, err := io.ReadAll(f)
 	if err != nil {
 		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-			fmt.Sprintf("falha ao ler o pidfile %s em %s: %v", pidPath, r.tr.Describe(), err))
+			fmt.Sprintf("failed to read the pidfile %s on %s: %v", pidPath, r.tr.Describe(), err))
 		return s, nil
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(conteudo)))
 	if err != nil || pid <= 0 {
 		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-			fmt.Sprintf("o pidfile %s nao contem um pid: %q", pidPath, resumo(string(conteudo))))
+			fmt.Sprintf("the pidfile %s does not contain a pid: %q", pidPath, resumo(string(conteudo))))
 		return s, nil
 	}
 	s.MasterPID = pid
 
-	// kill -0 nao sinaliza o processo; so consulta. Nao leva sudo: perguntar
-	// se um pid existe nao exige privilegio, e escalar aqui contrariaria a
-	// DR5 sem ganho nenhum.
+	// kill -0 does not signal the process; it only queries. It carries no
+	// sudo: asking whether a pid exists does not require privilege, and
+	// escalating here would go against DR5 with no gain at all.
 	_, stderr, exit, err := r.tr.Run(ctx, []string{"kill", "-0", strconv.Itoa(pid)})
 	if err != nil {
 		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-			fmt.Sprintf("nao foi possivel conferir se o pid %d esta vivo em %s: %v",
+			fmt.Sprintf("could not check whether the pid %d is alive on %s: %v",
 				pid, r.tr.Describe(), err))
 		return s, nil
 	}
@@ -111,28 +116,30 @@ func (r *Runtime) State(ctx context.Context, pidPath string) (*State, error) {
 		roda := true
 		s.Running = &roda
 	case exigePrivilegio(texto):
-		// Processo existe mas pertence a outro usuario -- o normal, porque o
-		// master do nginx roda como root. Afirmar que nao roda seria falso;
-		// afirmar que roda seria adivinhar a partir da mensagem.
+		// The process exists but belongs to another user -- the normal
+		// case, because the nginx master runs as root. Saying it is not
+		// running would be false; saying it is running would be guessing
+		// from the message.
 		//
-		// Com --sudo, porem, o operador JA autorizou privilegio de forma
-		// explicita, e a DR5 exige que ele seja explicito, nao que seja
-		// recusado. Entao a segunda tentativa acontece so aqui, so quando a
-		// primeira topou em permissao, e so com a flag: nada e escalado por
-		// conta propria. Sem a flag, o campo continua indisponivel e dito.
+		// With --sudo, however, the operator has ALREADY authorized
+		// privilege explicitly, and DR5 requires it to be explicit, not
+		// to be refused. So the second attempt happens only here, only
+		// when the first one hit a permission wall, and only with the
+		// flag: nothing is escalated on its own. Without the flag, the
+		// field stays unavailable and said so.
 		if r.sudo && r.confirmaComPrivilegio(ctx, pid) {
 			roda := true
 			s.Running = &roda
 			break
 		}
 		s.diag(output.SeverityWarning, CodigoPrivilegioNecessario,
-			fmt.Sprintf("o pid %d existe mas pertence a outro usuario, e conferir seu estado "+
-				"em %s exige privilegio", pid, r.tr.Describe()))
+			fmt.Sprintf("the pid %d exists but belongs to another user, and checking its state "+
+				"on %s requires privilege", pid, r.tr.Describe()))
 	default:
 		naoRoda := false
 		s.Running = &naoRoda
 		s.diag(output.SeverityWarning, CodigoEstadoProcesso,
-			fmt.Sprintf("o pidfile %s aponta para o pid %d, que nao existe: pidfile obsoleto",
+			fmt.Sprintf("the pidfile %s points to the pid %d, which does not exist: stale pidfile",
 				pidPath, pid))
 	}
 
@@ -148,10 +155,10 @@ func (s *State) diag(sev output.Severity, codigo, mensagem string) {
 	})
 }
 
-// confirmaComPrivilegio repete o kill -0 com sudo. Devolve true so quando a
-// resposta e inequivoca: sudo indisponivel, senha exigida ou qualquer outra
-// falha devolvem false, e ai o campo segue indisponivel em vez de virar um
-// palpite.
+// confirmaComPrivilegio retries the kill -0 with sudo. It returns true only
+// when the answer is unambiguous: sudo unavailable, a password required or
+// any other failure return false, and then the field stays unavailable
+// instead of turning into a guess.
 func (r *Runtime) confirmaComPrivilegio(ctx context.Context, pid int) bool {
 	_, _, exit, err := r.tr.Run(ctx, []string{"sudo", "-n", "kill", "-0", strconv.Itoa(pid)})
 	return err == nil && exit == 0

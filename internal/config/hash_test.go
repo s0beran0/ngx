@@ -21,9 +21,9 @@ func TestHashEhDeterministico(t *testing.T) {
 	require.Equal(t, a.Hash, b.Hash)
 }
 
-// O hash protege o significado, nao o texto: duas configuracoes que so diferem
-// em formatacao precisam produzir o mesmo hash, senao rodar fmt invalidaria
-// todos os IDs que o agente esta segurando.
+// The hash protects the meaning, not the text: two configurations differing
+// only in formatting have to produce the same hash, otherwise running fmt
+// would invalidate every ID the agent is holding.
 func TestFormatacaoDiferenteProduzMesmoHash(t *testing.T) {
 	compacto := parseTexto(t, "http{server{listen 80;}}")
 	espacado := parseTexto(t, `
@@ -39,9 +39,9 @@ http {
 
 func TestComentariosNaoEntramNoHash(t *testing.T) {
 	sem := parseTexto(t, "http { server { listen 80; } }")
-	com := parseTexto(t, `# um comentario
+	com := parseTexto(t, `# a comment
 http {
-  # outro
+  # another
   server { listen 80; }
 }`)
 
@@ -55,8 +55,8 @@ func TestMudancaDeArgumentoMudaOHash(t *testing.T) {
 	require.NotEqual(t, a.Hash, b.Hash)
 }
 
-// Ordem importa: mover um server muda o significado dos IDs, entao precisa
-// mudar o hash.
+// Order matters: moving a server changes what the IDs mean, so it has to
+// change the hash.
 func TestOrdemDeBlocosMudaOHash(t *testing.T) {
 	a := parseTexto(t, "http { server { listen 80; } server { listen 443; } }")
 	b := parseTexto(t, "http { server { listen 443; } server { listen 80; } }")
@@ -64,7 +64,7 @@ func TestOrdemDeBlocosMudaOHash(t *testing.T) {
 	require.NotEqual(t, a.Hash, b.Hash)
 }
 
-// Sem separador entre diretiva e argumentos, "a b" e "ab" colidiriam.
+// With no separator between directive and arguments, "a b" and "ab" would collide.
 func TestDiretivasDiferentesNaoColidem(t *testing.T) {
 	a := parseTexto(t, "ab c;")
 	b := parseTexto(t, "a bc;")

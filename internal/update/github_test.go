@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// servidorFalso responde no lugar da API do GitHub. Nenhum teste deste pacote
-// toca a API de verdade: um teste que depende de rede e um teste que quebra
-// sozinho, num dia em que ninguem mexeu no codigo.
+// servidorFalso answers in place of the GitHub API. No test in this package
+// touches the real API: a test that depends on the network is a test that
+// breaks on its own, on a day when nobody touched the code.
 type servidorFalso struct {
 	*httptest.Server
 	mu        sync.Mutex
@@ -128,8 +128,9 @@ func TestLatestBetaSemReleaseNenhuma(t *testing.T) {
 }
 
 func TestLatestTrataRateLimitComErroProprio(t *testing.T) {
-	// E a falha mais provavel em uso real: 60 chamadas por hora por IP sem
-	// autenticacao. Um "falhou" generico mandaria a pessoa investigar a rede.
+	// It is the most likely failure in real use: 60 calls per hour per IP
+	// without authentication. A generic "it failed" would send the person
+	// investigating the network.
 	s := novoServidor(t)
 	reset := time.Now().Add(20 * time.Minute).Unix()
 	s.responde("/repos/s0beran0/ngx/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
@@ -141,8 +142,8 @@ func TestLatestTrataRateLimitComErroProprio(t *testing.T) {
 	_, err := s.cliente().Latest(context.Background(), ChannelStable)
 
 	assert.Equal(t, CodigoRateLimit, codigoDe(t, err))
-	assert.Contains(t, err.Error(), "limite de requisicoes")
-	assert.Contains(t, err.Error(), "a janela reabre em")
+	assert.Contains(t, err.Error(), "rate limit")
+	assert.Contains(t, err.Error(), "the window reopens at")
 }
 
 func TestLatest403SemRateLimitNaoViraErroDeLimite(t *testing.T) {
@@ -243,11 +244,11 @@ func TestAssetPorNomeAusente(t *testing.T) {
 
 func TestBaixarRecusaStatusDeErro(t *testing.T) {
 	s := novoServidor(t)
-	s.responde("/artefato", func(w http.ResponseWriter, _ *http.Request) {
+	s.responde("/artifact", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 
-	_, err := s.cliente().Baixar(context.Background(), s.URL+"/artefato")
+	_, err := s.cliente().Baixar(context.Background(), s.URL+"/artifact")
 
 	assert.Equal(t, CodigoRede, codigoDe(t, err))
 	assert.Contains(t, err.Error(), "500")
@@ -255,12 +256,12 @@ func TestBaixarRecusaStatusDeErro(t *testing.T) {
 
 func TestBaixarDevolveOsBytes(t *testing.T) {
 	s := novoServidor(t)
-	s.respondeBytes("/artefato", []byte("conteudo binario"))
+	s.respondeBytes("/artifact", []byte("binary content"))
 
-	dados, err := s.cliente().Baixar(context.Background(), s.URL+"/artefato")
+	dados, err := s.cliente().Baixar(context.Background(), s.URL+"/artifact")
 
 	require.NoError(t, err)
-	assert.Equal(t, "conteudo binario", string(dados))
+	assert.Equal(t, "binary content", string(dados))
 }
 
 func TestParseChannel(t *testing.T) {
@@ -274,12 +275,12 @@ func TestParseChannel(t *testing.T) {
 
 	_, err = ParseChannel("nightly")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "canal desconhecido")
+	assert.Contains(t, err.Error(), "unknown channel")
 }
 
 func TestCanalDoAmbiente(t *testing.T) {
-	// NGX_CHANNEL=beta e o unico jeito de entrar no canal de pre-lancamento
-	// sem passar a flag: mudanca de canal e possivel, nunca acidental.
+	// NGX_CHANNEL=beta is the only way into the prerelease channel without
+	// passing the flag: changing channel is possible, never accidental.
 	c, err := CanalDoAmbiente(func(string) string { return "beta" })
 	require.NoError(t, err)
 	assert.Equal(t, ChannelBeta, c)
@@ -288,7 +289,7 @@ func TestCanalDoAmbiente(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ChannelStable, c)
 
-	_, err = CanalDoAmbiente(func(string) string { return "instavel" })
+	_, err = CanalDoAmbiente(func(string) string { return "unstable" })
 	assert.Error(t, err)
 }
 

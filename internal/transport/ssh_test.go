@@ -26,10 +26,10 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Glob remoto (DR6) — a parte que mais importa desta camada.
+// Remote glob (DR6) — the part of this layer that matters most.
 // ---------------------------------------------------------------------------
 
-// entradaFalsa e o minimo de os.FileInfo que o glob consome: so o nome.
+// entradaFalsa is the minimum os.FileInfo the glob consumes: just the name.
 type entradaFalsa struct {
 	nome string
 	dir  bool
@@ -42,15 +42,15 @@ func (e entradaFalsa) ModTime() time.Time { return time.Time{} }
 func (e entradaFalsa) IsDir() bool        { return e.dir }
 func (e entradaFalsa) Sys() any           { return nil }
 
-// remotoFalso e uma arvore em memoria com falha injetavel por caminho. E o
-// unico jeito de exercitar o caso que a DR6 existe para cobrir: um erro de
-// I/O no meio da listagem, que um servidor de teste saudavel nunca produz.
+// remotoFalso is an in-memory tree with per-path injectable failures. It is
+// the only way to exercise the case DR6 exists to cover: an I/O error in the
+// middle of the listing, which a healthy test server never produces.
 type remotoFalso struct {
-	// dirs mapeia caminho de diretorio para os nomes que ele contem.
+	// dirs maps a directory path to the names it contains.
 	dirs map[string][]string
-	// arquivos e o conjunto de caminhos que existem para o Lstat.
+	// arquivos is the set of paths that exist for Lstat.
 	arquivos map[string]bool
-	// falhas mapeia caminho para o erro que ReadDir/Lstat devolve ali.
+	// falhas maps a path to the error ReadDir/Lstat returns there.
 	falhas map[string]error
 
 	chamadas []string
@@ -90,8 +90,8 @@ func (r *remotoFalso) Lstat(p string) (os.FileInfo, error) {
 func remotoNginx() *remotoFalso {
 	return &remotoFalso{
 		dirs: map[string][]string{
-			// Ordem embaralhada de proposito: o servidor entrega o que quiser
-			// e o glob precisa devolver ordenado.
+			// Shuffled on purpose: the server hands back whatever it
+			// likes and the glob has to return a sorted result.
 			"/etc/nginx":            {"conf.d", "sites", "nginx.conf", "mime.types"},
 			"/etc/nginx/conf.d":     {"zz-ultimo.conf", "gzip.conf", "aa-primeiro.conf", "leiame.txt"},
 			"/etc/nginx/sites":      {"a", "b"},
@@ -119,26 +119,27 @@ func TestGlobRemotoExpandeEOrdena(t *testing.T) {
 		"/etc/nginx/conf.d/aa-primeiro.conf",
 		"/etc/nginx/conf.d/gzip.conf",
 		"/etc/nginx/conf.d/zz-ultimo.conf",
-	}, achados, "a ordem alimenta o hash canonico: precisa ser estavel")
+	}, achados, "the order feeds the canonical hash: it has to be stable")
 }
 
 func TestGlobRemotoPropagaErroDeIOAoListar(t *testing.T) {
-	// Este e o teste que a DR6 existe para permitir. O sftp.Client.Glob
-	// devolveria a lista vazia e err nil aqui, e o ngx apresentaria a
-	// configuracao do servidor sem os arquivos que ela tem.
+	// This is the test DR6 exists to make possible. sftp.Client.Glob would
+	// return an empty list and a nil err here, and ngx would present the
+	// server configuration without the files it actually has.
 	r := remotoNginx()
 	quedaDeLink := errors.New("connection lost")
 	r.falhas["/etc/nginx/conf.d"] = quedaDeLink
 
 	achados, err := globRemoto(r, "/etc/nginx/conf.d/*.conf")
 
-	require.Error(t, err, "erro de I/O nao pode virar lista vazia")
+	require.Error(t, err, "an I/O error cannot become an empty list")
 	assert.ErrorIs(t, err, quedaDeLink)
 	assert.Nil(t, achados)
 }
 
 func TestGlobRemotoPropagaPermissaoNegada(t *testing.T) {
-	// "Nao consegui ler" nao e "nao existe": so a ausencia vira lista vazia.
+	// "I could not read" is not "it does not exist": only absence becomes
+	// an empty list.
 	r := remotoNginx()
 	r.falhas["/etc/nginx/conf.d"] = fs.ErrPermission
 
@@ -155,7 +156,7 @@ func TestGlobRemotoDiretorioAusenteNaoEErro(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{}, achados)
-	assert.NotNil(t, achados, "lista vazia, nunca nil")
+	assert.NotNil(t, achados, "empty list, never nil")
 }
 
 func TestGlobRemotoSemMetacaractereComArquivoPresente(t *testing.T) {
@@ -178,8 +179,8 @@ func TestGlobRemotoSemMetacaractereComArquivoAusente(t *testing.T) {
 }
 
 func TestGlobRemotoSemMetacaracterePropagaErroDeIO(t *testing.T) {
-	// O caminho literal do sftp.Client.Glob e `if err != nil { return nil, nil }`.
-	// Aqui ele tem que devolver erro.
+	// The literal path in sftp.Client.Glob is `if err != nil { return nil, nil }`.
+	// Here it has to return an error.
 	r := remotoNginx()
 	quedaDeLink := errors.New("connection lost")
 	r.falhas["/etc/nginx/nginx.conf"] = quedaDeLink
@@ -211,7 +212,7 @@ func TestGlobRemotoPropagaErroDuranteExpansaoDoDiretorio(t *testing.T) {
 
 	_, err := globRemoto(r, "/etc/nginx/sites/*/*.conf")
 
-	require.Error(t, err, "falha num subdiretorio nao pode virar resultado parcial")
+	require.Error(t, err, "a failure in a subdirectory cannot become a partial result")
 	assert.ErrorIs(t, err, quedaDeLink)
 }
 
@@ -222,7 +223,7 @@ func TestGlobRemotoPadraoMalformado(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, path.ErrBadPattern)
-	assert.Empty(t, r.chamadas, "padrao invalido nao gasta viagem de rede")
+	assert.Empty(t, r.chamadas, "an invalid pattern does not spend a network round trip")
 }
 
 func TestGlobRemotoPadraoRelativoListaODiretorioCorrente(t *testing.T) {
@@ -236,9 +237,9 @@ func TestGlobRemotoPadraoRelativoListaODiretorioCorrente(t *testing.T) {
 }
 
 func TestGlobRemotoUsaSeparadorPOSIX(t *testing.T) {
-	// A garantia de que o glob nunca passa por filepath: se passasse, num
-	// cliente Windows o resultado viria com barra invertida e o servidor
-	// Linux nao acharia o arquivo.
+	// The guarantee that the glob never goes through filepath: if it did,
+	// on a Windows client the result would come back with backslashes and
+	// the Linux server would not find the file.
 	r := remotoNginx()
 
 	achados, err := globRemoto(r, "/etc/nginx/sites/a/*.conf")
@@ -254,15 +255,15 @@ func TestGlobRemotoNaoRecursaInfinitamente(t *testing.T) {
 
 	_, err := globRemoto(r, `\`)
 
-	// O importante e terminar. O desfecho e "nao casa" ou ErrBadPattern,
-	// nunca um laco.
+	// What matters is that it terminates. The outcome is "no match" or
+	// ErrBadPattern, never a loop.
 	if err != nil {
 		assert.ErrorIs(t, err, path.ErrBadPattern)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Distincao entre codigo de saida e erro de transporte.
+// Distinction between exit code and transport error.
 // ---------------------------------------------------------------------------
 
 func TestClassificarSaidaSSHComandoOK(t *testing.T) {
@@ -275,8 +276,9 @@ func TestClassificarSaidaSSHComandoOK(t *testing.T) {
 }
 
 func TestClassificarSaidaSSHExitMissingEFalhaDeTransporte(t *testing.T) {
-	// A sessao terminou sem o servidor dizer como: a conexao caiu. Devolver
-	// codigo zero com err nil faria isso parecer sucesso.
+	// The session ended without the server saying how: the connection
+	// dropped. Returning code zero with a nil err would make that look like
+	// success.
 	_, _, codigo, err := classificarSaidaSSH(nil, nil, &ssh.ExitMissingError{})
 
 	require.Error(t, err)
@@ -292,7 +294,7 @@ func TestClassificarSaidaSSHErroDeIOEFalhaDeTransporte(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Montagem da linha de comando: zero shell.
+// Building the command line: zero shell.
 // ---------------------------------------------------------------------------
 
 func TestEscaparArgumento(t *testing.T) {
@@ -323,16 +325,16 @@ func TestMontarLinhaDeComandoCitaCadaArgumento(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Servidor SSH em memoria: o resto so se prova ponta a ponta.
+// In-memory SSH server: the rest can only be proven end to end.
 // ---------------------------------------------------------------------------
 
-// respostaExec e o que o servidor de teste devolve para um comando.
+// respostaExec is what the test server returns for a command.
 type respostaExec struct {
 	stdout string
 	stderr string
 	codigo uint32
-	// semStatus reproduz a conexao caindo: o canal fecha sem exit-status, e
-	// o cliente recebe *ssh.ExitMissingError.
+	// semStatus reproduces the connection dropping: the channel closes with
+	// no exit-status, and the client receives *ssh.ExitMissingError.
 	semStatus bool
 }
 
@@ -348,10 +350,10 @@ type servidorSSHTeste struct {
 
 const senhaDeTeste = "senha-de-teste"
 
-// subirServidorSSH poe de pe um servidor SSH real em 127.0.0.1:0, com chave de
-// host efemera e autenticacao por senha. Sem isso nao ha como provar que um
-// codigo de saida diferente de zero chega como resultado e uma queda de
-// conexao chega como erro.
+// subirServidorSSH brings up a real SSH server on 127.0.0.1:0, with an
+// ephemeral host key and password authentication. Without it there is no way
+// to prove that a non-zero exit code arrives as a result and a dropped
+// connection arrives as an error.
 func subirServidorSSH(t *testing.T, responder func(string) respostaExec) *servidorSSHTeste {
 	t.Helper()
 
@@ -365,7 +367,7 @@ func subirServidorSSH(t *testing.T, responder func(string) respostaExec) *servid
 			if string(senha) == senhaDeTeste {
 				return nil, nil
 			}
-			return nil, fmt.Errorf("senha invalida")
+			return nil, fmt.Errorf("invalid password")
 		},
 	}
 	cfg.AddHostKey(assinante)
@@ -415,7 +417,7 @@ func (s *servidorSSHTeste) atender(conn net.Conn, cfg *ssh.ServerConfig) {
 
 	for novo := range canaisNovos {
 		if novo.ChannelType() != "session" {
-			_ = novo.Reject(ssh.UnknownChannelType, "so session")
+			_ = novo.Reject(ssh.UnknownChannelType, "session only")
 			continue
 		}
 		canal, pedidos, err := novo.Accept()
@@ -492,10 +494,10 @@ func (s *servidorSSHTeste) comandosRecebidos() []string {
 	return append([]string{}, s.recebidos...)
 }
 
-// opcoesPara monta as SSHOptions que alcancam o servidor de teste, gravando a
-// chave de host num known_hosts temporario. Verificacao estrita, como em
-// producao: o teste tambem prova que a politica da DR1 nao atrapalha o caminho
-// legitimo.
+// opcoesPara builds the SSHOptions that reach the test server, writing the
+// host key into a temporary known_hosts. Strict verification, as in
+// production: the test also proves the DR1 policy does not get in the way of
+// the legitimate path.
 func opcoesPara(t *testing.T, s *servidorSSHTeste) SSHOptions {
 	t.Helper()
 
@@ -520,8 +522,8 @@ func opcoesPara(t *testing.T, s *servidorSSHTeste) SSHOptions {
 }
 
 func TestSSHRunCodigoDiferenteDeZeroNaoEErro(t *testing.T) {
-	// A invariante central do Transport: `nginx -t` reprovando a
-	// configuracao e resultado, nao falha de infraestrutura.
+	// The central Transport invariant: `nginx -t` rejecting the
+	// configuration is a result, not an infrastructure failure.
 	s := subirServidorSSH(t, func(string) respostaExec {
 		return respostaExec{
 			stderr: "nginx: configuration file test failed\n",
@@ -533,7 +535,7 @@ func TestSSHRunCodigoDiferenteDeZeroNaoEErro(t *testing.T) {
 
 	stdout, stderr, codigo, err := tr.Run(context.Background(), []string{"nginx", "-t"})
 
-	require.NoError(t, err, "codigo de saida nao-zero e resultado, nunca erro")
+	require.NoError(t, err, "a non-zero exit code is a result, never an error")
 	assert.Equal(t, 1, codigo)
 	assert.Empty(t, stdout)
 	assert.Contains(t, string(stderr), "test failed")
@@ -553,8 +555,9 @@ func TestSSHRunSucesso(t *testing.T) {
 }
 
 func TestSSHRunQuedaDeConexaoEErroDeTransporte(t *testing.T) {
-	// O canal fecha sem exit-status. Sem a distincao, isso viraria "codigo 0,
-	// err nil" — um comando interrompido se passando por sucesso.
+	// The channel closes with no exit-status. Without the distinction, this
+	// would become "code 0, err nil" — an interrupted command passing for
+	// success.
 	s := subirServidorSSH(t, func(string) respostaExec {
 		return respostaExec{stdout: "parcial", semStatus: true}
 	})
@@ -562,7 +565,7 @@ func TestSSHRunQuedaDeConexaoEErroDeTransporte(t *testing.T) {
 
 	_, _, codigo, err := tr.Run(context.Background(), []string{"nginx", "-T"})
 
-	require.Error(t, err, "sessao sem status de saida e falha de transporte")
+	require.Error(t, err, "a session with no exit status is a transport failure")
 	var faltando *ssh.ExitMissingError
 	assert.ErrorAs(t, err, &faltando)
 	assert.Equal(t, 0, codigo)
@@ -623,7 +626,7 @@ func TestSSHRunContextoJaCancelado(t *testing.T) {
 	_, _, _, err := tr.Run(ctx, []string{"nginx", "-t"})
 
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.Empty(t, s.comandosRecebidos(), "contexto morto nao gasta sessao")
+	assert.Empty(t, s.comandosRecebidos(), "a dead context does not spend a session")
 }
 
 func TestSSHDescribe(t *testing.T) {
@@ -649,19 +652,19 @@ func TestSSHCloseDuasVezesESeguro(t *testing.T) {
 func TestSSHHostKeyDesconhecidoRecusa(t *testing.T) {
 	s := subirServidorSSH(t, func(string) respostaExec { return respostaExec{} })
 	opts := opcoesPara(t, s)
-	// known_hosts vazio: o host passa a ser desconhecido.
+	// Empty known_hosts: the host becomes unknown.
 	require.NoError(t, os.WriteFile(opts.KnownHostsPath, []byte("\n"), 0o600))
 
 	tr, _, err := SSHComDiagnosticos(opts)
 
 	require.Error(t, err)
 	assert.Nil(t, tr)
-	assert.Contains(t, err.Error(), "host desconhecido")
+	assert.Contains(t, err.Error(), "unknown host")
 
-	// O codigo tem de chegar intacto ate quem chamou: e pelo codigo, e nao
-	// pelo texto, que o consumidor separa primeiro acesso de chave alterada
-	// (DR1). Embrulhar isso em CodigoConexaoSSH faria a recusa de
-	// verificacao parecer falha de rede ou de credencial.
+	// The code has to reach the caller intact: it is by the code, and not
+	// by the text, that the consumer separates first access from a changed
+	// key (DR1). Wrapping this in CodigoConexaoSSH would make a
+	// verification refusal look like a network or credential failure.
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Equal(t, CodigoHostDesconhecido, e.Diag.Code)
@@ -677,8 +680,8 @@ func TestSSHConexaoRecusadaTemDiagnosticoAcionavel(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, tr)
 	assert.NotNil(t, diags)
-	assert.Contains(t, err.Error(), "nao foi possivel conectar")
-	assert.Contains(t, err.Error(), "Metodos de autenticacao oferecidos")
+	assert.Contains(t, err.Error(), "could not connect")
+	assert.Contains(t, err.Error(), "Authentication methods offered")
 }
 
 func TestSSHSemHostEErroDeUso(t *testing.T) {
@@ -686,11 +689,11 @@ func TestSSHSemHostEErroDeUso(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, tr)
-	assert.NotNil(t, diags, "a lista de diagnosticos nunca e nil")
+	assert.NotNil(t, diags, "the list of diagnostics is never nil")
 }
 
 // ---------------------------------------------------------------------------
-// SFTP ponta a ponta: Open e Glob contra um servidor de verdade.
+// SFTP end to end: Open and Glob against a real server.
 // ---------------------------------------------------------------------------
 
 func TestSSHOpenEGlobPontaAPonta(t *testing.T) {
@@ -706,7 +709,7 @@ func TestSSHOpenEGlobPontaAPonta(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(confd, "ssl.conf"), []byte("ssl on;\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(confd, "leiame.txt"), []byte("nao\n"), 0o644))
 
-	// Caminho remoto e POSIX: filepath.ToSlash cobre o cliente em Windows.
+	// A remote path is POSIX: filepath.ToSlash covers a Windows client.
 	raizPOSIX := filepath.ToSlash(raiz)
 
 	rc, err := tr.Open(raizPOSIX + "/nginx.conf")
@@ -732,8 +735,9 @@ func TestSSHOpenEGlobPontaAPonta(t *testing.T) {
 }
 
 func TestSSHGlobPropagaErroDepoisDaConexaoCair(t *testing.T) {
-	// O contrario do sftp.Client.Glob: com a conexao morta ele devolveria
-	// (nil, nil) no caminho sem metacaractere e uma lista vazia no outro.
+	// The opposite of sftp.Client.Glob: with the connection dead it would
+	// return (nil, nil) on the path with no metacharacters and an empty
+	// list on the other one.
 	s := subirServidorSSH(t, func(string) respostaExec { return respostaExec{} })
 	tr := conectar(t, s)
 
@@ -741,10 +745,10 @@ func TestSSHGlobPropagaErroDepoisDaConexaoCair(t *testing.T) {
 	require.NoError(t, tr.Close())
 
 	_, err := tr.Glob(raiz + "/*.conf")
-	require.Error(t, err, "conexao morta nao pode virar lista vazia")
+	require.Error(t, err, "a dead connection cannot become an empty list")
 
 	_, err = tr.Glob(raiz + "/nginx.conf")
-	require.Error(t, err, "conexao morta nao pode virar lista vazia")
+	require.Error(t, err, "a dead connection cannot become an empty list")
 }
 
 func conectar(t *testing.T, s *servidorSSHTeste) Transport {

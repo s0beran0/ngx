@@ -10,17 +10,17 @@ import (
 	"strings"
 )
 
-// limiteBinario limita o que aceitamos extrair do arquivo para a memoria. Um
-// arquivo comprimido pequeno pode declarar um membro enorme; sem teto, a
-// extracao vira consumo ilimitado de memoria.
+// limiteBinario caps what we accept to extract from the archive into memory.
+// A small compressed file can declare a huge member; with no ceiling,
+// extraction becomes unbounded memory consumption.
 const limiteBinario = 256 << 20 // 256 MiB
 
-// ExtrairBinario tira o executavel do arquivo publicado na release. O
-// goreleaser empacota tar.gz em Unix e zip no Windows.
+// ExtrairBinario takes the executable out of the archive published in the
+// release. goreleaser packages tar.gz on Unix and zip on Windows.
 //
-// A extracao acontece SO DEPOIS de Verify: descomprimir dados nao
-// autenticados e dar ao atacante um parser para atacar antes mesmo de a
-// assinatura ser conferida.
+// Extraction happens ONLY AFTER Verify: decompressing unauthenticated data is
+// handing the attacker a parser to attack before the signature has even been
+// checked.
 func ExtrairBinario(nomeArquivo string, dados []byte, so string) ([]byte, error) {
 	alvo := "ngx"
 	if so == "windows" {
@@ -34,8 +34,8 @@ func ExtrairBinario(nomeArquivo string, dados []byte, so string) ([]byte, error)
 		return doZip(nomeArquivo, dados, alvo)
 	default:
 		return nil, erro(CodigoArtefatoInvalido,
-			"o artefato %s nao esta num formato que o update saiba abrir (.tar.gz ou "+
-				".zip); baixe a versao nova manualmente", nomeArquivo)
+			"the artifact %s is not in a format the update knows how to open (.tar.gz "+
+				"or .zip); download the new version manually", nomeArquivo)
 	}
 }
 
@@ -43,7 +43,7 @@ func doTarGz(nomeArquivo string, dados []byte, alvo string) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(dados))
 	if err != nil {
 		return nil, erroCausa(err, CodigoArtefatoInvalido,
-			"o artefato %s nao pode ser descomprimido", nomeArquivo)
+			"the artifact %s cannot be decompressed", nomeArquivo)
 	}
 	defer gz.Close()
 
@@ -55,7 +55,7 @@ func doTarGz(nomeArquivo string, dados []byte, alvo string) ([]byte, error) {
 		}
 		if err != nil {
 			return nil, erroCausa(err, CodigoArtefatoInvalido,
-				"o artefato %s esta truncado ou corrompido", nomeArquivo)
+				"the artifact %s is truncated or corrupted", nomeArquivo)
 		}
 		if h.Typeflag != tar.TypeReg || path.Base(h.Name) != alvo {
 			continue
@@ -63,23 +63,23 @@ func doTarGz(nomeArquivo string, dados []byte, alvo string) ([]byte, error) {
 		bin, err := io.ReadAll(io.LimitReader(tr, limiteBinario+1))
 		if err != nil {
 			return nil, erroCausa(err, CodigoArtefatoInvalido,
-				"nao foi possivel ler %s de dentro de %s", alvo, nomeArquivo)
+				"could not read %s from inside %s", alvo, nomeArquivo)
 		}
 		if int64(len(bin)) > limiteBinario {
 			return nil, erro(CodigoArtefatoInvalido,
-				"o binario dentro de %s passou do limite de tamanho aceito", nomeArquivo)
+				"the binary inside %s went past the accepted size limit", nomeArquivo)
 		}
 		return bin, nil
 	}
 	return nil, erro(CodigoArtefatoInvalido,
-		"o artefato %s nao contem o executavel %s", nomeArquivo, alvo)
+		"the artifact %s does not contain the executable %s", nomeArquivo, alvo)
 }
 
 func doZip(nomeArquivo string, dados []byte, alvo string) ([]byte, error) {
 	zr, err := zip.NewReader(bytes.NewReader(dados), int64(len(dados)))
 	if err != nil {
 		return nil, erroCausa(err, CodigoArtefatoInvalido,
-			"o artefato %s nao pode ser aberto como zip", nomeArquivo)
+			"the artifact %s cannot be opened as a zip", nomeArquivo)
 	}
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() || path.Base(f.Name) != alvo {
@@ -88,20 +88,20 @@ func doZip(nomeArquivo string, dados []byte, alvo string) ([]byte, error) {
 		rc, err := f.Open()
 		if err != nil {
 			return nil, erroCausa(err, CodigoArtefatoInvalido,
-				"nao foi possivel abrir %s dentro de %s", alvo, nomeArquivo)
+				"could not open %s inside %s", alvo, nomeArquivo)
 		}
 		bin, err := io.ReadAll(io.LimitReader(rc, limiteBinario+1))
 		rc.Close()
 		if err != nil {
 			return nil, erroCausa(err, CodigoArtefatoInvalido,
-				"nao foi possivel ler %s de dentro de %s", alvo, nomeArquivo)
+				"could not read %s from inside %s", alvo, nomeArquivo)
 		}
 		if int64(len(bin)) > limiteBinario {
 			return nil, erro(CodigoArtefatoInvalido,
-				"o binario dentro de %s passou do limite de tamanho aceito", nomeArquivo)
+				"the binary inside %s went past the accepted size limit", nomeArquivo)
 		}
 		return bin, nil
 	}
 	return nil, erro(CodigoArtefatoInvalido,
-		"o artefato %s nao contem o executavel %s", nomeArquivo, alvo)
+		"the artifact %s does not contain the executable %s", nomeArquivo, alvo)
 }

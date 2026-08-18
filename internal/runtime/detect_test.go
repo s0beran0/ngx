@@ -28,20 +28,20 @@ func TestDetectExtraiCamposDoV(t *testing.T) {
 	assert.Contains(t, info.Modules, "http_ssl_module")
 	assert.Contains(t, info.Modules, "http_v2_module")
 
-	// Modulo construido como dinamico nao e modulo carregado: so um
-	// load_module na arvore responde isso.
+	// A module built as dynamic is not a loaded module: only a load_module
+	// in the tree answers that.
 	assert.NotContains(t, info.Modules, "http_image_filter_module")
 	assert.Contains(t, info.DynamicAvailable, "http_image_filter_module")
 
-	// As aspas do --with-cc-opt nao podem vazar para a lista de modulos.
+	// The quotes from --with-cc-opt must not leak into the module list.
 	for _, m := range info.Modules {
 		assert.NotContains(t, m, "'")
 		assert.NotContains(t, m, "-flto")
 	}
 }
 
-// A garantia central da tarefa: o parser nao sabe de onde os bytes vieram.
-// Mesma gravacao por transportes diferentes, mesmo resultado.
+// The central guarantee of the task: the parser does not know where the bytes
+// came from. Same recording through different transports, same result.
 func TestDetectIdenticoLocalERemoto(t *testing.T) {
 	local := novoFake("local").responde("nginx -V", resposta{stderr: saidaVMenosMaiusculo})
 	remoto := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -V", resposta{stderr: saidaVMenosMaiusculo})
@@ -56,8 +56,8 @@ func TestDetectIdenticoLocalERemoto(t *testing.T) {
 	assert.Equal(t, "ssh://opc@10.0.0.7:22", New(remoto).Alvo())
 }
 
-// Alguns transportes juntam stdout e stderr. O `-V` escreve em stderr, mas o
-// parser tem de funcionar nos dois casos.
+// Some transports merge stdout and stderr. `-V` writes to stderr, but the
+// parser has to work in both cases.
 func TestDetectAceitaSaidaEmStdout(t *testing.T) {
 	f := novoFake("local").responde("nginx -V", resposta{stdout: saidaVMenosMaiusculo})
 
@@ -75,8 +75,8 @@ func TestDetectResolveCaminhoRelativoAoPrefixo(t *testing.T) {
 	assert.Equal(t, "/usr/local/nginx/logs/nginx.pid", info.PIDPath)
 }
 
-// Campo indisponivel e omitido, nunca estimado: um build que nao declara
-// --pid-path nao ganha um /run/nginx.pid chutado.
+// An unavailable field is omitted, never estimated: a build that does not
+// declare --pid-path does not get a guessed /run/nginx.pid.
 func TestDetectOmiteCampoQueOVNaoInforma(t *testing.T) {
 	f := novoFake("local").responde("nginx -V", resposta{
 		stderr: "nginx version: nginx/1.27.0\nconfigure arguments: --prefix=/etc/nginx\n",
@@ -93,7 +93,7 @@ func TestDetectOmiteCampoQueOVNaoInforma(t *testing.T) {
 	assert.NotContains(t, string(bruto), "pid_path")
 	assert.NotContains(t, string(bruto), "main_config")
 
-	// Lista vazia serializa como [], nunca null.
+	// An empty list serializes as [], never as null.
 	assert.Contains(t, string(bruto), `"modules":[]`)
 	assert.Contains(t, string(bruto), `"dynamic_available":[]`)
 }
@@ -109,8 +109,8 @@ func TestDetectVariante(t *testing.T) {
 	assert.Equal(t, "1.21.4.1", info.Version)
 }
 
-// Binario ausente e erro de transporte no caso local: exec devolve
-// ErrNotFound sem nunca rodar nada.
+// A missing binary is a transport error in the local case: exec returns
+// ErrNotFound without ever running anything.
 func TestDetectNginxAusenteLocalmente(t *testing.T) {
 	f := novoFake("local")
 	f.padrao = &resposta{err: &exec.Error{Name: "nginx", Err: exec.ErrNotFound}}
@@ -123,8 +123,9 @@ func TestDetectNginxAusenteLocalmente(t *testing.T) {
 	assert.True(t, errors.Is(err, exec.ErrNotFound))
 }
 
-// No caso remoto o mesmo desfecho chega como codigo 127 do shell do alvo, sem
-// erro de transporte nenhum. Os dois tem de virar o mesmo diagnostico.
+// In the remote case the same outcome arrives as exit code 127 from the
+// target's shell, with no transport error at all. Both have to become the same
+// diagnostic.
 func TestDetectNginxAusenteRemotamente(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -V", resposta{
 		stderr: "bash: nginx: command not found\n",
@@ -140,7 +141,7 @@ func TestDetectNginxAusenteRemotamente(t *testing.T) {
 }
 
 func TestDetectSaidaNaoReconhecida(t *testing.T) {
-	f := novoFake("local").responde("nginx -V", resposta{stderr: "outra coisa qualquer\n"})
+	f := novoFake("local").responde("nginx -V", resposta{stderr: "something else entirely\n"})
 
 	_, err := New(f).Detect(context.Background())
 

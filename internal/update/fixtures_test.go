@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// parDeChaves gera um par minisign no proprio teste. Nenhuma chave fixa fica
-// versionada: uma chave de teste embutida no repositorio vira, mais cedo ou
-// mais tarde, uma chave que alguem confunde com a de producao.
+// parDeChaves generates a minisign pair inside the test itself. No fixed key
+// is versioned: a test key embedded in the repository becomes, sooner or
+// later, a key someone mistakes for the production one.
 func parDeChaves(t *testing.T) (minisign.PublicKey, minisign.PrivateKey) {
 	t.Helper()
 	pub, priv, err := minisign.GenerateKey(rand.Reader)
@@ -25,19 +25,19 @@ func parDeChaves(t *testing.T) (minisign.PublicKey, minisign.PrivateKey) {
 	return pub, priv
 }
 
-// textoDaChave devolve a chave publica no formato de uma linha, que e como
-// ela entra no binario via -ldflags.
+// textoDaChave returns the public key in the single-line format, which is how
+// it goes into the binary via -ldflags.
 func textoDaChave(t *testing.T, pub minisign.PublicKey) string {
 	t.Helper()
 	return pub.String()
 }
 
-// checksumsPara monta um checksums.txt no formato do goreleaser: SHA256 em
-// hexadecimal, dois espacos, nome do arquivo.
+// checksumsPara assembles a checksums.txt in the goreleaser format: SHA256 in
+// hexadecimal, two spaces, the file name.
 func checksumsPara(arquivos map[string][]byte) []byte {
 	var b bytes.Buffer
-	// A ordem nao importa para o parser, mas um mapa iterado direto deixaria
-	// o fixture instavel entre execucoes.
+	// The order does not matter to the parser, but iterating a map directly
+	// would leave the fixture unstable across runs.
 	for _, nome := range chavesOrdenadas(arquivos) {
 		soma := sha256.Sum256(arquivos[nome])
 		fmt.Fprintf(&b, "%s  %s\n", hex.EncodeToString(soma[:]), nome)
@@ -58,7 +58,7 @@ func chavesOrdenadas(m map[string][]byte) []string {
 	return nomes
 }
 
-// tarGzCom empacota os arquivos num tar.gz, como o goreleaser faz para Unix.
+// tarGzCom packs the files into a tar.gz, the way goreleaser does for Unix.
 func tarGzCom(t *testing.T, arquivos map[string][]byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -80,7 +80,7 @@ func tarGzCom(t *testing.T, arquivos map[string][]byte) []byte {
 	return buf.Bytes()
 }
 
-// zipCom empacota os arquivos num zip, como o goreleaser faz para Windows.
+// zipCom packs the files into a zip, the way goreleaser does for Windows.
 func zipCom(t *testing.T, arquivos map[string][]byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer

@@ -13,14 +13,15 @@ func TestCodeOfNilEhSucesso(t *testing.T) {
 	require.Equal(t, output.ExitOK, output.CodeOf(nil))
 }
 
-// Um erro que nao carrega codigo e um erro interno, nao um sucesso.
+// An error that carries no code is an internal error, not a success.
 func TestCodeOfErroDesconhecidoEhInterno(t *testing.T) {
 	require.Equal(t, output.ExitInternal, output.CodeOf(errors.New("boom")))
 }
 
-// Os valores numericos dos exit codes sao o contrato de saida do processo.
-// Comparar constante simbolica com constante simbolica nao pega uma troca
-// acidental de valor (ex.: ExitDrift de 7 para 8); aqui fixamos os numeros.
+// The numeric values of the exit codes are the process output contract.
+// Comparing a symbolic constant against a symbolic constant does not catch an
+// accidental value swap (e.g. ExitDrift going from 7 to 8); here we pin the
+// numbers.
 func TestValoresDosExitCodesSaoContrato(t *testing.T) {
 	require.Equal(t, 0, int(output.ExitOK))
 	require.Equal(t, 1, int(output.ExitInternal))
@@ -37,11 +38,11 @@ func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 		want     output.ExitCode
 		wantDiag string
 	}{
-		{"usage", output.Usage("seletor malformado: %q", "http..server"), output.ExitUsage, "NGX-0002"},
-		{"config invalida", output.InvalidConfig("nginx -t falhou"), output.ExitInvalidConfig, "NGX-0003"},
-		{"drift", output.Drift("config em disco mudou apos o ultimo reload"), output.ExitDrift, "NGX-0007"},
+		{"usage", output.Usage("malformed selector: %q", "http..server"), output.ExitUsage, "NGX-0002"},
+		{"invalid config", output.InvalidConfig("nginx -t failed"), output.ExitInvalidConfig, "NGX-0003"},
+		{"drift", output.Drift("the config on disk changed after the last reload"), output.ExitDrift, "NGX-0007"},
 		{"hash", output.HashMismatch("sha256:aa", "sha256:bb"), output.ExitHashMismatch, "NGX-0009"},
-		{"interno", output.Internal(errors.New("io"), "falha ao ler"), output.ExitInternal, "NGX-0001"},
+		{"internal", output.Internal(errors.New("io"), "read failed"), output.ExitInternal, "NGX-0001"},
 	}
 
 	for _, c := range casos {
@@ -56,17 +57,18 @@ func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 	}
 }
 
-// O codigo precisa sobreviver ao wrapping, senao um erro embrulhado por uma
-// camada intermediaria vira exit 1 silenciosamente.
+// The code needs to survive wrapping, otherwise an error wrapped by an
+// intermediate layer silently becomes exit 1.
 func TestCodeOfAtravessaWrapping(t *testing.T) {
-	err := fmt.Errorf("ao carregar configuracao: %w", output.Usage("flag invalida"))
+	err := fmt.Errorf("while loading the configuration: %w", output.Usage("invalid flag"))
 
 	require.Equal(t, output.ExitUsage, output.CodeOf(err))
 }
 
-// Todo erro tipado precisa render um diagnostico exibivel ao agente.
+// Every typed error needs to yield a diagnostic that can be shown to the
+// agent.
 func TestErroExpoeDiagnostico(t *testing.T) {
-	err := output.Usage("seletor malformado: %q", "http..server")
+	err := output.Usage("malformed selector: %q", "http..server")
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
@@ -75,19 +77,19 @@ func TestErroExpoeDiagnostico(t *testing.T) {
 	require.Contains(t, e.Diag.Message, "http..server")
 }
 
-// HashMismatch e o erro que impede o agente de agir sobre um ID envelhecido.
-// A mensagem precisa mostrar os dois hashes para ele saber o que aconteceu.
+// HashMismatch is the error that stops the agent from acting on a stale ID.
+// The message needs to show both hashes so it knows what happened.
 func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
-	err := output.HashMismatch("sha256:esperado", "sha256:atual")
+	err := output.HashMismatch("sha256:expected", "sha256:current")
 
-	require.Contains(t, err.Error(), "sha256:esperado")
-	require.Contains(t, err.Error(), "sha256:atual")
+	require.Contains(t, err.Error(), "sha256:expected")
+	require.Contains(t, err.Error(), "sha256:current")
 }
 
-// Internal precisa preservar a causa original via Unwrap, mesmo que ela nao
-// apareca na mensagem exibida. Sem isso, quem chama errors.Is/errors.As
-// contra a causa nunca a encontra.
+// Internal needs to preserve the original cause via Unwrap, even if it does
+// not show up in the displayed message. Without that, whoever calls
+// errors.Is/errors.As against the cause never finds it.
 func TestInternalPreservaACausa(t *testing.T) {
-	causa := errors.New("io: disco cheio")
-	require.ErrorIs(t, output.Internal(causa, "falha ao ler"), causa)
+	causa := errors.New("io: disk full")
+	require.ErrorIs(t, output.Internal(causa, "read failed"), causa)
 }

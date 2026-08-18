@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 )
 
-// localTransport opera na maquina onde o ngx roda. Nao guarda estado:
-// e um envelope fino sobre os/exec/filepath.
+// localTransport operates on the machine where ngx runs. It keeps no state:
+// it is a thin wrapper over os/exec/filepath.
 type localTransport struct{}
 
-// Local devolve o transporte da maquina local.
+// Local returns the transport for the local machine.
 func Local() Transport {
 	return &localTransport{}
 }
@@ -29,7 +29,7 @@ func (t *localTransport) Glob(pattern string) ([]string, error) {
 		return nil, err
 	}
 	if matches == nil {
-		// Lista vazia, nunca nil: quem consome faz len() sem checar.
+		// Empty list, never nil: consumers call len() without checking.
 		return []string{}, nil
 	}
 	return matches, nil
@@ -37,7 +37,7 @@ func (t *localTransport) Glob(pattern string) ([]string, error) {
 
 func (t *localTransport) Run(ctx context.Context, argv []string) ([]byte, []byte, int, error) {
 	if len(argv) == 0 {
-		return nil, nil, 0, errors.New("transport: argv vazio")
+		return nil, nil, 0, errors.New("transport: empty argv")
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
@@ -47,9 +47,9 @@ func (t *localTransport) Run(ctx context.Context, argv []string) ([]byte, []byte
 
 	err := cmd.Run()
 
-	// O contexto vence sobre qualquer coisa: um processo morto por
-	// cancelamento tambem devolve ExitError, mas isso e falha de
-	// transporte, nao veredito do comando.
+	// The context wins over anything else: a process killed by
+	// cancellation also returns an ExitError, but that is a transport
+	// failure, not the command's verdict.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return stdout.Bytes(), stderr.Bytes(), 0, ctxErr
 	}
@@ -57,10 +57,10 @@ func (t *localTransport) Run(ctx context.Context, argv []string) ([]byte, []byte
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			// O comando rodou e reprovou. Isso e resultado, nao erro.
+			// The command ran and rejected. That is a result, not an error.
 			return stdout.Bytes(), stderr.Bytes(), exitErr.ExitCode(), nil
 		}
-		// Binario inexistente, sem permissao de execucao, e afins.
+		// Missing binary, no execute permission, and the like.
 		return stdout.Bytes(), stderr.Bytes(), 0, err
 	}
 

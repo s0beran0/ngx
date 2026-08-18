@@ -9,28 +9,30 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// TestResult e o veredito de `nginx -t` ja estruturado.
+// TestResult is the verdict of `nginx -t`, already structured.
 //
-// OK vem do codigo de saida, nao do texto: o nginx e quem sabe se aprovou.
-// Uma configuracao reprovada e um TestResult com OK false e erro nulo — nao
-// e falha de infraestrutura, e a resposta a pergunta que se fez.
+// OK comes from the exit code, not from the text: nginx is the one that knows
+// whether it approved. A rejected configuration is a TestResult with OK false
+// and a nil error -- it is not an infrastructure failure, it is the answer to
+// the question that was asked.
 type TestResult struct {
 	OK bool `json:"ok"`
 
-	// ConfigFile e o arquivo de topo que o nginx testou, quando ele diz
-	// qual foi. Omitido quando nao diz.
+	// ConfigFile is the top-level file nginx tested, when it says which one
+	// it was. Omitted when it does not say.
 	ConfigFile string `json:"config_file,omitempty"`
 
-	// Diagnostics traz uma entrada por linha de diagnostico do nginx.
-	// Nunca e nil.
+	// Diagnostics carries one entry per diagnostic line from nginx. Never
+	// nil.
 	Diagnostics []output.Diagnostic `json:"diagnostics"`
 
-	// Raw e a saida original, preservada para depuracao de casos que o
-	// parser nao reconheceu.
+	// Raw is the original output, preserved for debugging cases the parser
+	// did not recognize.
 	Raw string `json:"raw,omitempty"`
 }
 
-// TestConfig executa `nginx -t` no alvo e traduz a saida em diagnosticos.
+// TestConfig runs `nginx -t` on the target and translates the output into
+// diagnostics.
 func (r *Runtime) TestConfig(ctx context.Context) (*TestResult, error) {
 	e, err := r.executar(ctx, "-t")
 	if err != nil {
@@ -51,29 +53,30 @@ func montarTestResult(e *execucao) *TestResult {
 }
 
 var (
-	// Linha de diagnostico do nginx: "nginx: [emerg] mensagem".
+	// An nginx diagnostic line: "nginx: [emerg] message".
 	reDiagnostico = regexp.MustCompile(`^nginx: \[([a-z]+)\] (.*)$`)
 
-	// Sufixo de localizacao: "... in /etc/nginx/conf.d/a.conf:3".
-	// O "in" e ganancioso de proposito — mensagens tem "in" no meio
+	// Location suffix: "... in /etc/nginx/conf.d/a.conf:3".
+	// The "in" is greedy on purpose -- messages have "in" in the middle
 	// ("invalid number of arguments in \"listen\" directive in /f.conf:2")
-	// e o que interessa e sempre o ultimo.
+	// and the one that matters is always the last.
 	reLocalizacao = regexp.MustCompile(`^(.*) in (\S+):(\d+)$`)
 
-	// Linhas de sumario, que nomeiam o arquivo de topo testado.
+	// Summary lines, which name the top-level file that was tested.
 	reArquivoTestado = regexp.MustCompile(
 		`configuration file (\S+) (?:syntax is ok|test (?:is successful|failed))`)
 )
 
-// ParseDiagnosticos traduz a saida textual do nginx em diagnosticos
-// estruturados.
+// ParseDiagnosticos translates the textual output of nginx into structured
+// diagnostics.
 //
-// A funcao e exportada e nao recebe nada alem do texto: e o coracao da regra
-// de que o parser nao sabe de onde os bytes vieram. A mesma funcao serve a
-// `nginx -t`, a `nginx -T` e a qualquer saida gravada num teste.
+// The function is exported and takes nothing beyond the text: it is the heart
+// of the rule that the parser does not know where the bytes came from. The
+// same function serves `nginx -t`, `nginx -T` and any output recorded in a
+// test.
 //
-// O nivel do nginx vira severity; o codigo e sempre o mesmo, porque a
-// severidade nunca entra no codigo.
+// The nginx level becomes severity; the code is always the same, because
+// severity never goes into the code.
 func ParseDiagnosticos(texto string) []output.Diagnostic {
 	diags := []output.Diagnostic{}
 
@@ -105,9 +108,9 @@ func ParseDiagnosticos(texto string) []output.Diagnostic {
 	return diags
 }
 
-// severidadeDoNivel mapeia o nivel do nginx para a severidade do envelope.
-// Nivel desconhecido vira erro, e nao info: subestimar um nivel que nao se
-// reconhece esconde exatamente o caso novo.
+// severidadeDoNivel maps the nginx level to the envelope severity. An unknown
+// level becomes an error, not info: underrating a level that is not
+// recognized hides exactly the new case.
 func severidadeDoNivel(nivel string) output.Severity {
 	switch nivel {
 	case "warn":

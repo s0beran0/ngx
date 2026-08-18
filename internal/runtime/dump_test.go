@@ -28,7 +28,7 @@ func TestDumpSeparaArquivos(t *testing.T) {
 
 	assert.Equal(t, "/etc/nginx/conf.d/site.conf", d.Files[1].Path)
 	assert.Contains(t, d.Files[1].Content, "server_name exemplo.com;")
-	// O ultimo arquivo nao ganha uma linha em branco a mais que os outros.
+	// The last file does not get one more blank line than the others.
 	assert.True(t, strings.HasSuffix(d.Files[1].Content, "}\n"))
 }
 
@@ -44,8 +44,8 @@ func TestDumpIdenticoLocalERemoto(t *testing.T) {
 	assert.Equal(t, a, b)
 }
 
-// Configuracao invalida faz o `-T` sair diferente de zero e nao despejar
-// nada. Continua sendo resultado.
+// An invalid configuration makes `-T` exit non-zero and dump nothing. It is
+// still a result.
 func TestDumpConfiguracaoInvalidaNaoEErro(t *testing.T) {
 	f := novoFake("local").responde("nginx -T", resposta{stderr: saidaTesteFalhou, exit: 1})
 
@@ -62,9 +62,9 @@ func TestDumpConfiguracaoInvalidaNaoEErro(t *testing.T) {
 	assert.Contains(t, string(bruto), `"files":[]`)
 }
 
-// DR5, o caso medido no host real: `nginx -T` falha para o usuario comum.
-// Sem --sudo o ngx reporta a exigencia e diz qual e o comando — e nao tenta
-// de novo.
+// DR5, the case measured on the real host: `nginx -T` fails for an ordinary
+// user. Without --sudo ngx reports the requirement and says what the command
+// is -- and does not try again.
 func TestDumpSemPrivilegioReportaENaoEscala(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22").responde("nginx -T", resposta{
 		stderr: saidaSemPrivilegio,
@@ -80,15 +80,15 @@ func TestDumpSemPrivilegioReportaENaoEscala(t *testing.T) {
 	assert.Contains(t, e.Diag.Message, "--sudo")
 	assert.Contains(t, e.Diag.Message, "sudo -n nginx -T")
 
-	// O ponto da DR5: uma unica chamada, sem sudo. Escalar em silencio e o
-	// defeito que a decisao existe para impedir.
+	// The point of DR5: a single call, with no sudo. Escalating in silence
+	// is the defect the decision exists to prevent.
 	chamadas := f.chamadas()
 	require.Len(t, chamadas, 1)
 	assert.Equal(t, []string{"nginx", "-T"}, chamadas[0])
 }
 
-// O outro caminho: com --sudo explicito, o comando roda escalado e devolve a
-// configuracao.
+// The other path: with an explicit --sudo, the command runs escalated and
+// returns the configuration.
 func TestDumpComSudoExecutaEscalado(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22").responde("sudo -n nginx -T", resposta{
 		stdout: saidaDump,
@@ -105,8 +105,9 @@ func TestDumpComSudoExecutaEscalado(t *testing.T) {
 	assert.Equal(t, []string{"sudo", "-n", "nginx", "-T"}, chamadas[0])
 }
 
-// Mesma gravacao, mesmos arquivos: o resultado com --sudo e o resultado sem
-// privilegio necessario nao podem diferir em nada alem de terem sido obtidos.
+// Same recording, same files: the result with --sudo and the result without
+// any privilege requirement must not differ in anything beyond how they were
+// obtained.
 func TestDumpComSudoIgualAoSemSudo(t *testing.T) {
 	semSudo := novoFake("local").responde("nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
 	comSudo := novoFake("local").responde("sudo -n nginx -T", resposta{stdout: saidaDump, stderr: saidaTesteOK})
@@ -119,9 +120,9 @@ func TestDumpComSudoIgualAoSemSudo(t *testing.T) {
 	assert.Equal(t, a, b)
 }
 
-// --sudo pedido num alvo onde o sudo quer senha: o ngx nao tem TTY e nao tem
-// para onde mandar a senha, entao isso e um desfecho proprio, nao um
-// "precisa de privilegio" generico.
+// --sudo requested on a target whose sudo wants a password: ngx has no TTY
+// and nowhere to send the password, so this is an outcome of its own, not a
+// generic "needs privilege".
 func TestDumpSudoExigeSenha(t *testing.T) {
 	f := novoFake("ssh://opc@10.0.0.7:22").responde("sudo -n nginx -T", resposta{
 		stderr: "sudo: a password is required\n",
@@ -135,8 +136,8 @@ func TestDumpSudoExigeSenha(t *testing.T) {
 	assert.Equal(t, CodigoSudoIndisponivel, e.Diag.Code)
 }
 
-// Com --sudo e ainda assim sem permissao, a mensagem nao pode mandar usar
-// --sudo de novo.
+// With --sudo and still no permission, the message must not tell the user to
+// use --sudo again.
 func TestDumpComSudoAindaSemPermissao(t *testing.T) {
 	f := novoFake("local").responde("sudo -n nginx -T", resposta{
 		stderr: saidaSemPrivilegio,
@@ -148,11 +149,11 @@ func TestDumpComSudoAindaSemPermissao(t *testing.T) {
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Equal(t, CodigoPrivilegioNecessario, e.Diag.Code)
-	assert.Contains(t, e.Diag.Message, "com --sudo")
+	assert.Contains(t, e.Diag.Message, "with --sudo")
 }
 
-// Erro de sintaxe nao pode ser confundido com falta de privilegio: a
-// deteccao e conservadora de proposito.
+// A syntax error must not be confused with a missing privilege: the detection
+// is conservative on purpose.
 func TestTestConfigErroDeSintaxeNaoViraPrivilegio(t *testing.T) {
 	f := novoFake("local").responde("nginx -t", resposta{stderr: saidaTesteFalhou, exit: 1})
 
@@ -162,19 +163,19 @@ func TestTestConfigErroDeSintaxeNaoViraPrivilegio(t *testing.T) {
 }
 
 func TestDividirDumpIgnoraConteudoAntesDoPrimeiroMarcador(t *testing.T) {
-	arquivos := DividirDump("lixo solto\n# configuration file /a.conf:\nfoo;\n")
+	arquivos := DividirDump("loose junk\n# configuration file /a.conf:\nfoo;\n")
 	require.Len(t, arquivos, 1)
 	assert.Equal(t, "/a.conf", arquivos[0].Path)
 	assert.Equal(t, "foo;\n", arquivos[0].Content)
 }
 
-// Um comentario dentro de uma configuracao nao pode partir o arquivo em dois:
-// o marcador so vale no inicio da linha e com o dois-pontos final.
+// A comment inside a configuration must not split the file in two: the marker
+// only counts at the start of the line and with the trailing colon.
 func TestDividirDumpNaoConfundeComentario(t *testing.T) {
-	texto := "# configuration file /a.conf:\n    # configuration file /falso.conf:\nfoo;\n"
+	texto := "# configuration file /a.conf:\n    # configuration file /fake.conf:\nfoo;\n"
 	arquivos := DividirDump(texto)
 	require.Len(t, arquivos, 1)
-	assert.Contains(t, arquivos[0].Content, "/falso.conf")
+	assert.Contains(t, arquivos[0].Content, "/fake.conf")
 }
 
 func TestDividirDumpVazio(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-// ExitCode e o codigo de saida do processo. A v0.1 emite apenas os codigos
-// abaixo; 4 (lint), 5 e 6 (apply) e 8 (mutacao ambigua) pertencem a comandos
-// que ainda nao existem e nao sao documentados como suportados ate que sejam
-// emitiveis.
+// ExitCode is the process exit code. v0.1 emits only the codes below; 4
+// (lint), 5 and 6 (apply) and 8 (ambiguous mutation) belong to commands that
+// do not exist yet and are not documented as supported until they can be
+// emitted.
 type ExitCode int
 
 const (
@@ -20,18 +20,19 @@ const (
 	ExitHashMismatch  ExitCode = 9
 )
 
-// Error e um erro que carrega seu proprio exit code e o diagnostico
-// correspondente. Comandos nunca escolhem exit code diretamente: eles
-// devolvem um destes, e main.go traduz num unico ponto.
+// Error is an error that carries its own exit code and the corresponding
+// diagnostic. Commands never pick an exit code directly: they return one of
+// these, and main.go translates it at a single point.
 type Error struct {
 	Code ExitCode
 	Diag Diagnostic
 	Err  error
 
-	// Extras sao diagnosticos que acompanham a falha sem serem a causa dela
-	// -- por exemplo, quais arquivos precisaram de privilegio antes de a
-	// leitura falhar em outro. Sem este campo eles se perderiam justamente
-	// no caminho de erro, que e onde mais ajudam a entender o que houve.
+	// Extras are diagnostics that accompany the failure without being its
+	// cause -- for example, which files required privilege before the read
+	// failed on another one. Without this field they would be lost exactly
+	// on the error path, which is where they help the most to understand
+	// what happened.
 	Extras []Diagnostic
 }
 
@@ -50,43 +51,44 @@ func newError(code ExitCode, diagCode, format string, args ...any) *Error {
 	}
 }
 
-// Usage sinaliza erro de uso: flag invalida, seletor malformado, argumento
-// obrigatorio ausente.
+// Usage signals a usage error: invalid flag, malformed selector, missing
+// required argument.
 func Usage(format string, args ...any) *Error {
 	return newError(ExitUsage, "NGX-0002", format, args...)
 }
 
-// InvalidConfig sinaliza que a configuracao do nginx nao e valida.
+// InvalidConfig signals that the nginx configuration is not valid.
 func InvalidConfig(format string, args ...any) *Error {
 	return newError(ExitInvalidConfig, "NGX-0003", format, args...)
 }
 
-// Drift sinaliza que a configuracao em disco difere da que esta carregada.
+// Drift signals that the configuration on disk differs from the loaded one.
 func Drift(format string, args ...any) *Error {
 	return newError(ExitDrift, "NGX-0007", format, args...)
 }
 
-// HashMismatch sinaliza que um ID foi apresentado contra uma versao da
-// configuracao diferente daquela em que foi gerado. Os IDs anteriores sao
-// invalidos e o agente precisa reler antes de agir.
+// HashMismatch signals that an ID was presented against a version of the
+// configuration different from the one it was generated in. The previous IDs
+// are invalid and the agent needs to read again before acting.
 func HashMismatch(esperado, atual string) *Error {
 	return newError(ExitHashMismatch, "NGX-0009",
-		"a configuracao mudou desde a leitura: esperado %s, atual %s", esperado, atual)
+		"the configuration changed since the read: expected %s, current %s", esperado, atual)
 }
 
-// Internal envolve uma falha de IO ou um defeito do proprio ngx. A causa
-// original (err) e guardada no campo Err e so fica acessivel via
-// errors.Unwrap/errors.Is/errors.As: Error() e Diag.Message devolvem apenas
-// o format, nunca a causa. Isso e deliberado — quem renderizar o diagnostico
-// no envelope JSON nao deve vazar detalhes internos ao agente.
+// Internal wraps an IO failure or a defect of ngx itself. The original cause
+// (err) is kept in the Err field and is only reachable via
+// errors.Unwrap/errors.Is/errors.As: Error() and Diag.Message return only the
+// format, never the cause. This is deliberate -- whoever renders the
+// diagnostic in the JSON envelope must not leak internal details to the
+// agent.
 func Internal(err error, format string, args ...any) *Error {
 	e := newError(ExitInternal, "NGX-0001", format, args...)
 	e.Err = err
 	return e
 }
 
-// CodeOf extrai o exit code de um erro, atravessando wrapping. Um erro sem
-// codigo e tratado como falha interna, nunca como sucesso.
+// CodeOf extracts the exit code from an error, going through wrapping. An
+// error without a code is treated as an internal failure, never as a success.
 func CodeOf(err error) ExitCode {
 	if err == nil {
 		return ExitOK

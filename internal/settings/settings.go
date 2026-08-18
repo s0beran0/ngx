@@ -1,7 +1,7 @@
-// Package settings carrega o arquivo de configuracao do proprio ngx.
-// A v0.1 le apenas o subconjunto que seus comandos usam; chaves de versoes
-// futuras sao ignoradas sem erro, para que um arquivo escrito a partir da
-// spec completa funcione hoje.
+// Package settings loads the configuration file of ngx itself.
+// v0.1 reads only the subset its commands use; keys from future versions are
+// ignored without error, so that a file written from the complete spec works
+// today.
 package settings
 
 import (
@@ -14,34 +14,34 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
-// Nginx aponta para o binario e a configuracao principal.
+// Nginx points to the binary and the main configuration.
 type Nginx struct {
 	Binary string `koanf:"binary"`
 	Config string `koanf:"config"`
 }
 
-// Output controla formato e redacao.
+// Output controls format and redaction.
 type Output struct {
 	Format string   `koanf:"format"`
 	Redact []string `koanf:"redact"`
 }
 
-// chaveRedact e o caminho koanf de Output.Redact, usado em Load() para
-// decidir quando a lista declarada substitui a default. Extraida como
-// constante porque renomear a tag `koanf:"redact"` ou `koanf:"output"`
-// sem atualizar este valor quebraria a substituicao em silencio, sem
-// erro de compilacao.
+// chaveRedact is the koanf path of Output.Redact, used in Load() to decide
+// when the declared list replaces the default one. It is extracted as a
+// constant because renaming the `koanf:"redact"` or `koanf:"output"` tag
+// without updating this value would break the replacement silently, with no
+// compile error.
 const chaveRedact = "output.redact"
 
-// Settings e a configuracao efetiva do ngx.
+// Settings is the effective ngx configuration.
 type Settings struct {
 	Nginx  Nginx  `koanf:"nginx"`
 	Output Output `koanf:"output"`
 }
 
-// Defaults devolve a configuracao usada quando nenhum arquivo existe. A
-// redacao vem ligada: sem ela, um get pode vazar caminho de chave privada
-// para dentro do contexto de um LLM rodando em API de terceiro.
+// Defaults returns the configuration used when no file exists. Redaction
+// comes turned on: without it, a get may leak the path of a private key into
+// the context of an LLM running on a third-party API.
 func Defaults() *Settings {
 	return &Settings{
 		Output: Output{
@@ -55,8 +55,8 @@ func Defaults() *Settings {
 	}
 }
 
-// Load funde o arquivo global com o local, com o local vencendo chave a
-// chave. Arquivo ausente nao e erro.
+// Load merges the global file with the local one, with the local one winning
+// key by key. A missing file is not an error.
 func Load(globalPath, localPath string) (*Settings, error) {
 	k := koanf.New(".")
 
@@ -68,32 +68,33 @@ func Load(globalPath, localPath string) (*Settings, error) {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("ao carregar %s: %w", p, err)
+			return nil, fmt.Errorf("while loading %s: %w", p, err)
 		}
 	}
 
 	s := Defaults()
 
-	// O mapstructure (usado pelo koanf no Unmarshal) reaproveita o slice
-	// nao-nil ja presente na struct de destino e o preenche por indice, em
-	// vez de aloca-lo do zero. Isso deixaria defaults sobrando na cauda
-	// sempre que a lista do usuario for menor que a default — por exemplo,
-	// uma lista de 1 item por cima dos 3 defaults deixaria os ultimos 2
-	// defaults intocados. Zeramos aqui para forcar substituicao total,
-	// independente de como a versao fixada do mapstructure se comporta.
+	// mapstructure (used by koanf in Unmarshal) reuses the non-nil slice
+	// already present in the destination struct and fills it by index,
+	// instead of allocating it from scratch. That would leave leftover
+	// defaults in the tail whenever the user's list is shorter than the
+	// default one -- for example, a 1-item list on top of the 3 defaults
+	// would leave the last 2 defaults untouched. We zero it here to force a
+	// total replacement, regardless of how the pinned version of
+	// mapstructure behaves.
 	//
-	// A zeragem so deve acontecer quando o usuario de fato declarou uma
-	// lista (mesmo vazia). Se a chave esta ausente, ou presente mas nula —
-	// caso tipico de um arquivo onde a pessoa comentou todos os itens da
-	// lista —, k.Get devolve nil e os defaults devem sobreviver; do
-	// contrario a redacao desligaria em silencio, falhando aberta numa
-	// feature de seguranca.
+	// The zeroing must only happen when the user actually declared a list
+	// (even an empty one). If the key is absent, or present but null -- the
+	// typical case of a file where the person commented out every item of
+	// the list -- k.Get returns nil and the defaults must survive;
+	// otherwise redaction would silently turn off, failing open on a
+	// security feature.
 	if v := k.Get(chaveRedact); v != nil {
 		s.Output.Redact = nil
 	}
 
 	if err := k.Unmarshal("", s); err != nil {
-		return nil, fmt.Errorf("configuracao invalida: %w", err)
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 	return s, nil
 }

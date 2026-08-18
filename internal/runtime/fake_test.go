@@ -8,8 +8,8 @@ import (
 	"sync"
 )
 
-// resposta e uma saida gravada de um comando: o que um nginx real escreveu,
-// congelado num teste.
+// resposta is a recorded output of a command: what a real nginx wrote, frozen
+// into a test.
 type resposta struct {
 	stdout string
 	stderr string
@@ -17,17 +17,18 @@ type resposta struct {
 	err    error
 }
 
-// fakeTransport devolve saidas gravadas. Nenhum teste deste pacote abre
-// conexao, executa nginx ou toca o disco fora do que ele mesmo cria: o
-// proposito e provar que os parsers nao sabem de onde os bytes vieram, e um
-// teste que dependesse de um nginx instalado provaria o contrario.
+// fakeTransport returns recorded outputs. No test in this package opens a
+// connection, executes nginx or touches the disk beyond what it creates
+// itself: the purpose is to prove that the parsers do not know where the bytes
+// came from, and a test that depended on an installed nginx would prove the
+// opposite.
 type fakeTransport struct {
 	descricao string
 
-	// respostas e indexada pelo argv inteiro, juntado por espaco.
+	// respostas is indexed by the whole argv, joined by spaces.
 	respostas map[string]resposta
 
-	// padrao responde qualquer argv nao mapeado.
+	// padrao answers any argv that is not mapped.
 	padrao *resposta
 
 	arquivos   map[string]string
@@ -74,7 +75,7 @@ func (f *fakeTransport) Run(ctx context.Context, argv []string) ([]byte, []byte,
 	r, ok := f.respostas[chave]
 	if !ok {
 		if f.padrao == nil {
-			return nil, []byte("fake: argv nao gravado: " + chave), 127, nil
+			return nil, []byte("fake: unrecorded argv: " + chave), 127, nil
 		}
 		r = *f.padrao
 	}
@@ -85,8 +86,8 @@ func (f *fakeTransport) Close() error { return nil }
 
 func (f *fakeTransport) Describe() string { return f.descricao }
 
-// chamadas devolve o argv de cada execucao, na ordem. E o que permite afirmar
-// que o ngx nao repetiu um comando com sudo por conta propria.
+// chamadas returns the argv of each execution, in order. It is what allows
+// asserting that ngx did not retry a command with sudo on its own.
 func (f *fakeTransport) chamadas() [][]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()

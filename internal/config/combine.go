@@ -7,17 +7,17 @@ import (
 	"slices"
 )
 
-// Combine resolve os includes, devolvendo uma arvore de arquivo unico onde
-// cada no carrega a origem real.
+// Combine resolves the includes, returning a single-file tree where every
+// node carries its real origin.
 //
-// A resolucao e feita sobre a nossa arvore, e nao pelo CombineConfigs do
-// crossplane, porque combinar antes destruiria os spans: eles apontam para
-// offsets de arquivos especificos. Aqui os nos originais permanecem intactos
-// e apenas a estrutura e reorganizada.
+// The resolution runs over our own tree rather than through crossplane's
+// CombineConfigs because combining beforehand would destroy the spans: they
+// point at offsets of specific files. Here the original nodes stay untouched
+// and only the structure is rearranged.
 func Combine(t *Tree) (*Tree, error) {
 	if len(t.Files) == 0 {
-		// Mesmo vazia, a arvore mantem a invariante de que todo Tree tem
-		// Hash preenchido -- e o que Parse tambem garante.
+		// Even when empty, the tree keeps the invariant that every Tree has
+		// Hash filled in -- the same thing Parse guarantees.
 		vazia := &Tree{}
 		vazia.Hash = Hash(vazia)
 		return vazia, nil
@@ -27,11 +27,12 @@ func Combine(t *Tree) (*Tree, error) {
 	c := &combinador{
 		arquivos:  t.Files,
 		visitados: map[string]bool{},
-		// configDir e o diretorio do arquivo de topo, fixo para a resolucao
-		// inteira -- e a mesma aproximacao que o crossplane usa (p.configDir
-		// em parse.go), que nao muda ao descer para arquivos incluidos. Um
-		// padrao relativo declarado dentro de um arquivo incluido resolve
-		// contra este diretorio, nao contra o diretorio de quem declarou.
+		// configDir is the directory of the top-level file, fixed for the
+		// whole resolution -- the same approximation crossplane makes
+		// (p.configDir in parse.go), which does not change as it descends
+		// into included files. A relative pattern declared inside an
+		// included file resolves against this directory, not against the
+		// directory of the file that declared it.
 		configDir: filepath.Dir(principal.Path),
 	}
 
@@ -43,11 +44,12 @@ func Combine(t *Tree) (*Tree, error) {
 	combinado := &Tree{
 		Files: []*File{{
 			Path: principal.Path,
-			// Source fica vazio de proposito: a arvore combinada e uma view
-			// estrutural, montada com nos de varios arquivos, e cada um
-			// carrega Span/HeadSpan que so fazem sentido contra a fonte do
-			// seu proprio Origin.File. Quem precisar do texto resolve pela
-			// arvore original, usando Origin para achar o arquivo real.
+			// Source is left empty on purpose: the combined tree is a
+			// structural view, assembled from nodes of several files, and
+			// each one carries Span/HeadSpan that only make sense against
+			// the source of its own Origin.File. Whoever needs the text
+			// resolves it through the original tree, using Origin to find
+			// the real file.
 			Source: nil,
 			Nodes:  nodes,
 		}},
@@ -57,9 +59,10 @@ func Combine(t *Tree) (*Tree, error) {
 	return combinado, nil
 }
 
-// arquivos e uma slice, e nao um map, de proposito: um include com glob pode
-// casar varios arquivos, e iterar um map daria ordem diferente a cada
-// execucao — o que faria os IDs e o hash mudarem sem a configuracao mudar.
+// arquivos is a slice and not a map on purpose: an include with a glob may
+// match several files, and iterating a map would give a different order on
+// every run -- which would make the IDs and the hash change without the
+// configuration changing.
 type combinador struct {
 	arquivos  []*File
 	visitados map[string]bool
@@ -68,7 +71,7 @@ type combinador struct {
 
 func (c *combinador) resolver(f *File) ([]*Node, error) {
 	if c.visitados[f.Path] {
-		return nil, fmt.Errorf("include circular detectado em %s", f.Path)
+		return nil, fmt.Errorf("circular include detected in %s", f.Path)
 	}
 	c.visitados[f.Path] = true
 	defer delete(c.visitados, f.Path)
@@ -90,11 +93,11 @@ func (c *combinador) expandir(nodes []*Node) ([]*Node, error) {
 		}
 
 		copia := *n
-		// Args e clonado, nao apenas copiado por valor: a copia rasa de *n
-		// deixaria Args apontando para o mesmo array de backing da arvore
-		// original, e mutar um dos dois afetaria o outro -- exatamente o
-		// que clonarArgs em parse.go existe para evitar quando "a Task 12
-		// monta nos novos a partir destes".
+		// Args is cloned, not just copied by value: the shallow copy of *n
+		// would leave Args pointing at the same backing array as the
+		// original tree, and mutating one of them would affect the other --
+		// exactly what clonarArgs in parse.go exists to prevent when "Task
+		// 12 builds new nodes out of these ones".
 		copia.Args = slices.Clone(n.Args)
 		copia.Origin = &Origin{File: n.File, Line: n.Line}
 
@@ -105,9 +108,9 @@ func (c *combinador) expandir(nodes []*Node) ([]*Node, error) {
 			}
 			copia.Block = filhos
 		} else {
-			// Sem isso, copia.Block manteria o slice header copiado de
-			// n.Block (vazio, mas potencialmente com o mesmo array de
-			// backing): a copia ficaria sem nenhum laco com a original.
+			// Without this, copia.Block would keep the slice header copied
+			// from n.Block (empty, but potentially sharing the same backing
+			// array): this way the copy is left with no tie to the original.
 			copia.Block = nil
 		}
 		saida = append(saida, &copia)
@@ -116,22 +119,23 @@ func (c *combinador) expandir(nodes []*Node) ([]*Node, error) {
 	return saida, nil
 }
 
-// padraoTemMagic casa os mesmos caracteres que o crossplane usa para decidir
-// se um padrao de include e um glob (hasMagic em parse.go). Um padrao sem
-// nenhum deles e literal, e o crossplane exige que ele abra e leia com
-// sucesso durante o Parse -- se chegou aqui sem casar nenhum arquivo da
-// arvore, o bug esta na nossa comparacao de caminhos, nao na configuracao.
+// padraoTemMagic matches the same characters crossplane uses to decide
+// whether an include pattern is a glob (hasMagic in parse.go). A pattern with
+// none of them is literal, and crossplane requires it to open and read
+// successfully during the Parse -- so if it got here without matching any
+// file of the tree, the bug is in our path comparison, not in the
+// configuration.
 var padraoTemMagic = regexp.MustCompile(`[*?[]`)
 
-// expandirInclude localiza os arquivos que casam com o padrao do include.
-// O crossplane ja resolveu os globs e devolveu cada arquivo casado como um
-// Config proprio, entao basta encontrar os que ainda nao foram consumidos.
+// expandirInclude locates the files that match the include pattern.
+// Crossplane has already resolved the globs and returned each matched file as
+// a Config of its own, so all that is left is finding the ones not consumed yet.
 func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
 	achados := c.arquivosDoInclude(n)
 
 	if len(achados) == 0 && len(n.Args) > 0 && !padraoTemMagic.MatchString(n.Args[0]) {
 		return nil, fmt.Errorf(
-			"include literal %q em %s:%d nao casou nenhum arquivo da arvore",
+			"literal include %q at %s:%d matched no file of the tree",
 			n.Args[0], n.File, n.Line,
 		)
 	}
@@ -148,14 +152,15 @@ func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
 	return saida, nil
 }
 
-// A iteracao e sobre a slice de arquivos, na ordem em que o crossplane os
-// devolveu, para que o resultado seja deterministico.
+// The iteration runs over the slice of files, in the order crossplane
+// returned them, so that the result is deterministic.
 //
-// So Args[0] entra na comparacao: e o unico argumento que o crossplane usa
-// para resolver o include (stmt.Args[0] em parse.go); considerar os demais
-// arriscaria casar arquivos que o crossplane nunca tratou como incluidos
-// por aquele no. Um include sem argumentos ja falha no Parse, mas a guarda
-// evita indexar uma slice vazia se algum dia chegar aqui montado a mao.
+// Only Args[0] takes part in the comparison: it is the only argument
+// crossplane uses to resolve the include (stmt.Args[0] in parse.go);
+// considering the rest would risk matching files crossplane never treated as
+// included by that node. An include with no arguments already fails during
+// Parse, but the guard keeps us from indexing an empty slice should one ever
+// reach here hand-built.
 func (c *combinador) arquivosDoInclude(n *Node) []*File {
 	if len(n.Args) == 0 {
 		return nil
@@ -171,15 +176,15 @@ func (c *combinador) arquivosDoInclude(n *Node) []*File {
 	return achados
 }
 
-// casaInclude decide se um arquivo parseado corresponde ao padrao de um
-// include, espelhando a resolucao do crossplane (parse.go): um padrao
-// relativo junta com configDir -- o diretorio do arquivo de topo, fixo para
-// o parse inteiro -- nunca com o diretorio de quem declarou o include.
+// casaInclude decides whether a parsed file corresponds to the pattern of an
+// include, mirroring crossplane's resolution (parse.go): a relative pattern
+// is joined with configDir -- the directory of the top-level file, fixed for
+// the whole parse -- never with the directory of whoever declared the include.
 //
-// Depois de resolvido, a comparacao e por igualdade (o caso comum, padrao
-// literal apontando exatamente para um File.Path) ou por filepath.Match
-// (padrao com glob). Nao ha um terceiro ramo comparando o padrao cru: isso
-// abriria a porta para casar um caminho resolvido contra outra base.
+// Once resolved, the comparison is either by equality (the common case, a
+// literal pattern pointing exactly at one File.Path) or by filepath.Match (a
+// pattern with a glob). There is no third branch comparing the raw pattern:
+// that would open the door to matching a resolved path against a different base.
 func casaInclude(caminho, padrao, configDir string) bool {
 	resolvido := padrao
 	if !filepath.IsAbs(padrao) {

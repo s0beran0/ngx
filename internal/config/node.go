@@ -1,27 +1,27 @@
-// Package config e a representacao canonica da configuracao do nginx: a
-// arvore semantica vem do nginx-go-crossplane, os offsets de byte vem do
-// tokenizador deste pacote, e as duas sao casadas por sequencia de tokens.
+// Package config is the canonical representation of the nginx configuration:
+// the semantic tree comes from nginx-go-crossplane, the byte offsets come from
+// this package's tokenizer, and the two are matched by token sequence.
 package config
 
-// Span e um intervalo de bytes no arquivo de origem, com End exclusivo.
+// Span is a byte range in the source file, with End exclusive.
 type Span struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
 }
 
-// Len devolve o tamanho do intervalo em bytes.
+// Len returns the size of the range in bytes.
 func (s Span) Len() int { return s.End - s.Start }
 
-// Origin registra de onde um no veio depois de resolver include.
+// Origin records where a node came from once includes were resolved.
 type Origin struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
 }
 
-// Node e uma diretiva. Span cobre a diretiva inteira, incluindo o bloco e o
-// delimitador final; HeadSpan cobre apenas o nome e os argumentos. Ter os
-// dois e o que torna a edicao da v0.2 uma substituicao de bytes em vez de
-// uma re-renderizacao do arquivo.
+// Node is a directive. Span covers the whole directive, block and closing
+// delimiter included; HeadSpan covers only the name and the arguments. Having
+// both is what makes editing in v0.2 a byte replacement instead of a
+// re-render of the file.
 type Node struct {
 	Directive string   `json:"directive"`
 	Args      []string `json:"args"`
@@ -31,54 +31,54 @@ type Node struct {
 	Span      Span     `json:"span"`
 	HeadSpan  Span     `json:"head_span"`
 
-	// HeadComments sao os spans dos comentarios que caem DENTRO de HeadSpan
-	// -- "default # x\n 0;" tem o comentario entre o nome e o ultimo
-	// argumento. O crossplane tira esses comentarios de Args
-	// (parse.go:286-290), entao sem este campo eles ficariam invisiveis na
-	// arvore e a reescrita da v0.2, que substitui os bytes de HeadSpan,
-	// apagaria um comentario que o usuario escreveu. Vazio na esmagadora
-	// maioria dos nos, por isso omitempty.
+	// HeadComments holds the spans of the comments that fall INSIDE
+	// HeadSpan -- "default # x\n 0;" has a comment sitting between the name
+	// and the last argument. Crossplane strips those comments out of Args
+	// (parse.go:286-290), so without this field they would be invisible in
+	// the tree and the v0.2 rewrite, which replaces the bytes of HeadSpan,
+	// would erase a comment the user wrote. Empty for the overwhelming
+	// majority of nodes, hence omitempty.
 	HeadComments []Span  `json:"head_comments,omitempty"`
 	ID           string  `json:"id,omitempty"`
 	Comment      *string `json:"comment,omitempty"`
 	Block        []*Node `json:"block,omitempty"`
 	Origin       *Origin `json:"origin,omitempty"`
 
-	// temBloco distingue "server {}" de "server;". O campo Block nao serve
-	// para isso: um bloco vazio e uma slice vazia, indistinguivel de nil
-	// depois da serializacao.
+	// temBloco tells "server {}" apart from "server;". The Block field
+	// cannot do it: an empty block is an empty slice, indistinguishable
+	// from nil once serialized.
 	temBloco bool
 }
 
-// IsComment informa se o no representa um comentario.
+// IsComment reports whether the node stands for a comment.
 //
-// Directive == "#" sozinho nao basta: uma diretiva cujo NOME e o texto
-// citado "#" tambem chega aqui com Directive == "#", e ela e uma diretiva de
-// verdade, com argumentos e ate com bloco. O crossplane faz a distincao com
-// !IsQuoted (parse.go:264) e so preenche Comment nos dois caminhos que sao
-// comentario de fato (parse.go:264-268 e parse.go:438-444); Comment != nil e
-// portanto o mesmo teste, do lado de ca.
+// Directive == "#" on its own is not enough: a directive whose NAME is the
+// quoted text "#" also lands here with Directive == "#", and that one is a
+// real directive, with arguments and even with a block. Crossplane draws the
+// distinction with !IsQuoted (parse.go:264) and only fills Comment on the two
+// paths that really are comments (parse.go:264-268 and parse.go:438-444);
+// Comment != nil is therefore the same test, seen from this side.
 func (n *Node) IsComment() bool { return n.Directive == "#" && n.Comment != nil }
 
-// HasBlock informa se o no abre um bloco, inclusive vazio.
+// HasBlock reports whether the node opens a block, empty ones included.
 func (n *Node) HasBlock() bool { return n.temBloco }
 
-// File e um arquivo de configuracao com sua fonte original preservada. A
-// fonte e necessaria para que os spans possam ser resolvidos em texto.
+// File is a configuration file with its original source preserved. The source
+// is what makes it possible to resolve spans back into text.
 type File struct {
 	Path   string  `json:"file"`
 	Source []byte  `json:"-"`
 	Nodes  []*Node `json:"parsed"`
 }
 
-// Tree e o resultado completo de um parse.
+// Tree is the complete result of a parse.
 type Tree struct {
 	Files []*File `json:"config"`
 	Hash  string  `json:"-"`
 }
 
-// Walk percorre a arvore em pre-ordem. Se fn devolver false, os filhos
-// daquele no sao pulados.
+// Walk traverses the tree in pre-order. If fn returns false, the children of
+// that node are skipped.
 func (t *Tree) Walk(fn func(*Node) bool) {
 	for _, f := range t.Files {
 		walkNodes(f.Nodes, fn)

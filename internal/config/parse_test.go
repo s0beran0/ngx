@@ -30,7 +30,7 @@ func TestParseProduzUmArquivoComFonte(t *testing.T) {
 	tree := parseSimples(t)
 
 	require.Len(t, tree.Files, 1)
-	require.NotEmpty(t, tree.Files[0].Source, "a fonte original precisa ser guardada para os spans")
+	require.NotEmpty(t, tree.Files[0].Source, "the original source has to be kept around for the spans")
 	require.Contains(t, tree.Files[0].Path, "simples.conf")
 }
 
@@ -42,7 +42,7 @@ func TestParsePreservaComentarios(t *testing.T) {
 		if n.IsComment() {
 			comentarios++
 			require.NotNil(t, n.Comment)
-			require.Contains(t, *n.Comment, "configuracao de exemplo")
+			require.Contains(t, *n.Comment, "example configuration")
 		}
 		return true
 	})
@@ -101,8 +101,8 @@ func TestParseArquivoInexistenteVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A redacao acontece na saida: a arvore em memoria mantem o valor real, senao
-// fmt gravaria *** dentro do .conf do usuario.
+// Redaction happens on output: the in-memory tree keeps the real value,
+// otherwise fmt would write *** into the user's .conf.
 func TestArvoreEmMemoriaNaoEhRedigida(t *testing.T) {
 	tree := parseSimples(t)
 
@@ -117,10 +117,10 @@ func TestArvoreEmMemoriaNaoEhRedigida(t *testing.T) {
 	require.True(t, achou)
 }
 
-// O crossplane nao aborta num erro de sintaxe: ele registra o problema em
-// payload.Errors/cfg.Errors e devolve err == nil. Sem esse tratamento,
-// TestParseErroDeSintaxeViraParseErrors falharia porque config.Parse
-// devolveria uma *Tree com Source mas zero Nodes, e nenhum erro.
+// Crossplane does not abort on a syntax error: it records the problem in
+// payload.Errors/cfg.Errors and returns err == nil. Without this handling,
+// TestParseErroDeSintaxeViraParseErrors would fail because config.Parse would
+// return a *Tree with Source but zero Nodes, and no error at all.
 func TestParseErroDeSintaxeViraParseErrors(t *testing.T) {
 	_, err := config.Parse(config.ParseOptions{
 		Path: filepath.Join("testdata", "erro_sintaxe.conf"),
@@ -129,16 +129,16 @@ func TestParseErroDeSintaxeViraParseErrors(t *testing.T) {
 	require.Error(t, err)
 
 	var problemas config.ParseErrors
-	require.True(t, errors.As(err, &problemas), "o erro devolvido precisa ser (ou envolver) config.ParseErrors")
+	require.True(t, errors.As(err, &problemas), "the returned error has to be (or wrap) config.ParseErrors")
 	require.NotEmpty(t, problemas)
 	require.NotEmpty(t, problemas[0].File)
 	require.NotZero(t, problemas[0].Line)
 }
 
-// Um include apontando para um arquivo inexistente e o mesmo tipo de
-// defeito silencioso: o crossplane marca o problema no arquivo que faz o
-// include, sem gerar Config nenhum para o arquivo ausente e sem devolver
-// erro pela via normal.
+// An include pointing at a missing file is the same kind of silent defect:
+// crossplane flags the problem in the file that does the include, generating
+// no Config at all for the absent file and returning no error through the
+// normal channel.
 func TestParseIncludeQuebradoViraParseErrors(t *testing.T) {
 	_, err := config.Parse(config.ParseOptions{
 		Path: filepath.Join("testdata", "include_quebrado.conf"),
@@ -147,16 +147,16 @@ func TestParseIncludeQuebradoViraParseErrors(t *testing.T) {
 	require.Error(t, err)
 
 	var problemas config.ParseErrors
-	require.True(t, errors.As(err, &problemas), "o erro devolvido precisa ser (ou envolver) config.ParseErrors")
+	require.True(t, errors.As(err, &problemas), "the returned error has to be (or wrap) config.ParseErrors")
 	require.NotEmpty(t, problemas)
 	require.NotEmpty(t, problemas[0].File)
 	require.NotZero(t, problemas[0].Line)
 }
 
-// ParseOptions.Open e o unico gancho de teste sem disco do pacote: precisa
-// ser exercitado com um filesystem em memoria, e precisa ser a unica fonte
-// de leitura -- um caminho ausente do FS em memoria tem que falhar mesmo
-// que exista de verdade no disco.
+// ParseOptions.Open is the only diskless test hook of this package: it has to
+// be exercised against an in-memory filesystem, and it has to be the only
+// source of reads -- a path missing from the in-memory FS has to fail even
+// when it really does exist on disk.
 func TestParseComFilesystemEmMemoria(t *testing.T) {
 	memFS := map[string][]byte{
 		"mem/nginx.conf": []byte("worker_processes auto;\n"),
@@ -164,7 +164,7 @@ func TestParseComFilesystemEmMemoria(t *testing.T) {
 	abrir := func(path string) (io.ReadCloser, error) {
 		b, ok := memFS[path]
 		if !ok {
-			return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+			return nil, fmt.Errorf("file does not exist in the in-memory fs: %s", path)
 		}
 		return io.NopCloser(bytes.NewReader(b)), nil
 	}
@@ -177,8 +177,8 @@ func TestParseComFilesystemEmMemoria(t *testing.T) {
 	require.Len(t, tree.Files, 1)
 	require.Equal(t, memFS["mem/nginx.conf"], tree.Files[0].Source)
 
-	// simples.conf existe de verdade no disco, mas nao esta no FS em
-	// memoria: o Open injetado precisa ser a unica fonte, sem fallback.
+	// simples.conf really does exist on disk, but is not in the in-memory
+	// FS: the injected Open has to be the only source, with no fallback.
 	_, err = config.Parse(config.ParseOptions{
 		Path: filepath.Join("testdata", "simples.conf"),
 		Open: abrir,
@@ -186,22 +186,23 @@ func TestParseComFilesystemEmMemoria(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Um include com curinga nao pode escapar do filesystem injetado. Sem
-// ParseOptions.Glob o crossplane cai em filepath.Glob e casa o padrao contra o
-// disco LOCAL: apontado para um host remoto, o ngx leria conf.d/*.conf da
-// maquina do operador e apresentaria aquilo como configuracao do servidor.
+// An include with a wildcard must not escape the injected filesystem. Without
+// ParseOptions.Glob, crossplane falls back to filepath.Glob and matches the
+// pattern against the LOCAL disk: pointed at a remote host, ngx would read
+// conf.d/*.conf from the operator's machine and present that as the server's
+// configuration.
 //
-// O teste monta as duas coisas ao mesmo tempo, no MESMO diretorio: um
-// filesystem em memoria com dois arquivos casando o padrao, e um terceiro
-// arquivo, so no disco real, que casa o mesmo padrao e nao esta em memoria.
-// Se o Glob do disco vencer, ele entra na lista e o Open injetado falha ao
-// abri-lo.
+// The test sets both things up at once, in the SAME directory: an in-memory
+// filesystem with two files matching the pattern, and a third file, on the
+// real disk only, that matches the same pattern and is not in memory. If the
+// disk Glob wins, that third file gets into the list and the injected Open
+// fails to open it.
 func TestParseIncludeComCuringaNaoVazaParaODiscoLocal(t *testing.T) {
 	dir := t.TempDir()
 	confD := filepath.Join(dir, "conf.d")
 	require.NoError(t, os.MkdirAll(confD, 0o755))
 
-	// so no disco real: nenhuma leitura pode alcancar este arquivo.
+	// on the real disk only: no read may reach this file.
 	discoLocal := filepath.Join(confD, "disco-local.conf")
 	require.NoError(t, os.WriteFile(discoLocal, []byte("worker_shutdown_timeout 1s;\n"), 0o644))
 
@@ -217,7 +218,7 @@ func TestParseIncludeComCuringaNaoVazaParaODiscoLocal(t *testing.T) {
 		Open: func(path string) (io.ReadCloser, error) {
 			b, ok := memFS[path]
 			if !ok {
-				return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+				return nil, fmt.Errorf("file does not exist in the in-memory fs: %s", path)
 			}
 			return io.NopCloser(bytes.NewReader(b)), nil
 		},
@@ -253,21 +254,21 @@ func TestParseIncludeComCuringaNaoVazaParaODiscoLocal(t *testing.T) {
 	require.NotContains(t, lidos, discoLocal)
 }
 
-// A tag json:"-" em File.Source e o unico anteparo contra os bytes crus do
-// .conf -- onde caminhos de chave privada aparecem em texto -- vazarem na
-// saida JSON por baixo da redacao, que so age sobre os argumentos. Este
-// teste trava a forma serializada de File para que a remocao acidental da
-// tag quebre a build.
+// The json:"-" tag on File.Source is the only shield against the raw bytes of
+// the .conf -- where private key paths appear as plain text -- leaking into
+// the JSON output underneath redaction, which only acts on the arguments.
+// This test pins the serialized shape of File so that accidentally removing
+// the tag breaks the build.
 func TestFileNaoSerializaSource(t *testing.T) {
 	f := &config.File{
-		Path:   "exemplo.conf",
-		Source: []byte("segredo-que-nao-pode-vazar"),
+		Path:   "example.conf",
+		Source: []byte("secret-that-must-not-leak"),
 		Nodes:  []*config.Node{},
 	}
 
 	b, err := json.Marshal(f)
 	require.NoError(t, err)
-	require.NotContains(t, string(b), "segredo-que-nao-pode-vazar")
+	require.NotContains(t, string(b), "secret-that-must-not-leak")
 
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(b, &m))
@@ -280,13 +281,12 @@ func TestFileNaoSerializaSource(t *testing.T) {
 	require.Equal(t, []string{"file", "parsed"}, chaves)
 }
 
-// leitorLento entrega os bytes de dados em pedacos pequenos com uma pausa
-// entre cada leitura. Um arquivo pequeno lido do disco real costuma vir
-// inteiro (ou quase) numa unica chamada de Read do bufio.Scanner, entao o
-// timing organico nao garante que a goroutine do lexer ainda esteja lendo
-// no instante em que o parser bate no erro e fecha o arquivo -- a pausa
-// artificial torna essa sobreposicao praticamente garantida, em vez de
-// depender de sorte de agendamento do scheduler.
+// leitorLento hands the data bytes over in small chunks with a pause between
+// each read. A small file read from the real disk usually arrives whole (or
+// nearly so) in a single Read call of bufio.Scanner, so organic timing does
+// not guarantee that the lexer goroutine is still reading at the moment the
+// parser hits the error and closes the file -- the artificial pause makes that
+// overlap practically certain, instead of relying on scheduler luck.
 type leitorLento struct {
 	dados []byte
 	pos   int
@@ -309,15 +309,15 @@ func (l *leitorLento) Read(p []byte) (int, error) {
 
 func (l *leitorLento) Close() error { return nil }
 
-// Um "include;" sem argumento faz o parser do crossplane retornar
-// imediatamente, abandonando a goroutine do lexer daquele arquivo -- que
-// continua lendo do mesmo reader (o fixture tem bem mais de 2048 tokens
-// depois do include quebrado, a capacidade do canal de tokens). O Close()
-// do arquivo roda no meio disso. Antes do round 2 do fix, leituraEspelhada
-// nao tinha mutex proprio no buffer, e essa concorrencia real dava data
-// race sob -race -- reproduzido manualmente revertendo leituraEspelhada
-// para a versao do round 1 e rodando este mesmo teste. Este teste so trava
-// a regressao quando rodado com go test -race.
+// An "include;" with no argument makes crossplane's parser return
+// immediately, abandoning the lexer goroutine of that file -- which keeps
+// reading from the same reader (the fixture has far more than 2048 tokens
+// after the broken include, the capacity of the token channel). The file's
+// Close() runs in the middle of that. Before round 2 of the fix,
+// leituraEspelhada had no mutex of its own on the buffer, and this real
+// concurrency produced a data race under -race -- reproduced by hand by
+// reverting leituraEspelhada to the round 1 version and running this very
+// test. This test only pins the regression when run with go test -race.
 func TestParseComIncludeSemArgumentosNaoTemDataRace(t *testing.T) {
 	dados, err := os.ReadFile(filepath.Join("testdata", "include_sem_args.conf"))
 	require.NoError(t, err)
@@ -331,22 +331,22 @@ func TestParseComIncludeSemArgumentosNaoTemDataRace(t *testing.T) {
 		Open: abrir,
 	})
 
-	// O include sem argumento e, por si so, um problema que o crossplane
-	// reporta via Status/Errors -- entao um erro aqui e esperado. O que
-	// este teste trava e a ausencia de data race, nao o valor do erro.
+	// An include with no argument is, by itself, a problem crossplane
+	// reports through Status/Errors -- so an error here is expected. What
+	// this test pins is the absence of a data race, not the error value.
 	require.Error(t, err)
 
 	var problemas config.ParseErrors
 	require.True(t, errors.As(err, &problemas))
 }
 
-// leitorComFalha devolve um numero fixo de bytes e depois passa a
-// devolver um erro de I/O real (nao io.EOF) em toda chamada seguinte,
-// simulando uma falha no meio da leitura de um arquivo -- ex.: um FS de
-// rede que cai depois de entregar as primeiras linhas.
-// erro, quando presente, substitui o erro padrao -- serve para os testes que
-// precisam reconhecer a string crua do runtime na saida (ou provar que ela
-// nao aparece).
+// leitorComFalha returns a fixed number of bytes and then starts returning a
+// real I/O error (not io.EOF) on every subsequent call, simulating a failure
+// midway through reading a file -- e.g. a network FS that drops after
+// delivering the first few lines.
+// erro, when set, replaces the default error -- it serves the tests that need
+// to recognize the raw runtime string in the output (or to prove it does not
+// show up).
 type leitorComFalha struct {
 	restante []byte
 	erro     error
@@ -357,7 +357,7 @@ func (l *leitorComFalha) Read(p []byte) (int, error) {
 		if l.erro != nil {
 			return 0, l.erro
 		}
-		return 0, errors.New("falha de i/o simulada no meio do arquivo")
+		return 0, errors.New("simulated i/o failure in the middle of the file")
 	}
 	n := copy(p, l.restante)
 	l.restante = l.restante[n:]
@@ -366,15 +366,14 @@ func (l *leitorComFalha) Read(p []byte) (int, error) {
 
 func (l *leitorComFalha) Close() error { return nil }
 
-// Antes do round 2 do fix, leituraEspelhada.Close gravava incondicionalmente
-// o que houvesse no buffer, mesmo que a leitura subjacente tivesse
-// terminado num erro real em vez de io.EOF. O crossplane, por sua vez, nao
-// consulta scanner.Err(), entao esse erro de I/O terminava a tokenizacao em
-// silencio -- e config.Parse devolveria uma Tree com Source truncado e
-// err == nil. Um Source truncado e mais perigoso que o defeito original do
-// round 1: os spans da Task 9 ficariam coerentes com esse Source, e uma
-// escrita de volta por substituicao de bytes truncaria o arquivo real do
-// usuario.
+// Before round 2 of the fix, leituraEspelhada.Close unconditionally wrote
+// whatever was in the buffer, even when the underlying read had ended in a
+// real error instead of io.EOF. Crossplane, in turn, never consults
+// scanner.Err(), so that I/O error ended the tokenization silently -- and
+// config.Parse would return a Tree with a truncated Source and err == nil. A
+// truncated Source is more dangerous than the original defect of round 1: the
+// spans of Task 9 would be coherent with that Source, and a write-back by
+// byte replacement would truncate the user's real file.
 func TestParseFalhaDeIONaoTruncaSourceSilenciosamente(t *testing.T) {
 	primeiraLinha := "worker_processes auto;\n"
 
@@ -387,17 +386,17 @@ func TestParseFalhaDeIONaoTruncaSourceSilenciosamente(t *testing.T) {
 		Open: abrir,
 	})
 
-	require.Error(t, err, "uma falha de i/o no meio do arquivo precisa propagar como erro, nao produzir uma Tree com Source truncado e err nil")
+	require.Error(t, err, "an i/o failure in the middle of the file has to propagate as an error, not produce a Tree with a truncated Source and a nil err")
 	require.Nil(t, tree)
 }
 
-// Antes do round 3 do fix, uma leitura que falhasse no meio mas cuja
-// releitura do fallback tivesse sucesso -- uma falha de I/O transitoria --
-// produzia err == nil, Source completo (da releitura bem-sucedida) e Nodes
-// contendo so o prefixo que o lexer alcancou antes do erro original: uma
-// arvore parcial com sucesso silencioso. Esse teste usa um Open que falha
-// na primeira leitura mas teria sucesso numa segunda, para provar que
-// lerFonte propaga o erro registrado em vez de reler o arquivo.
+// Before round 3 of the fix, a read that failed midway but whose fallback
+// re-read succeeded -- a transient I/O failure -- produced err == nil, a
+// complete Source (from the successful re-read) and Nodes containing only the
+// prefix the lexer reached before the original error: a partial tree with
+// silent success. This test uses an Open that fails on the first read but
+// would succeed on a second one, to prove that lerFonte propagates the
+// recorded error instead of re-reading the file.
 func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
 	completo := []byte("worker_processes auto;\nevents {\n    worker_connections 1024;\n}\n")
 	primeiraLinha := completo[:len("worker_processes auto;\n")]
@@ -406,11 +405,11 @@ func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
 	abrir := func(path string) (io.ReadCloser, error) {
 		chamadas++
 		if chamadas == 1 {
-			// primeira leitura: falha depois da primeira linha.
+			// first read: fails after the first line.
 			return &leitorComFalha{restante: append([]byte{}, primeiraLinha...)}, nil
 		}
-		// se lerFonte relesse o arquivo, essa segunda leitura teria
-		// sucesso total -- e e exatamente isso que nao pode acontecer.
+		// if lerFonte re-read the file, this second read would succeed
+		// completely -- and that is exactly what must not happen.
 		return io.NopCloser(bytes.NewReader(completo)), nil
 	}
 
@@ -419,24 +418,26 @@ func TestParseFalhaDeIOTransitoriaNaoViraArvoreParcial(t *testing.T) {
 		Open: abrir,
 	})
 
-	require.Error(t, err, "uma falha de i/o transitoria precisa propagar como erro, nao produzir uma arvore parcial com sucesso silencioso numa releitura")
+	require.Error(t, err, "a transient i/o failure has to propagate as an error, not produce a partial tree with silent success on a re-read")
 	require.Nil(t, tree)
-	require.Equal(t, 1, chamadas, "lerFonte nao deve reler o arquivo quando ja ha um erro registrado para aquele caminho")
+	require.Equal(t, 1, chamadas, "lerFonte must not re-read the file when there is already an error recorded for that path")
 }
 
-// Falha de I/O num arquivo INCLUIDO nao pode virar erro de sintaxe no
-// arquivo que faz o include. O crossplane, ao abrir um include explicito,
-// transforma o erro do Open num ParseError localizado no arquivo que
-// inclui, na linha do include -- e a mensagem e a string crua do runtime.
-// Se o ngx repassa isso, o consumidor recebe "erro na linha 2 do
-// nginx.conf" para um nginx.conf intacto e vai depurar o arquivo errado.
+// An I/O failure in an INCLUDED file must not turn into a syntax error in the
+// file that does the include. Crossplane, when opening an explicit include,
+// turns the Open error into a ParseError located in the including file, on the
+// include line -- and the message is the raw runtime string. If ngx forwards
+// that, the consumer gets "error on line 2 of nginx.conf" for an intact
+// nginx.conf and goes off debugging the wrong file.
 //
-// Isso deixou de ser hipotese com o acesso remoto por SSH: nada e instalado
-// no servidor, entao cada arquivo da config e uma leitura de rede (132 num
-// host medido) e queda de conexao no meio de uma delas e rotina.
+// This stopped being hypothetical with remote access over SSH: nothing is
+// installed on the server, so every config file is a network read (132 on one
+// measured host) and the connection dropping in the middle of one of them is
+// routine.
 //
-// O teste prova a ATRIBUICAO, nao so que deu erro: arquivo apontado, classe
-// propria, e a string crua do runtime ausente da mensagem.
+// The test proves the ATTRIBUTION, not merely that an error happened: the file
+// pointed at, a class of its own, and the raw runtime string absent from the
+// message.
 func TestParseFalhaDeIOEmIncludeNaoCulpaOArquivoQueInclui(t *testing.T) {
 	dir := t.TempDir()
 	topo := filepath.Join(dir, "nginx.conf")
@@ -452,11 +453,11 @@ func TestParseFalhaDeIOEmIncludeNaoCulpaOArquivoQueInclui(t *testing.T) {
 	abrir := func(path string) (io.ReadCloser, error) {
 		b, ok := fonte[path]
 		if !ok {
-			return nil, fmt.Errorf("arquivo nao existe no fs em memoria: %s", path)
+			return nil, fmt.Errorf("file does not exist in the in-memory fs: %s", path)
 		}
 		if path == incluido {
-			// entrega as primeiras linhas e cai no meio, como uma sessao
-			// SSH que morre durante a leitura de um dos arquivos.
+			// delivers the first lines and drops midway, like an SSH
+			// session dying while one of the files is being read.
 			return &leitorComFalha{
 				restante: append([]byte{}, b[:9]...),
 				erro:     errors.New(cru),
@@ -476,19 +477,19 @@ func TestParseFalhaDeIOEmIncludeNaoCulpaOArquivoQueInclui(t *testing.T) {
 	p := problemas[0]
 
 	require.Equal(t, incluido, p.File,
-		"o diagnostico precisa apontar o arquivo que nao pode ser lido, nao o que faz o include")
+		"the diagnostic has to point at the file that could not be read, not at the one doing the include")
 	require.NotEqual(t, topo, p.File,
-		"o arquivo que faz o include esta intacto: culpa-lo manda o consumidor depurar o arquivo errado")
+		"the file doing the include is intact: blaming it sends the consumer off debugging the wrong file")
 	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe,
-		"falha de I/O precisa ter classe propria, nao sair como recusa do crossplane")
+		"an I/O failure has to carry a class of its own, not come out as a crossplane refusal")
 	require.NotContains(t, p.Message, cru,
-		"a mensagem e nossa: nao repassa a string crua do runtime Go")
+		"the message is ours: it does not forward the raw Go runtime string")
 	require.NotContains(t, p.Message, "connection reset")
 }
 
-// A mesma falha no arquivo de topo: o crossplane devolve o erro direto e o
-// ngx o embrulhava num fmt.Errorf sem classe, carregando a string crua do
-// runtime para dentro do diagnostico.
+// The same failure in the top-level file: crossplane returns the error
+// directly and ngx used to wrap it in an fmt.Errorf with no class, carrying
+// the raw runtime string into the diagnostic.
 func TestParseFalhaDeIONoTopoTemClasseEMensagemPropria(t *testing.T) {
 	const cru = "read tcp 10.0.0.9:22: connection reset by peer"
 
@@ -499,7 +500,7 @@ func TestParseFalhaDeIONoTopoTemClasseEMensagemPropria(t *testing.T) {
 		}, nil
 	}
 
-	tree, err := config.Parse(config.ParseOptions{Path: "remoto/nginx.conf", Open: abrir})
+	tree, err := config.Parse(config.ParseOptions{Path: "remote/nginx.conf", Open: abrir})
 
 	require.Error(t, err)
 	require.Nil(t, tree)
@@ -509,27 +510,27 @@ func TestParseFalhaDeIONoTopoTemClasseEMensagemPropria(t *testing.T) {
 	require.Len(t, problemas, 1)
 	p := problemas[0]
 
-	require.Equal(t, "remoto/nginx.conf", p.File)
+	require.Equal(t, "remote/nginx.conf", p.File)
 	require.Equal(t, config.RecusaFalhaDeLeitura, p.Classe)
 	require.NotContains(t, p.Message, cru,
-		"a mensagem e nossa: nao repassa a string crua do runtime Go")
+		"the message is ours: it does not forward the raw Go runtime string")
 }
 
-// Permissao negada num include e o caso que o acesso remoto tornou rotina:
-// num alvo remoto, o usuario da conexao frequentemente nao alcanca todos os
-// arquivos que o root do servidor alcanca. Medido contra um nginx de
-// producao: um arquivo entre 128 era ilegivel pelo usuario da conexao.
+// Permission denied on an include is the case remote access made routine: on
+// a remote target the connection user often cannot reach every file the
+// server's root can. Measured against a production nginx: one file out of 128
+// was unreadable by the connection user.
 //
-// O teste exige as tres coisas que faltavam. Que o diagnostico acuse o
-// arquivo QUE FALHOU, e nao o de topo que o inclui -- senao manda depurar o
-// lugar errado. Que a causa apareca CLASSIFICADA, porque permissao se
-// resolve diferente de conexao caindo. E que a string crua do runtime NAO
-// vaze, porque ela muda entre sistemas e um agente que ramifique por ela
-// quebra sozinho.
+// The test demands the three things that were missing. That the diagnostic
+// blames the file THAT FAILED, and not the top-level one including it --
+// otherwise it sends you debugging the wrong place. That the cause shows up
+// CLASSIFIED, because permission is fixed differently from a dropping
+// connection. And that the raw runtime string does NOT leak, because it
+// changes across systems and an agent branching on it breaks on its own.
 func TestParsePermissaoNegadaEmIncludeAcusaOArquivoCerto(t *testing.T) {
 	dir := t.TempDir()
 	topo := filepath.Join(dir, "nginx.conf")
-	incluido := filepath.Join(dir, "negado.conf")
+	incluido := filepath.Join(dir, "denied.conf")
 	require.NoError(t, os.WriteFile(topo, []byte("include "+incluido+";\n"), 0o644))
 	require.NoError(t, os.WriteFile(incluido, []byte("worker_processes 1;\n"), 0o644))
 
@@ -537,21 +538,21 @@ func TestParsePermissaoNegadaEmIncludeAcusaOArquivoCerto(t *testing.T) {
 		Path: topo,
 		Open: func(path string) (io.ReadCloser, error) {
 			if path == incluido {
-				return nil, fmt.Errorf("abrindo %s: %w", path, fs.ErrPermission)
+				return nil, fmt.Errorf("opening %s: %w", path, fs.ErrPermission)
 			}
 			return os.Open(path)
 		},
 	})
 
 	var problemas config.ParseErrors
-	require.True(t, errors.As(err, &problemas), "precisa ser ParseErrors, nao erro generico")
+	require.True(t, errors.As(err, &problemas), "it has to be ParseErrors, not a generic error")
 	require.NotEmpty(t, problemas)
 
 	p := problemas[0]
-	require.Equal(t, incluido, p.File, "o diagnostico tem que acusar o arquivo que falhou")
-	require.NotEqual(t, topo, p.File, "acusar o arquivo de topo manda depurar o lugar errado")
-	require.Contains(t, p.Message, "permissao")
+	require.Equal(t, incluido, p.File, "the diagnostic has to blame the file that failed")
+	require.NotEqual(t, topo, p.File, "blaming the top-level file sends you debugging the wrong place")
+	require.Contains(t, p.Message, "permission")
 	require.NotContains(t, p.Message, "ErrPermission")
-	require.NotContains(t, p.Message, "abrindo ")
-	require.Zero(t, p.Line, "arquivo que nao abriu nao tem linha a oferecer")
+	require.NotContains(t, p.Message, "opening ")
+	require.Zero(t, p.Line, "a file that never opened has no line to offer")
 }

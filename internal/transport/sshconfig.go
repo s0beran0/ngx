@@ -17,25 +17,26 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// PortaSSHPadrao e a porta usada quando nem a flag nem o ~/.ssh/config dizem
-// qual e. A biblioteca de parse nao aplica defaults — (*Config).Get devolve
-// string vazia para uma chave ausente, nunca "22" —, entao o default e nosso.
+// PortaSSHPadrao is the port used when neither the flag nor ~/.ssh/config says
+// what it is. The parsing library does not apply defaults — (*Config).Get
+// returns an empty string for a missing key, never "22" —, so the default is
+// ours.
 const PortaSSHPadrao = 22
 
-// CodigoAvisoSSHConfig identifica o diagnostico da DR7: o ~/.ssh/config
-// existe mas nao pode ser lido inteiro.
+// CodigoAvisoSSHConfig identifies the DR7 diagnostic: ~/.ssh/config exists but
+// cannot be read in full.
 //
-// Os codigos NGX-000N espelham exit codes e sao sempre erros. Avisos, que por
-// definicao nao derrubam o comando, usam a faixa NGX-W###.
+// The NGX-000N codes mirror exit codes and are always errors. Warnings, which
+// by definition do not bring the command down, use the NGX-W### range.
 const CodigoAvisoSSHConfig = "NGX-0210"
 
-// SSHOptions descreve como o ngx alcanca um host remoto. Host e o alvo final
-// da conexao — se o ~/.ssh/config traduzir o alias via HostName, e o HostName
-// que fica aqui.
+// SSHOptions describes how ngx reaches a remote host. Host is the final target
+// of the connection — if ~/.ssh/config translates the alias through HostName,
+// it is the HostName that ends up here.
 //
-// Port zero, e as strings vazias, significam "nao informado": e assim que a
-// resolucao distingue uma flag ausente de uma flag deliberadamente vazia, e e
-// o que faz --user "" nao apagar o User que veio do arquivo.
+// A zero Port, and the empty strings, mean "not provided": that is how the
+// resolution tells an absent flag from a deliberately empty one, and it is
+// what makes --user "" not erase the User that came from the file.
 type SSHOptions struct {
 	Host            string
 	Port            int
@@ -47,35 +48,38 @@ type SSHOptions struct {
 	Timeout         time.Duration
 }
 
-// posicaoDeErro casa o prefixo "(linha, coluna): " que a kevinburke/ssh_config
-// coloca na mensagem. A biblioteca formata a posicao dentro da string do erro
-// e nao expoe a Position em nenhum tipo publico: recuperar o lugar exato do
-// problema so e possivel relendo a mensagem.
+// posicaoDeErro matches the "(line, column): " prefix that
+// kevinburke/ssh_config puts in the message. The library formats the position
+// inside the error string and does not expose the Position in any public type:
+// recovering the exact place of the problem is only possible by re-reading the
+// message.
 var posicaoDeErro = regexp.MustCompile(`^\((\d+), (\d+)\): (.*)$`)
 
-// ResolverSSHConfig resolve as opcoes de conexao para o host pedido, aplicando
-// a precedencia da DR2: flag explicita vence o arquivo, arquivo vence default.
+// ResolverSSHConfig resolves the connection options for the requested host,
+// applying the DR2 precedence: an explicit flag beats the file, the file beats
+// the default.
 //
-// Uma flag vazia nao e uma flag: ela nao sobrescreve o valor do arquivo. Quem
-// nao passou --port fica com o Port do ~/.ssh/config, e so na falta dele com a
-// porta 22.
+// An empty flag is not a flag: it does not override the value from the file.
+// Whoever did not pass --port keeps the Port from ~/.ssh/config, and only in
+// its absence falls back to port 22.
 //
-// O caminho do arquivo e parametro, e nao derivado de os.UserHomeDir() aqui
-// dentro, para que a resolucao seja testavel sem depender do HOME de quem roda.
-// Use CaminhoSSHConfigPadrao para o caminho de producao.
+// The file path is a parameter, and not derived from os.UserHomeDir() in here,
+// so that the resolution is testable without depending on the HOME of whoever
+// runs it. Use CaminhoSSHConfigPadrao for the production path.
 //
-// Ausencia do arquivo nao e erro nem aviso: quem nao tem ~/.ssh/config
-// simplesmente cai nos defaults. Ja um arquivo que existe e nao pode ser lido
-// inteiro devolve um diagnostico de severidade warning (DR7) — a resolucao
-// segue com flags e defaults, mas nunca em silencio.
+// An absent file is neither an error nor a warning: whoever has no
+// ~/.ssh/config simply falls back to the defaults. A file that exists and
+// cannot be read in full, on the other hand, returns a warning-severity
+// diagnostic (DR7) — the resolution goes on with flags and defaults, but never
+// in silence.
 //
-// A lista de diagnosticos nunca e nil.
+// The list of diagnostics is never nil.
 func ResolverSSHConfig(flags SSHOptions, caminhoConfig string) (SSHOptions, []output.Diagnostic, error) {
 	diags := []output.Diagnostic{}
 
 	alias := strings.TrimSpace(flags.Host)
 	if alias == "" {
-		return SSHOptions{}, diags, output.Usage("host de destino nao informado")
+		return SSHOptions{}, diags, output.Usage("no target host provided")
 	}
 
 	resolvido := flags
@@ -90,8 +94,8 @@ func ResolverSSHConfig(flags SSHOptions, caminhoConfig string) (SSHOptions, []ou
 		diags = aplicarArquivo(&resolvido, cfg, alias, caminhoConfig, diags)
 	}
 
-	// Defaults: o ultimo nivel da precedencia, aplicado sobre o que sobrou
-	// vazio depois de flags e arquivo.
+	// Defaults: the last level of the precedence, applied over whatever is
+	// still empty after flags and file.
 	if resolvido.Port == 0 {
 		resolvido.Port = PortaSSHPadrao
 	}
@@ -102,21 +106,21 @@ func ResolverSSHConfig(flags SSHOptions, caminhoConfig string) (SSHOptions, []ou
 	return resolvido, diags, nil
 }
 
-// CaminhoSSHConfigPadrao devolve ~/.ssh/config. O filepath.Join usa o
-// separador nativo, entao o mesmo codigo produz /home/x/.ssh/config e
+// CaminhoSSHConfigPadrao returns ~/.ssh/config. filepath.Join uses the native
+// separator, so the same code produces /home/x/.ssh/config and
 // C:\Users\x\.ssh\config.
 func CaminhoSSHConfigPadrao() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("nao foi possivel localizar o diretorio do usuario; "+
-			"passe --host, --user, --port e --key explicitamente: %w", err)
+		return "", fmt.Errorf("could not locate the user's home directory; "+
+			"pass --host, --user, --port and --key explicitly: %w", err)
 	}
 	return filepath.Join(home, ".ssh", "config"), nil
 }
 
-// carregarSSHConfig le e parseia o arquivo. Devolve (nil, nil) quando o
-// arquivo nao existe — a ausencia e normal — e (nil, aviso) quando ele existe
-// mas nao pode ser lido ou parseado.
+// carregarSSHConfig reads and parses the file. It returns (nil, nil) when the
+// file does not exist — absence is normal — and (nil, warning) when it exists
+// but cannot be read or parsed.
 func carregarSSHConfig(caminho string) (*ssh_config.Config, *output.Diagnostic) {
 	if caminho == "" {
 		return nil, nil
@@ -141,8 +145,8 @@ func carregarSSHConfig(caminho string) (*ssh_config.Config, *output.Diagnostic) 
 	return cfg, nil
 }
 
-// aplicarArquivo preenche os campos que a flag deixou vazios com o que o
-// arquivo diz para aquele alias.
+// aplicarArquivo fills the fields the flag left empty with what the file says
+// for that alias.
 func aplicarArquivo(
 	opts *SSHOptions,
 	cfg *ssh_config.Config,
@@ -153,15 +157,16 @@ func aplicarArquivo(
 		v, err := cfg.Get(alias, chave)
 		if err != nil {
 			diags = append(diags, avisoSSHConfig(caminho, 0, 0,
-				fmt.Sprintf("nao foi possivel ler %s: %v", chave, err)))
+				fmt.Sprintf("could not read %s: %v", chave, err)))
 			return ""
 		}
 		return strings.TrimSpace(v)
 	}
 
-	// HostName nao concorre com --host: --host da o alias que se procura no
-	// arquivo, e o HostName e a traducao desse alias para o alvo real. E o
-	// mesmo que o ssh faz quando `ssh web1` conecta em 10.0.0.1.
+	// HostName does not compete with --host: --host gives the alias to look
+	// up in the file, and HostName is the translation of that alias into
+	// the real target. It is the same thing ssh does when `ssh web1`
+	// connects to 10.0.0.1.
 	if hostName := ler("HostName"); hostName != "" {
 		opts.Host = hostName
 	}
@@ -175,7 +180,7 @@ func aplicarArquivo(
 			n, err := strconv.Atoi(porta)
 			if err != nil || n <= 0 || n > 65535 {
 				diags = append(diags, avisoSSHConfig(caminho, 0, 0,
-					fmt.Sprintf("Port %q nao e um numero de porta valido; usando %d", porta, PortaSSHPadrao)))
+					fmt.Sprintf("Port %q is not a valid port number; using %d", porta, PortaSSHPadrao)))
 			} else {
 				opts.Port = n
 			}
@@ -191,17 +196,18 @@ func aplicarArquivo(
 	return diags
 }
 
-// avisoSSHConfig monta o diagnostico da DR7. A mensagem diz o que nao foi lido
-// e o que continua valendo, porque um aviso que so diz "falhou" leva quem
-// consome a saida a achar que o host nao estava no arquivo — e a causa e outra.
+// avisoSSHConfig builds the DR7 diagnostic. The message says what was not read
+// and what still holds, because a warning that only says "it failed" leads
+// whoever consumes the output to think the host was not in the file — and the
+// cause is another one.
 func avisoSSHConfig(caminho string, linha, coluna int, motivo string) output.Diagnostic {
 	return output.Diagnostic{
 		Severity: output.SeverityWarning,
 		Code:     CodigoAvisoSSHConfig,
 		Message: fmt.Sprintf(
-			"%s nao pode ser lido (%s); a resolucao por ssh_config foi pulada e valem "+
-				"apenas as flags explicitas (--host, --user, --port, --key) e os defaults "+
-				"(porta %d, usuario corrente)",
+			"%s could not be read (%s); the ssh_config resolution was skipped and only "+
+				"the explicit flags (--host, --user, --port, --key) and the defaults "+
+				"(port %d, current user) apply",
 			caminho, motivo, PortaSSHPadrao),
 		File:   caminho,
 		Line:   linha,
@@ -209,8 +215,8 @@ func avisoSSHConfig(caminho string, linha, coluna int, motivo string) output.Dia
 	}
 }
 
-// posicaoDoErro separa a posicao da mensagem. Erro sem posicao devolve zeros,
-// e o Diagnostic omite os campos.
+// posicaoDoErro splits the position from the message. An error with no
+// position returns zeros, and Diagnostic omits the fields.
 func posicaoDoErro(err error) (linha, coluna int, motivo string) {
 	msg := err.Error()
 	m := posicaoDeErro.FindStringSubmatch(msg)
@@ -222,9 +228,9 @@ func posicaoDoErro(err error) (linha, coluna int, motivo string) {
 	return linha, coluna, m[3]
 }
 
-// expandirTil resolve "~/" contra o diretorio do usuario. Um til que nao pode
-// ser resolvido fica como esta: e melhor devolver o caminho literal, que falha
-// visivelmente ao abrir, do que inventar um diretorio.
+// expandirTil resolves "~/" against the user's home directory. A tilde that
+// cannot be resolved is left as it is: it is better to return the literal
+// path, which fails visibly on open, than to invent a directory.
 func expandirTil(caminho string) string {
 	if caminho != "~" && !strings.HasPrefix(caminho, "~/") && !strings.HasPrefix(caminho, `~\`) {
 		return caminho
@@ -239,9 +245,9 @@ func expandirTil(caminho string) string {
 	return filepath.Join(home, filepath.FromSlash(caminho[2:]))
 }
 
-// usuarioCorrente devolve o usuario do SO. os/user.Current funciona sem cgo
-// (o Go cai num leitor puro de /etc/passwd), mas pode falhar em container sem
-// entrada de usuario; ai as variaveis de ambiente sao a ultima tentativa.
+// usuarioCorrente returns the OS user. os/user.Current works without cgo (Go
+// falls back to a pure reader of /etc/passwd), but it can fail in a container
+// with no user entry; there the environment variables are the last attempt.
 func usuarioCorrente() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		return nomeSemDominio(u.Username)
@@ -254,8 +260,8 @@ func usuarioCorrente() string {
 	return ""
 }
 
-// nomeSemDominio remove o prefixo de dominio que o Windows poe em
-// Username ("DOMINIO\usuario"): o SSH quer so o nome.
+// nomeSemDominio strips the domain prefix Windows puts in Username
+// ("DOMAIN\user"): SSH wants only the name.
 func nomeSemDominio(nome string) string {
 	if i := strings.LastIndex(nome, `\`); i >= 0 {
 		return nome[i+1:]

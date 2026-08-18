@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 )
 
-// aplicar troca o binario em Linux e macOS.
+// aplicar swaps the binary on Linux and macOS.
 //
-// Escrever POR CIMA de um executavel em uso falha com ETXTBSY; renomear POR
-// CIMA dele funciona, porque o inode antigo sobrevive enquanto o processo em
-// execucao mantiver o descritor aberto. Por isso o novo binario e escrito num
-// temporario NO MESMO DIRETORIO — rename nao cruza filesystem — e entra por
-// rename, que e atomico: em nenhum instante o caminho fica sem um binario
-// completo.
+// Writing OVER an executable in use fails with ETXTBSY; renaming OVER it
+// works, because the old inode survives as long as the running process keeps
+// the descriptor open. That is why the new binary is written to a temporary
+// file IN THE SAME DIRECTORY -- rename does not cross filesystems -- and
+// comes in through a rename, which is atomic: at no instant is caminho left
+// without a complete binary.
 func aplicar(caminho string, novo []byte, perm os.FileMode) error {
 	dir := filepath.Dir(caminho)
 
@@ -33,8 +33,8 @@ func aplicar(caminho string, novo []byte, perm os.FileMode) error {
 	if err := os.Rename(nomeTmp, caminho); err != nil {
 		_ = os.Remove(nomeTmp)
 		return erroCausa(err, CodigoTrocaFalhou,
-			"nao foi possivel colocar o binario novo em %s; o ngx atual continua "+
-				"no lugar e funcionando", caminho)
+			"could not put the new binary at %s; the current ngx stays in place "+
+				"and keeps working", caminho)
 	}
 	return nil
 }

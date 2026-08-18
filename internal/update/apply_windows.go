@@ -4,16 +4,17 @@ package update
 
 import "os"
 
-// aplicar troca o binario no Windows.
+// aplicar swaps the binary on Windows.
 //
-// Aqui o executavel em execucao e travado pelo sistema: sobrescrever e
-// deletar falham, renomear funciona. Entao a estrategia do Unix (rename por
-// cima) nao serve, e a sequencia e a de DD5, implementada em
-// trocaComRenomeio: escreve .new, renomeia o atual para .old, poe o novo no
-// lugar e deixa a remocao do .old para a proxima execucao (LimparResiduo).
+// Here the running executable is locked by the system: overwriting and
+// deleting fail, renaming works. So the Unix strategy (rename over it) does
+// not serve, and the sequence is the one from DD5, implemented in
+// trocaComRenomeio: write .new, rename the current one to .old, put the new
+// one in place and leave the removal of the .old for the next run
+// (LimparResiduo).
 //
-// os.Rename do Go usa MoveFileEx com MOVEFILE_REPLACE_EXISTING, que basta
-// para os dois renomeios: nao e preciso chamar a API do Windows direto.
+// Go's os.Rename uses MoveFileEx with MOVEFILE_REPLACE_EXISTING, which is
+// enough for both renames: there is no need to call the Windows API directly.
 func aplicar(caminho string, novo []byte, perm os.FileMode) error {
 	return trocaComRenomeio(opsReais(), caminho, novo, perm)
 }

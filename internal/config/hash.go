@@ -8,18 +8,19 @@ import (
 	"strconv"
 )
 
-// Hash devolve o hash canonico da arvore.
+// Hash returns the canonical hash of the tree.
 //
-// O que o hash protege e o significado, nao o texto: comentarios e espacamento
-// ficam de fora, entao rodar fmt nao invalida os IDs que o agente esta
-// segurando. Ja a ordem dos blocos entra, porque mover um server muda a que
-// no cada ID se refere.
+// What the hash protects is the meaning, not the text: comments and spacing
+// are left out, so running fmt does not invalidate the IDs the agent is
+// holding. Block order, on the other hand, does count, because moving a
+// server changes which node each ID refers to.
 func Hash(t *Tree) string {
 	h := sha256.New()
 	for _, f := range t.Files {
-		// So o nome base entra no hash, nao o caminho absoluto: mover a
-		// configuracao de diretorio nao muda seu significado, e o caminho
-		// absoluto varia por ambiente (t.TempDir() nos testes, por exemplo).
+		// Only the base name goes into the hash, not the absolute path:
+		// moving the configuration to another directory does not change its
+		// meaning, and the absolute path varies per environment
+		// (t.TempDir() in the tests, for instance).
 		escreverCampo(h, filepath.Base(f.Path))
 		escreverNodes(h, f.Nodes)
 	}
@@ -46,8 +47,8 @@ func escreverNodes(h hash.Hash, nodes []*Node) {
 	}
 }
 
-// escreverCampo usa um separador que nao pode aparecer numa diretiva, para
-// que "ab c" e "a bc" nunca colidam.
+// escreverCampo uses a separator that cannot show up inside a directive, so
+// that "ab c" and "a bc" never collide.
 func escreverCampo(h hash.Hash, s string) {
 	_, _ = h.Write([]byte(s))
 	_, _ = h.Write([]byte{0})
