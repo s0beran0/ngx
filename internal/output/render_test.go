@@ -270,3 +270,34 @@ func TestQuietSuprimeSucessoMasNaoErro(t *testing.T) {
 	require.NoError(t, r2.Render(env))
 	require.Contains(t, falha.String(), "falhou")
 }
+
+// --quiet suprime sucesso, nunca aviso. Um envelope ok=true pode carregar
+// diagnostico de seguranca (host key aceita sem verificacao, redacao
+// desligada); engoli-lo faz o escape virar silencioso, que e o que a DR1
+// proibe. O par de casos existe para provar a distincao: sem aviso continua
+// mudo, com aviso fala.
+func TestQuietSuprimeSucessoMasNuncaAviso(t *testing.T) {
+	casos := []struct {
+		nome    string
+		diags   []output.Diagnostic
+		emitido bool
+	}{
+		{"sucesso limpo fica mudo", nil, false},
+		{"info tambem fica mudo", []output.Diagnostic{{Severity: output.SeverityInfo, Code: "NGX-0212"}}, false},
+		{"warning fala", []output.Diagnostic{{Severity: output.SeverityWarning, Code: "NGX-0211"}}, true},
+		{"error fala", []output.Diagnostic{{Severity: output.SeverityError, Code: "NGX-0201"}}, true},
+	}
+	for _, c := range casos {
+		t.Run(c.nome, func(t *testing.T) {
+			var out bytes.Buffer
+			r := &output.Renderer{Out: &out, Quiet: true, Format: output.FormatJSON}
+			env := &output.Envelope{OK: true, Command: "inspect", Diagnostics: c.diags}
+			require.NoError(t, r.Render(env))
+			if c.emitido {
+				require.NotEmpty(t, out.String(), "aviso suprimido e aviso inexistente")
+			} else {
+				require.Empty(t, out.String())
+			}
+		})
+	}
+}

@@ -56,7 +56,12 @@ func (r *Renderer) Render(env *Envelope) error {
 		return Usage("--no-redact so e aceito quando a saida e um terminal")
 	}
 
-	if r.Quiet && env.OK {
+	// --quiet suprime o sucesso, nao o aviso. Um envelope ok=true pode
+	// carregar diagnostico de seguranca -- host key aceita sem verificacao,
+	// chave recusada com queda calada para senha -- e engoli-lo faria o
+	// escape virar silencioso, que e exatamente o que a DR1 proibe. Quem
+	// pede --quiet quer menos ruido, nao menos alerta.
+	if r.Quiet && env.OK && !temAvisoOuPior(env.Diagnostics) {
 		return nil
 	}
 
@@ -149,4 +154,16 @@ func (r *Renderer) renderHuman(env *Envelope) error {
 		return Internal(err, "falha ao escrever saida")
 	}
 	return nil
+}
+
+// temAvisoOuPior diz se ha diagnostico que nao pode ser suprimido por
+// --quiet. Severidade info e informativa e cai no silencio; warning e error
+// sao sinal, e sinal suprimido e sinal inexistente.
+func temAvisoOuPior(diags []Diagnostic) bool {
+	for _, d := range diags {
+		if d.Severity == SeverityWarning || d.Severity == SeverityError {
+			return true
+		}
+	}
+	return false
 }

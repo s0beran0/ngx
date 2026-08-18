@@ -257,6 +257,22 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 		return output.Usage("%s", err.Error())
 	}
 
+	// Lista de redacao vazia desliga a redacao pelo arquivo de settings, sem
+	// passar pelo portao de terminal do --no-redact. E um caminho legitimo,
+	// mas nao pode ser mudo: um `.ngx/config.yaml` relativo ao cwd basta
+	// para um agente de IA passar a despejar segredo no pipe sem que nada na
+	// saida indique que a protecao foi desligada. O aviso e o que impede
+	// isso de ser invisivel para quem consome.
+	if set.Empty() {
+		ctx.TransportDiags = append(ctx.TransportDiags, output.Diagnostic{
+			Severity: output.SeverityWarning,
+			Code:     "NGX-0004",
+			Message: "a redacao esta DESLIGADA: a lista output.redact do arquivo de " +
+				"settings esta vazia, entao valores sensiveis saem como estao. " +
+				"Isso nao passa pelo portao de terminal do --no-redact",
+		})
+	}
+
 	ctx.Renderer.Format = formato
 	ctx.Renderer.Redact = set
 	ctx.Renderer.NoRedact = f.NoRedact
