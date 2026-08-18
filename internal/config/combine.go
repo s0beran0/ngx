@@ -18,32 +18,32 @@ func Combine(t *Tree) (*Tree, error) {
 	if len(t.Files) == 0 {
 		// Even when empty, the tree keeps the invariant that every Tree has
 		// Hash filled in -- the same thing Parse guarantees.
-		vazia := &Tree{}
-		vazia.Hash = Hash(vazia)
-		return vazia, nil
+		empty := &Tree{}
+		empty.Hash = Hash(empty)
+		return empty, nil
 	}
 
-	principal := t.Files[0]
-	c := &combinador{
-		arquivos:  t.Files,
-		visitados: map[string]bool{},
+	top := t.Files[0]
+	c := &combiner{
+		files:   t.Files,
+		visited: map[string]bool{},
 		// configDir is the directory of the top-level file, fixed for the
 		// whole resolution -- the same approximation crossplane makes
 		// (p.configDir in parse.go), which does not change as it descends
 		// into included files. A relative pattern declared inside an
 		// included file resolves against this directory, not against the
 		// directory of the file that declared it.
-		configDir: filepath.Dir(principal.Path),
+		configDir: filepath.Dir(top.Path),
 	}
 
-	nodes, err := c.resolver(principal)
+	nodes, err := c.resolve(top)
 	if err != nil {
 		return nil, err
 	}
 
-	combinado := &Tree{
+	combined := &Tree{
 		Files: []*File{{
-			Path: principal.Path,
+			Path: top.Path,
 			// Source is left empty on purpose: the combined tree is a
 			// structural view, assembled from nodes of several files, and
 			// each one carries Span/HeadSpan that only make sense against
@@ -54,102 +54,102 @@ func Combine(t *Tree) (*Tree, error) {
 			Nodes:  nodes,
 		}},
 	}
-	AtribuirIDs(combinado.Files[0].Nodes, "")
-	combinado.Hash = Hash(combinado)
-	return combinado, nil
+	AtribuirIDs(combined.Files[0].Nodes, "")
+	combined.Hash = Hash(combined)
+	return combined, nil
 }
 
-// arquivos is a slice and not a map on purpose: an include with a glob may
+// files is a slice and not a map on purpose: an include with a glob may
 // match several files, and iterating a map would give a different order on
 // every run -- which would make the IDs and the hash change without the
 // configuration changing.
-type combinador struct {
-	arquivos  []*File
-	visitados map[string]bool
+type combiner struct {
+	files     []*File
+	visited   map[string]bool
 	configDir string
 }
 
-func (c *combinador) resolver(f *File) ([]*Node, error) {
-	if c.visitados[f.Path] {
+func (c *combiner) resolve(f *File) ([]*Node, error) {
+	if c.visited[f.Path] {
 		return nil, fmt.Errorf("circular include detected in %s", f.Path)
 	}
-	c.visitados[f.Path] = true
-	defer delete(c.visitados, f.Path)
+	c.visited[f.Path] = true
+	defer delete(c.visited, f.Path)
 
-	return c.expandir(f.Nodes)
+	return c.expand(f.Nodes)
 }
 
-func (c *combinador) expandir(nodes []*Node) ([]*Node, error) {
-	var saida []*Node
+func (c *combiner) expand(nodes []*Node) ([]*Node, error) {
+	var out []*Node
 
 	for _, n := range nodes {
 		if n.Directive == "include" {
-			incluidos, err := c.expandirInclude(n)
+			included, err := c.expandInclude(n)
 			if err != nil {
 				return nil, err
 			}
-			saida = append(saida, incluidos...)
+			out = append(out, included...)
 			continue
 		}
 
-		copia := *n
+		copied := *n
 		// Args is cloned, not just copied by value: the shallow copy of *n
 		// would leave Args pointing at the same backing array as the
 		// original tree, and mutating one of them would affect the other --
-		// exactly what clonarArgs in parse.go exists to prevent when "Task
+		// exactly what cloneArgs in parse.go exists to prevent when "Task
 		// 12 builds new nodes out of these ones".
-		copia.Args = slices.Clone(n.Args)
-		copia.Origin = &Origin{File: n.File, Line: n.Line}
+		copied.Args = slices.Clone(n.Args)
+		copied.Origin = &Origin{File: n.File, Line: n.Line}
 
 		if len(n.Block) > 0 {
-			filhos, err := c.expandir(n.Block)
+			children, err := c.expand(n.Block)
 			if err != nil {
 				return nil, err
 			}
-			copia.Block = filhos
+			copied.Block = children
 		} else {
-			// Without this, copia.Block would keep the slice header copied
+			// Without this, copied.Block would keep the slice header copied
 			// from n.Block (empty, but potentially sharing the same backing
 			// array): this way the copy is left with no tie to the original.
-			copia.Block = nil
+			copied.Block = nil
 		}
-		saida = append(saida, &copia)
+		out = append(out, &copied)
 	}
 
-	return saida, nil
+	return out, nil
 }
 
-// padraoTemMagic matches the same characters crossplane uses to decide
+// patternHasMagic matches the same characters crossplane uses to decide
 // whether an include pattern is a glob (hasMagic in parse.go). A pattern with
 // none of them is literal, and crossplane requires it to open and read
 // successfully during the Parse -- so if it got here without matching any
 // file of the tree, the bug is in our path comparison, not in the
 // configuration.
-var padraoTemMagic = regexp.MustCompile(`[*?[]`)
+var patternHasMagic = regexp.MustCompile(`[*?[]`)
 
-// expandirInclude locates the files that match the include pattern.
+// expandInclude locates the files that match the include pattern.
 // Crossplane has already resolved the globs and returned each matched file as
 // a Config of its own, so all that is left is finding the ones not consumed yet.
-func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
-	achados := c.arquivosDoInclude(n)
+func (c *combiner) expandInclude(n *Node) ([]*Node, error) {
+	matches := c.filesForInclude(n)
 
-	if len(achados) == 0 && len(n.Args) > 0 && !padraoTemMagic.MatchString(n.Args[0]) {
+	if len(matches) == 0 && len(n.Args) > 0 && !patternHasMagic.MatchString(n.Args[0]) {
 		return nil, fmt.Errorf(
 			"literal include %q at %s:%d matched no file of the tree",
 			n.Args[0], n.File, n.Line,
 		)
 	}
 
-	var saida []*Node
-	for _, alvo := range achados {
-		nodes, err := c.resolver(alvo)
+	var out []*Node
+	for _, target := range matches {
+		nodes, err := c.resolve(target)
 		if err != nil {
 			return nil, err
 		}
-		saida = append(saida, nodes...)
+		out = append(out, nodes...)
 	}
 
-	return saida, nil
+	return out, nil
 }
 
 // The iteration runs over the slice of files, in the order crossplane
@@ -161,22 +161,22 @@ func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
 // included by that node. An include with no arguments already fails during
 // Parse, but the guard keeps us from indexing an empty slice should one ever
 // reach here hand-built.
-func (c *combinador) arquivosDoInclude(n *Node) []*File {
+func (c *combiner) filesForInclude(n *Node) []*File {
 	if len(n.Args) == 0 {
 		return nil
 	}
-	padrao := n.Args[0]
+	pattern := n.Args[0]
 
-	var achados []*File
-	for _, f := range c.arquivos {
-		if casaInclude(f.Path, padrao, c.configDir) {
-			achados = append(achados, f)
+	var matches []*File
+	for _, f := range c.files {
+		if matchesInclude(f.Path, pattern, c.configDir) {
+			matches = append(matches, f)
 		}
 	}
-	return achados
+	return matches
 }
 
-// casaInclude decides whether a parsed file corresponds to the pattern of an
+// matchesInclude decides whether a parsed file corresponds to the pattern of an
 // include, mirroring crossplane's resolution (parse.go): a relative pattern
 // is joined with configDir -- the directory of the top-level file, fixed for
 // the whole parse -- never with the directory of whoever declared the include.
@@ -185,16 +185,16 @@ func (c *combinador) arquivosDoInclude(n *Node) []*File {
 // literal pattern pointing exactly at one File.Path) or by filepath.Match (a
 // pattern with a glob). There is no third branch comparing the raw pattern:
 // that would open the door to matching a resolved path against a different base.
-func casaInclude(caminho, padrao, configDir string) bool {
-	resolvido := padrao
-	if !filepath.IsAbs(padrao) {
-		resolvido = filepath.Join(configDir, padrao)
+func matchesInclude(path, pattern, configDir string) bool {
+	resolved := pattern
+	if !filepath.IsAbs(pattern) {
+		resolved = filepath.Join(configDir, pattern)
 	}
 
-	if caminho == resolvido {
+	if path == resolved {
 		return true
 	}
-	if ok, _ := filepath.Match(resolvido, caminho); ok {
+	if ok, _ := filepath.Match(resolved, path); ok {
 		return true
 	}
 	return false

@@ -31,7 +31,7 @@ import (
 // being caught afterwards. The recover barrier in parse.go stays around for
 // the next surprise from the dependency, not for this one.
 
-// validarExpressoesIf returns the refusals of the "if" directives whose
+// validateIfExpressions returns the refusals of the "if" directives whose
 // expression is not parenthesized. It works over this package's tokens, which
 // match crossplane's lexer token for token.
 //
@@ -39,13 +39,13 @@ import (
 // point the decision belongs to the aligner (which classifies the refusal) or
 // to crossplane itself, and guessing about tokens that do not exist would
 // only produce a wrong message.
-func validarExpressoesIf(path string, src []byte) ParseErrors {
+func validateIfExpressions(path string, src []byte) ParseErrors {
 	toks, err := Tokenize(src)
 	if err != nil {
 		return nil
 	}
 
-	var problemas ParseErrors
+	var problems ParseErrors
 	// mapLike counts the open map-like blocks. Inside them crossplane never
 	// even reaches analyze/prepareIfArgs: parse.go:304-321 appends the
 	// statement and moves on. An "if" in there is a map parameter, not a
@@ -72,7 +72,7 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 			continue
 		}
 
-		nome := t
+		name := t
 		i++
 		var args []string
 		for i < len(toks) {
@@ -88,9 +88,9 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 			i++
 		}
 
-		abreBloco := i < len(toks) && toks[i].Kind == TokenBlockStart
-		if abreBloco {
-			if ehCorpoMapLike(nome.Value) || mapLike > 0 {
+		opensBlock := i < len(toks) && toks[i].Kind == TokenBlockStart
+		if opensBlock {
+			if isMapLikeBody(name.Value) || mapLike > 0 {
 				mapLike++
 			}
 			i++
@@ -104,29 +104,29 @@ func validarExpressoesIf(path string, src []byte) ParseErrors {
 		if mapLike > 0 {
 			continue
 		}
-		if nome.Value != "if" {
+		if name.Value != "if" {
 			continue
 		}
-		if expressaoValida(args) {
+		if validIfExpr(args) {
 			continue
 		}
-		problemas = append(problemas, ParseError{
+		problems = append(problems, ParseError{
 			File:    path,
-			Line:    nome.Line,
+			Line:    name.Line,
 			Message: fmt.Sprintf("directive \"if\" with expression %q: the expression must be parenthesized and cannot be empty", strings.Join(args, " ")),
 			Classe:  RecusaExpressaoIfInvalida,
-			Token:   nome.Raw,
+			Token:   name.Raw,
 		})
 	}
-	return problemas
+	return problems
 }
 
-// expressaoValida replicates validExpr (crossplane/util.go:57-67) over the
+// validIfExpr replicates validExpr (crossplane/util.go:57-67) over the
 // argument values: the first argument must start with "(", the last one must
 // end with ")", and the expression between them cannot be empty -- and
 // emptiness is tested by the LENGTH of the edge tokens, exactly as in the
 // original, because that is what prepareIfArgs (util.go:71-86) assumes.
-func expressaoValida(args []string) bool {
+func validIfExpr(args []string) bool {
 	l := len(args)
 	if l == 0 {
 		return false

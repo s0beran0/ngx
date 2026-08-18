@@ -55,44 +55,44 @@ type tokenizer struct {
 func Tokenize(src []byte) ([]Token, error) {
 	t := &tokenizer{src: src, line: 1, col: 1}
 	for {
-		t.pularEspacos()
+		t.skipSpaces()
 		if t.pos >= len(t.src) {
 			return t.tokens, nil
 		}
-		if err := t.proximo(); err != nil {
+		if err := t.next(); err != nil {
 			return nil, err
 		}
 	}
 }
 
-// runeAqui returns the rune beginning at t.pos and its size in bytes, without
+// runeHere returns the rune beginning at t.pos and its size in bytes, without
 // advancing. utf8.DecodeRune already returns (RuneError, 1) for an invalid
 // byte or a truncated sequence -- the tokenizer never gets stuck on malformed
 // input (the fuzz produces such input on purpose), it just advances 1 byte at
 // a time through it, the same way bufio.ScanRunes does in crossplane's lexer.
-func (t *tokenizer) runeAqui() (rune, int) {
+func (t *tokenizer) runeHere() (rune, int) {
 	if t.pos >= len(t.src) {
 		return 0, 0
 	}
 	return utf8.DecodeRune(t.src[t.pos:])
 }
 
-// espacoAqui says whether the rune at t.pos is whitespace in the full unicode
+// spaceHere says whether the rune at t.pos is whitespace in the full unicode
 // sense -- \v, \f and NBSP (U+00A0) included, not just the four ascii bytes.
 // It is the same set crossplane uses through strings.TrimSpace.
-func (t *tokenizer) espacoAqui() bool {
-	r, _ := t.runeAqui()
+func (t *tokenizer) spaceHere() bool {
+	r, _ := t.runeHere()
 	return unicode.IsSpace(r)
 }
 
-// avancar consumes one whole rune (1 or more bytes) starting at t.pos,
+// advance consumes one whole rune (1 or more bytes) starting at t.pos,
 // updating position, line and column. Column counts runes; pos stays in bytes.
-func (t *tokenizer) avancar() {
-	r, tam := t.runeAqui()
-	if tam == 0 {
+func (t *tokenizer) advance() {
+	r, size := t.runeHere()
+	if size == 0 {
 		return
 	}
-	t.pos += tam
+	t.pos += size
 	if r == '\n' {
 		t.line++
 		t.col = 1
@@ -101,27 +101,27 @@ func (t *tokenizer) avancar() {
 	}
 }
 
-// consumirParaValor consumes the rune at t.pos and returns the bytes that
+// consumeIntoValue consumes the rune at t.pos and returns the bytes that
 // should go into Value: for a valid rune, the source bytes themselves; for an
 // invalid UTF-8 byte, the encoding of the replacement rune U+FFFD -- which is
 // what bufio.ScanRunes (the scanner crossplane's lexer uses) returns for
 // invalid bytes, even though it advances only 1 byte in the input source.
 // Without this, an invalid byte in the middle of a word makes our Value
 // disagree with crossplane's, breaking the differential comparison of Task 9.
-func (t *tokenizer) consumirParaValor() []byte {
-	r, tam := t.runeAqui()
-	antes := t.pos
-	t.avancar()
-	if r == utf8.RuneError && tam == 1 {
+func (t *tokenizer) consumeIntoValue() []byte {
+	r, size := t.runeHere()
+	from := t.pos
+	t.advance()
+	if r == utf8.RuneError && size == 1 {
 		return []byte(string(utf8.RuneError))
 	}
-	return t.src[antes:t.pos]
+	return t.src[from:t.pos]
 }
 
-// consumirEscape consumes the backslash at t.pos and, right after it, any run
+// consumeEscape consumes the backslash at t.pos and, right after it, any run
 // of \r -- each one invisible, just like in crossplane -- until it finds the
 // real rune that forms the escape pair with that backslash (already with
-// invalid bytes replaced by U+FFFD through consumirParaValor). This
+// invalid bytes replaced by U+FFFD through consumeIntoValue). This
 // replicates a genuine crossplane behavior: the "escape pending" state
 // crosses a stray \r and merges with the NEXT real character, wherever it may
 // be -- not with the \r itself. If the source ends before that rune is found
@@ -129,55 +129,55 @@ func (t *tokenizer) consumirParaValor() []byte {
 // file), the pair never forms: everything consumed stays invisible (it never
 // goes into Value, but it still advances the position, so it stays inside the
 // Raw of whatever token is being built), and ok comes back false.
-func (t *tokenizer) consumirEscape() (proximo []byte, ok bool) {
-	t.avancar() // the backslash itself, always 1 ascii byte
+func (t *tokenizer) consumeEscape() (next []byte, ok bool) {
+	t.advance() // the backslash itself, always 1 ascii byte
 	for t.pos < len(t.src) && t.src[t.pos] == '\r' {
-		t.avancar()
+		t.advance()
 	}
 	if t.pos >= len(t.src) {
 		return nil, false
 	}
-	return t.consumirParaValor(), true
+	return t.consumeIntoValue(), true
 }
 
-func (t *tokenizer) pularEspacos() {
-	for t.pos < len(t.src) && t.espacoAqui() {
-		t.avancar()
+func (t *tokenizer) skipSpaces() {
+	for t.pos < len(t.src) && t.spaceHere() {
+		t.advance()
 	}
 }
 
-func (t *tokenizer) proximo() error {
+func (t *tokenizer) next() error {
 	start, line, col := t.pos, t.line, t.col
 
 	switch c := t.src[t.pos]; {
 	case c == ';':
-		t.avancar()
-		t.emitir(TokenSemicolon, ";", start, line, col, false)
+		t.advance()
+		t.emit(TokenSemicolon, ";", start, line, col, false)
 		return nil
 	case c == '{':
-		t.avancar()
-		t.emitir(TokenBlockStart, "{", start, line, col, false)
+		t.advance()
+		t.emit(TokenBlockStart, "{", start, line, col, false)
 		return nil
 	case c == '}':
-		t.avancar()
-		t.emitir(TokenBlockEnd, "}", start, line, col, false)
+		t.advance()
+		t.emit(TokenBlockEnd, "}", start, line, col, false)
 		return nil
 	case c == '#':
-		t.lerComentario(start, line, col)
+		t.readComment(start, line, col)
 		return nil
 	case c == '"' || c == '\'':
-		return t.lerAspas(c, start, line, col)
+		return t.readQuoted(c, start, line, col)
 	default:
-		return t.lerPalavra(start, line, col)
+		return t.readWord(start, line, col)
 	}
 }
 
-// lerComentario consumes a comment up to the end of the line. The CR of a
+// readComment consumes a comment up to the end of the line. The CR of a
 // CRLF terminator stays out of the token span: it belongs to the whitespace
 // that follows, not to the comment. That way v0.2, when rewriting that
 // comment, never converts the line break from CRLF to LF -- an off-target
 // change the project promises never to make.
-func (t *tokenizer) lerComentario(start, line, col int) {
+func (t *tokenizer) readComment(start, line, col int) {
 	for t.pos < len(t.src) {
 		if t.src[t.pos] == '\n' {
 			break
@@ -185,47 +185,47 @@ func (t *tokenizer) lerComentario(start, line, col int) {
 		if t.src[t.pos] == '\r' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
 			break
 		}
-		t.avancar()
+		t.advance()
 	}
-	t.emitir(TokenComment, string(t.src[start+1:t.pos]), start, line, col, false)
+	t.emit(TokenComment, string(t.src[start+1:t.pos]), start, line, col, false)
 }
 
-// lerAspas consumes a string between single or double quotes. A backslash is
+// readQuoted consumes a string between single or double quotes. A backslash is
 // only dropped when it precedes the active quote (the current delimiter); any
 // other escape stays literal in Value, just like in crossplane -- which is
 // why msg "a\nb"; yields Value a\nb (a literal backslash and n), not a real
 // line break. A stray \r never goes into Value, it stays invisible, just like
 // in crossplane -- but it still advances the position, so it stays inside
 // Raw. A backslash followed by \r skips the \r (invisible) and forms the
-// escape pair with the real rune that comes next, through consumirEscape.
-func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
-	t.avancar() // consumes the opening quote
+// escape pair with the real rune that comes next, through consumeEscape.
+func (t *tokenizer) readQuoted(quote byte, start, line, col int) error {
+	t.advance() // consumes the opening quote
 
-	var valor []byte
+	var value []byte
 	for t.pos < len(t.src) {
 		c := t.src[t.pos]
 		switch {
 		case c == '\\':
-			if prox, ok := t.consumirEscape(); ok {
-				if len(prox) == 1 && prox[0] == aspa {
-					valor = append(valor, prox...) // the quote only, no backslash
+			if next, ok := t.consumeEscape(); ok {
+				if len(next) == 1 && next[0] == quote {
+					value = append(value, next...) // the quote only, no backslash
 				} else {
-					valor = append(valor, '\\')
-					valor = append(valor, prox...)
+					value = append(value, '\\')
+					value = append(value, next...)
 				}
 			}
 		case c == '\r':
 			// A stray CR stays invisible -- it never goes into Value.
-			t.avancar()
-		case c == aspa:
-			t.avancar() // consumes the closing quote
-			t.emitir(TokenWord, string(valor), start, line, col, true)
+			t.advance()
+		case c == quote:
+			t.advance() // consumes the closing quote
+			t.emit(TokenWord, string(value), start, line, col, true)
 			return nil
 		default:
-			valor = append(valor, t.consumirParaValor()...)
+			value = append(value, t.consumeIntoValue()...)
 		}
 	}
-	return &ErroDeAspa{Aspa: string(aspa), Linha: line}
+	return &ErroDeAspa{Aspa: string(quote), Linha: line}
 }
 
 // ErroDeAspa is the source ending inside an open quote. It is a type, and not
@@ -245,7 +245,7 @@ func (e *ErroDeAspa) Error() string {
 	return fmt.Sprintf("quote %q opened on line %d was never closed", e.Aspa, e.Linha)
 }
 
-// lerPalavra consumes an unquoted word: a directive name or an argument. It
+// readWord consumes an unquoted word: a directive name or an argument. It
 // treats ${...} (parameter expansion, common in Docker/envsubst templates,
 // njs, rewrite and set) as part of the same word -- without that handling,
 // phantom "{" and "}" show up in the middle of the word and throw Task 9 out
@@ -253,56 +253,56 @@ func (e *ErroDeAspa) Error() string {
 // middle of the word, just like in crossplane: it does not end the word and
 // never goes into Value -- only a real \n ends it. A backslash skips any \r
 // that comes right after it and forms the escape pair with the next real
-// rune, through consumirEscape; if the source ends before that, the backslash
+// rune, through consumeEscape; if the source ends before that, the backslash
 // (and the \r) vanish leaving no content, exactly like in crossplane.
-func (t *tokenizer) lerPalavra(start, line, col int) error {
-	var valor []byte
+func (t *tokenizer) readWord(start, line, col int) error {
+	var value []byte
 	for t.pos < len(t.src) {
-		if len(valor) > 0 && valor[len(valor)-1] == '$' && t.src[t.pos] == '{' {
-			antes := t.pos
-			t.avancar() // consumes the '{' that opens the expansion
-			valor = append(valor, t.src[antes:t.pos]...)
-			t.lerVar(&valor)
+		if len(value) > 0 && value[len(value)-1] == '$' && t.src[t.pos] == '{' {
+			from := t.pos
+			t.advance() // consumes the '{' that opens the expansion
+			value = append(value, t.src[from:t.pos]...)
+			t.readVar(&value)
 			continue
 		}
 
 		c := t.src[t.pos]
 		if c == '\\' {
-			if prox, ok := t.consumirEscape(); ok {
-				valor = append(valor, '\\')
-				valor = append(valor, prox...)
+			if next, ok := t.consumeEscape(); ok {
+				value = append(value, '\\')
+				value = append(value, next...)
 			}
 			continue
 		}
 		if c == '\r' {
-			// mirrors lerComentario: the CR of a CRLF terminator stays out
+			// mirrors readComment: the CR of a CRLF terminator stays out
 			// of the span, it belongs to the whitespace that follows, not to
 			// the word. Only a stray CR (with no \n after it) is invisible
 			// and consumed here.
 			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
 				break
 			}
-			t.avancar()
+			t.advance()
 			continue
 		}
-		if t.espacoAqui() || c == ';' || c == '{' || c == '}' {
+		if t.spaceHere() || c == ';' || c == '{' || c == '}' {
 			break
 		}
 
-		valor = append(valor, t.consumirParaValor()...)
+		value = append(value, t.consumeIntoValue()...)
 	}
-	if len(valor) == 0 {
+	if len(value) == 0 {
 		// the only thing consumed was a backslash (and maybe some \r)
 		// swallowed without ever finding a pair: there is no content at all,
 		// and crossplane produces no token for it either.
 		return nil
 	}
-	t.emitir(TokenWord, string(valor), start, line, col, false)
+	t.emit(TokenWord, string(value), start, line, col, false)
 	return nil
 }
 
-// lerVar consumes the body of a parameter expansion (${...}) after the
-// opening '{' has already been folded into the word by lerPalavra. It mirrors
+// readVar consumes the body of a parameter expansion (${...}) after the
+// opening '{' has already been folded into the word by readWord. It mirrors
 // the inVar state of crossplane's lexer, byte by byte: the reading stops
 // (back to normal word mode) at the first '}' or the first unescaped
 // whitespace, and both are still part of the same word -- odd behavior
@@ -311,44 +311,44 @@ func (t *tokenizer) lerPalavra(start, line, col int) error {
 // token for token, not fix it. A backslash escaping anything (except '}')
 // never counts as the whitespace that ends the expansion, only a backslash
 // escaping '}' ends it, just like in crossplane. A stray \r stays invisible,
-// as in lerAspas; a backslash skips any \r before forming the escape pair,
-// through consumirEscape.
-func (t *tokenizer) lerVar(valor *[]byte) {
+// as in readQuoted; a backslash skips any \r before forming the escape pair,
+// through consumeEscape.
+func (t *tokenizer) readVar(value *[]byte) {
 	for t.pos < len(t.src) {
 		c := t.src[t.pos]
 
 		if c == '\\' {
-			if prox, ok := t.consumirEscape(); ok {
-				*valor = append(*valor, '\\')
-				*valor = append(*valor, prox...)
-				if len(prox) == 1 && prox[0] == '}' {
+			if next, ok := t.consumeEscape(); ok {
+				*value = append(*value, '\\')
+				*value = append(*value, next...)
+				if len(next) == 1 && next[0] == '}' {
 					return
 				}
 			}
 			continue
 		}
 		if c == '\r' {
-			// same handling as in lerPalavra: the CR of a CRLF stays out of
+			// same handling as in readWord: the CR of a CRLF stays out of
 			// the span, it does not go into the expansion.
 			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
 				return
 			}
-			t.avancar()
+			t.advance()
 			continue
 		}
 
-		espaco := t.espacoAqui()
-		*valor = append(*valor, t.consumirParaValor()...)
-		if espaco || (*valor)[len(*valor)-1] == '}' {
+		space := t.spaceHere()
+		*value = append(*value, t.consumeIntoValue()...)
+		if space || (*value)[len(*value)-1] == '}' {
 			return
 		}
 	}
 }
 
-func (t *tokenizer) emitir(kind TokenKind, valor string, start, line, col int, quoted bool) {
+func (t *tokenizer) emit(kind TokenKind, value string, start, line, col int, quoted bool) {
 	t.tokens = append(t.tokens, Token{
 		Kind:   kind,
-		Value:  valor,
+		Value:  value,
 		Raw:    string(t.src[start:t.pos]),
 		Start:  start,
 		End:    t.pos,

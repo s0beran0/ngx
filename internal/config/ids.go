@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// abreviacoes shortens the most common block directives. A bare first letter
+// abbreviations shortens the most common block directives. A bare first letter
 // would not do: server and stream would collide.
-var abreviacoes = map[string]string{
+var abbreviations = map[string]string{
 	"http":     "h",
 	"stream":   "st",
 	"events":   "e",
@@ -18,9 +18,9 @@ var abreviacoes = map[string]string{
 	"map":      "mp",
 }
 
-// blocosRaiz are the top-level contexts, which occur at most once and
+// rootBlocks are the top-level contexts, which occur at most once and
 // therefore need no index: the ID is "h", not "h0".
-var blocosRaiz = map[string]bool{
+var rootBlocks = map[string]bool{
 	"http":   true,
 	"stream": true,
 	"events": true,
@@ -33,20 +33,20 @@ var blocosRaiz = map[string]bool{
 // position: inserting a location does not renumber the servers next to it.
 // Comments get no ID and take no part in the count -- otherwise adding a
 // comment would shift the IDs of the directives around it.
-func AtribuirIDs(nodes []*Node, prefixo string) {
-	contadores := map[string]int{}
-	naRaiz := prefixo == ""
+func AtribuirIDs(nodes []*Node, prefix string) {
+	counters := map[string]int{}
+	atRoot := prefix == ""
 
 	for _, n := range nodes {
 		if n.IsComment() {
 			continue
 		}
 
-		seg := segmento(n, contadores, naRaiz)
-		if naRaiz {
+		seg := segment(n, counters, atRoot)
+		if atRoot {
 			n.ID = seg
 		} else {
-			n.ID = prefixo + "." + seg
+			n.ID = prefix + "." + seg
 		}
 
 		if len(n.Block) > 0 {
@@ -55,28 +55,28 @@ func AtribuirIDs(nodes []*Node, prefixo string) {
 	}
 }
 
-func segmento(n *Node, contadores map[string]int, naRaiz bool) string {
+func segment(n *Node, counters map[string]int, atRoot bool) string {
 	// Only the root level goes without an index: a stream nested inside http
 	// is just one more sibling block and has to be numbered like any other.
-	if naRaiz && n.HasBlock() && blocosRaiz[n.Directive] {
-		return abreviar(n.Directive)
+	if atRoot && n.HasBlock() && rootBlocks[n.Directive] {
+		return abbreviate(n.Directive)
 	}
 
-	chave := n.Directive
-	base := abreviar(n.Directive)
-	if !n.HasBlock() && abreviacoes[n.Directive] == "" {
+	key := n.Directive
+	base := abbreviate(n.Directive)
+	if !n.HasBlock() && abbreviations[n.Directive] == "" {
 		// Plain directives with no abbreviation of their own share the d
 		// counter.
-		chave, base = "", "d"
+		key, base = "", "d"
 	}
 
-	i := contadores[chave]
-	contadores[chave] = i + 1
+	i := counters[key]
+	counters[key] = i + 1
 	return fmt.Sprintf("%s%d", base, i)
 }
 
-func abreviar(directive string) string {
-	if a, ok := abreviacoes[directive]; ok {
+func abbreviate(directive string) string {
+	if a, ok := abbreviations[directive]; ok {
 		return a
 	}
 	return directive
@@ -86,16 +86,16 @@ func abreviar(directive string) string {
 func FindByID(t *Tree, id string) *Node {
 	id = strings.TrimPrefix(id, "#")
 
-	var achado *Node
+	var found *Node
 	t.Walk(func(n *Node) bool {
-		if achado != nil {
+		if found != nil {
 			return false
 		}
 		if n.ID == id {
-			achado = n
+			found = n
 			return false
 		}
 		return true
 	})
-	return achado
+	return found
 }

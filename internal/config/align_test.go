@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHeadSpanCobreDiretivaEArgumentos(t *testing.T) {
-	tree := parseSimples(t)
+func TestHeadSpanCoversDirectiveAndArgs(t *testing.T) {
+	tree := parseSimple(t)
 	src := tree.Files[0].Source
 
 	var listen *config.Node
@@ -27,8 +27,8 @@ func TestHeadSpanCobreDiretivaEArgumentos(t *testing.T) {
 	require.Equal(t, "listen 443 ssl", string(src[listen.HeadSpan.Start:listen.HeadSpan.End]))
 }
 
-func TestSpanDeDiretivaSimplesTerminaNoPontoEVirgula(t *testing.T) {
-	tree := parseSimples(t)
+func TestSpanOfSimpleDirectiveEndsAtSemicolon(t *testing.T) {
+	tree := parseSimple(t)
 	src := tree.Files[0].Source
 
 	var listen *config.Node
@@ -43,8 +43,8 @@ func TestSpanDeDiretivaSimplesTerminaNoPontoEVirgula(t *testing.T) {
 	require.Equal(t, "listen 443 ssl;", string(src[listen.Span.Start:listen.Span.End]))
 }
 
-func TestSpanDeBlocoTerminaNaChaveDeFechamento(t *testing.T) {
-	tree := parseSimples(t)
+func TestSpanOfBlockEndsAtClosingBrace(t *testing.T) {
+	tree := parseSimple(t)
 	src := tree.Files[0].Source
 
 	var upstream *config.Node
@@ -57,17 +57,17 @@ func TestSpanDeBlocoTerminaNaChaveDeFechamento(t *testing.T) {
 	})
 	require.NotNil(t, upstream)
 
-	texto := string(src[upstream.Span.Start:upstream.Span.End])
-	require.True(t, strings.HasPrefix(texto, "upstream backend_v1"))
-	require.True(t, strings.HasSuffix(texto, "}"))
-	require.Contains(t, texto, "server 10.0.0.1:8080;")
+	text := string(src[upstream.Span.Start:upstream.Span.End])
+	require.True(t, strings.HasPrefix(text, "upstream backend_v1"))
+	require.True(t, strings.HasSuffix(text, "}"))
+	require.Contains(t, text, "server 10.0.0.1:8080;")
 
 	require.Equal(t, "upstream backend_v1", string(src[upstream.HeadSpan.Start:upstream.HeadSpan.End]),
 		"the head does not include the block")
 }
 
-func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
-	tree := parseSimples(t)
+func TestLineAndColumnComeFromTokenizer(t *testing.T) {
+	tree := parseSimple(t)
 
 	var serverName *config.Node
 	tree.Walk(func(n *config.Node) bool {
@@ -82,13 +82,13 @@ func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
 	require.Greater(t, serverName.Line, 0)
 	require.Greater(t, serverName.Column, 0)
 
-	linhas := strings.Split(string(tree.Files[0].Source), "\n")
-	require.Contains(t, linhas[serverName.Line-1], "server_name")
+	lines := strings.Split(string(tree.Files[0].Source), "\n")
+	require.Contains(t, lines[serverName.Line-1], "server_name")
 }
 
 // Quotes containing a semicolon are the case that breaks a naive alignment.
-func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
-	tree := parseSimples(t)
+func TestAlignmentSurvivesQuotesWithSemicolon(t *testing.T) {
+	tree := parseSimple(t)
 	src := tree.Files[0].Source
 
 	var addHeader *config.Node
@@ -105,47 +105,47 @@ func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
 }
 
 // Containment invariant: the span of a child lives inside the span of its parent.
-func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
-	tree := parseSimples(t)
+func TestChildSpansAreContainedInParent(t *testing.T) {
+	tree := parseSimple(t)
 
-	var verificar func(nodes []*config.Node, pai *config.Node)
-	verificar = func(nodes []*config.Node, pai *config.Node) {
-		anteriorFim := -1
+	var check func(nodes []*config.Node, parent *config.Node)
+	check = func(nodes []*config.Node, parent *config.Node) {
+		prevEnd := -1
 		for _, n := range nodes {
-			if pai != nil {
-				require.GreaterOrEqual(t, n.Span.Start, pai.Span.Start,
-					"%s starts before its parent %s", n.Directive, pai.Directive)
-				require.LessOrEqual(t, n.Span.End, pai.Span.End,
-					"%s ends after its parent %s", n.Directive, pai.Directive)
+			if parent != nil {
+				require.GreaterOrEqual(t, n.Span.Start, parent.Span.Start,
+					"%s starts before its parent %s", n.Directive, parent.Directive)
+				require.LessOrEqual(t, n.Span.End, parent.Span.End,
+					"%s ends after its parent %s", n.Directive, parent.Directive)
 			}
-			require.GreaterOrEqual(t, n.Span.Start, anteriorFim,
+			require.GreaterOrEqual(t, n.Span.Start, prevEnd,
 				"%s overlaps the previous sibling", n.Directive)
-			anteriorFim = n.Span.End
-			verificar(n.Block, n)
+			prevEnd = n.Span.End
+			check(n.Block, n)
 		}
 	}
 
 	for _, f := range tree.Files {
-		verificar(f.Nodes, nil)
+		check(f.Nodes, nil)
 	}
 }
 
 // Coverage: every significant byte of the file belongs to the span of some
 // root-level node. This is the concrete formulation of the property that holds
 // the architecture up: if it holds, the token-tree matching is correct.
-func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
-	tree := parseSimples(t)
+func TestRootSpansCoverEverySignificantByte(t *testing.T) {
+	tree := parseSimple(t)
 	src := tree.Files[0].Source
 
-	coberto := make([]bool, len(src))
+	covered := make([]bool, len(src))
 	for _, n := range tree.Files[0].Nodes {
 		for i := n.Span.Start; i < n.Span.End; i++ {
-			coberto[i] = true
+			covered[i] = true
 		}
 	}
 
 	for i, b := range src {
-		if coberto[i] {
+		if covered[i] {
 			continue
 		}
 		require.True(t, b == ' ' || b == '\t' || b == '\n' || b == '\r',
@@ -156,7 +156,7 @@ func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 // A comment between arguments: crossplane/parse.go:286-290 strips "# prod"
 // out of Args and crossplane/parse.go:435-445 attaches it as a sibling "#"
 // node after the whole directive (Task 9, defect 1).
-func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
+func TestCommentBetweenArgsDoesNotBreakAlignment(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
 	src := "server_name a.com # prod\n  b.com;\nlisten 80;\n"
@@ -173,11 +173,11 @@ func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
 	require.Equal(t, []string{"a.com", "b.com"}, serverName.Args)
 	require.Equal(t, "server_name a.com # prod\n  b.com;", string(src[serverName.Span.Start:serverName.Span.End]))
 
-	comentario := nodes[1]
-	require.True(t, comentario.IsComment())
-	require.NotNil(t, comentario.Comment)
-	require.Equal(t, " prod", *comentario.Comment)
-	require.Equal(t, "# prod", string(src[comentario.Span.Start:comentario.Span.End]))
+	comment := nodes[1]
+	require.True(t, comment.IsComment())
+	require.NotNil(t, comment.Comment)
+	require.Equal(t, " prod", *comment.Comment)
+	require.Equal(t, "# prod", string(src[comment.Span.Start:comment.Span.End]))
 
 	listen := nodes[2]
 	require.Equal(t, "listen", listen.Directive)
@@ -187,7 +187,7 @@ func TestComentarioEntreArgumentosNaoQuebraOAlinhamento(t *testing.T) {
 // A comment between the name/arguments and the block: same crossplane
 // mechanism, but now the "#" node lands after the directive AND after its
 // block (Task 9, defect 1, second example).
-func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
+func TestCommentBeforeBlockDoesNotBreakAlignment(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
 	src := "location /api # gw\n{ proxy_pass http://a; }\n"
@@ -208,16 +208,16 @@ func TestComentarioAntesDoBlocoNaoQuebraOAlinhamento(t *testing.T) {
 	require.Equal(t, "location /api # gw\n{ proxy_pass http://a; }",
 		string(src[location.Span.Start:location.Span.End]))
 
-	comentario := nodes[1]
-	require.True(t, comentario.IsComment())
-	require.Equal(t, "# gw", string(src[comentario.Span.Start:comentario.Span.End]))
+	comment := nodes[1]
+	require.True(t, comment.IsComment())
+	require.Equal(t, "# gw", string(src[comment.Span.Start:comment.Span.End]))
 }
 
 // if with isolated parentheses: crossplane/util.go:71-86 (prepareIfArgs)
 // strips "(" and ")" out of Args when they come isolated, so len(n.Args) does
 // not count the real word tokens between "if" and the terminator (Task 9,
 // defect 2).
-func TestIfComParentesesEspacadosAlinha(t *testing.T) {
+func TestIfWithSpacedParenthesesAligns(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "f.conf")
 	src := "http { server { if ( $a = b ) { return 404; } } }\n"
@@ -226,22 +226,22 @@ func TestIfComParentesesEspacadosAlinha(t *testing.T) {
 	tree, err := config.Parse(config.ParseOptions{Path: p})
 	require.NoError(t, err)
 
-	var se *config.Node
+	var ifNode *config.Node
 	tree.Walk(func(n *config.Node) bool {
 		if n.Directive == "if" {
-			se = n
+			ifNode = n
 			return false
 		}
 		return true
 	})
-	require.NotNil(t, se)
-	require.Equal(t, []string{"$a", "=", "b"}, se.Args)
-	require.Equal(t, "if ( $a = b )", string(src[se.HeadSpan.Start:se.HeadSpan.End]))
-	require.True(t, se.HasBlock())
-	require.Equal(t, "if ( $a = b ) { return 404; }", string(src[se.Span.Start:se.Span.End]))
+	require.NotNil(t, ifNode)
+	require.Equal(t, []string{"$a", "=", "b"}, ifNode.Args)
+	require.Equal(t, "if ( $a = b )", string(src[ifNode.HeadSpan.Start:ifNode.HeadSpan.End]))
+	require.True(t, ifNode.HasBlock())
+	require.Equal(t, "if ( $a = b ) { return 404; }", string(src[ifNode.Span.Start:ifNode.Span.End]))
 }
 
-func TestBlocoVazioEhReconhecido(t *testing.T) {
+func TestEmptyBlockIsRecognized(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "vazio.conf")
 	require.NoError(t, os.WriteFile(p, []byte("events {}\n"), 0o644))

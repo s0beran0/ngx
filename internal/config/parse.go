@@ -29,14 +29,14 @@ type ParseOptions struct {
 	Glob func(pattern string) ([]string, error)
 }
 
-func (o ParseOptions) abrir(path string) (io.ReadCloser, error) {
+func (o ParseOptions) open(path string) (io.ReadCloser, error) {
 	if o.Open != nil {
 		return o.Open(path)
 	}
 	return os.Open(path)
 }
 
-func (o ParseOptions) expandir(pattern string) ([]string, error) {
+func (o ParseOptions) glob(pattern string) ([]string, error) {
 	if o.Glob != nil {
 		return o.Glob(pattern)
 	}
@@ -54,18 +54,18 @@ func (o ParseOptions) expandir(pattern string) ([]string, error) {
 // broken config. Here that is treated as a failure, keeping file and line in
 // ParseErrors so that the output can point at the exact spot of the problem.
 func Parse(opts ParseOptions) (*Tree, error) {
-	cache := novaCacheFonte()
-	abrirEspelhado := cache.decora(opts.abrir)
+	cache := newSourceCache()
+	mirroredOpen := cache.wrap(opts.open)
 
-	payload, err := parseComBarreira(opts.Path, &crossplane.ParseOptions{
+	payload, err := parseGuarded(opts.Path, &crossplane.ParseOptions{
 		ParseComments:             true,
 		CombineConfigs:            false,
 		SingleFile:                false,
 		SkipDirectiveArgsCheck:    true,
 		SkipDirectiveContextCheck: true,
 		ErrorOnUnknownDirectives:  false,
-		Open:                      abrirEspelhado,
-		Glob:                      opts.expandir,
+		Open:                      mirroredOpen,
+		Glob:                      opts.glob,
 	})
 
 	// The refusal from the up-front validation comes before any crossplane
@@ -73,8 +73,8 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	// parser never reaches the broken statement, and the error crossplane
 	// reports next is only an echo of that. What explains the problem is the
 	// refusal.
-	if problemas := cache.recusas(); len(problemas) > 0 {
-		return nil, problemas
+	if problems := cache.refusals(); len(problems) > 0 {
+		return nil, problems
 	}
 
 	// An I/O failure while reading takes precedence over whatever crossplane
@@ -87,44 +87,44 @@ func Parse(opts ParseOptions) (*Tree, error) {
 	// line -- and the consumer gets "error on line N" for an intact .conf and
 	// goes off debugging the wrong file. What knows what happened, and in
 	// which file, is the read that failed; it is already recorded in the cache.
-	if problemas := cache.errosDeLeitura(); len(problemas) > 0 {
-		return nil, problemas
+	if problems := cache.readErrors(); len(problems) > 0 {
+		return nil, problems
 	}
 
 	if err != nil {
-		var problemas ParseErrors
-		if errors.As(err, &problemas) {
-			return nil, problemas
+		var problems ParseErrors
+		if errors.As(err, &problems) {
+			return nil, problems
 		}
 		return nil, fmt.Errorf("while parsing %s: %w", opts.Path, err)
 	}
 
 	if payload.Status != "ok" {
-		return nil, coletarErros(payload)
+		return nil, collectErrors(payload)
 	}
 
 	tree := &Tree{}
 	for _, cfg := range payload.Config {
-		src, err := lerFonte(opts, cache, cfg.File)
+		src, err := readSource(opts, cache, cfg.File)
 		if err != nil {
 			return nil, err
 		}
-		arquivo := &File{
+		file := &File{
 			Path:   cfg.File,
 			Source: src,
-			Nodes:  converterDirectives(cfg.Parsed, cfg.File),
+			Nodes:  convertDirectives(cfg.Parsed, cfg.File),
 		}
-		if err := alinhar(arquivo); err != nil {
+		if err := align(file); err != nil {
 			return nil, err
 		}
-		AtribuirIDs(arquivo.Nodes, "")
-		tree.Files = append(tree.Files, arquivo)
+		AtribuirIDs(file.Nodes, "")
+		tree.Files = append(tree.Files, file)
 	}
 	tree.Hash = Hash(tree)
 	return tree, nil
 }
 
-// parseComBarreira runs crossplane's parser behind a safety net against
+// parseGuarded runs crossplane's parser behind a safety net against
 // panics. A CLI whose consumer is an AI agent cannot emit a stack trace: that
 // is not JSON, is not readable, and carries no useful exit code. The panic
 // becomes ParseErrors, which the CLI layer already translates into the exit
@@ -133,8 +133,8 @@ func Parse(opts ParseOptions) (*Tree, error) {
 // It covers the parser goroutine, which is this one; a panic inside
 // crossplane's lexer goroutine would still escape, and there is no way to
 // recover it from here. The known case -- prepareIfArgs (util.go:71-86) -- is
-// in the parser, and besides is already blocked earlier by validarExpressoesIf.
-func parseComBarreira(path string, opts *crossplane.ParseOptions) (payload *crossplane.Payload, err error) {
+// in the parser, and besides is already blocked earlier by validateIfExpressions.
+func parseGuarded(path string, opts *crossplane.ParseOptions) (payload *crossplane.Payload, err error) {
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -150,63 +150,63 @@ func parseComBarreira(path string, opts *crossplane.ParseOptions) (payload *cros
 	return crossplane.Parse(path, opts)
 }
 
-// coletarErros turns the problems crossplane reported into a single located
+// collectErrors turns the problems crossplane reported into a single located
 // error. The problems show up both in payload.Errors and in the Errors of
 // each affected Config -- crossplane records the same occurrence in both
 // places --, so here they are deduplicated by file, line and message before
 // becoming ParseErrors.
-func coletarErros(payload *crossplane.Payload) error {
-	var problemas ParseErrors
-	visto := map[string]bool{}
+func collectErrors(payload *crossplane.Payload) error {
+	var problems ParseErrors
+	seen := map[string]bool{}
 
-	adicionar := func(arquivo string, linha *int, causa error) {
-		if causa == nil {
+	add := func(file string, line *int, cause error) {
+		if cause == nil {
 			return
 		}
 		l := 0
-		if linha != nil {
-			l = *linha
+		if line != nil {
+			l = *line
 		}
-		chave := fmt.Sprintf("%s:%d:%s", arquivo, l, causa.Error())
-		if visto[chave] {
+		key := fmt.Sprintf("%s:%d:%s", file, l, cause.Error())
+		if seen[key] {
 			return
 		}
-		visto[chave] = true
-		problemas = append(problemas, ParseError{File: arquivo, Line: l, Message: causa.Error()})
+		seen[key] = true
+		problems = append(problems, ParseError{File: file, Line: l, Message: cause.Error()})
 	}
 
 	for _, pe := range payload.Errors {
-		adicionar(pe.File, pe.Line, pe.Error)
+		add(pe.File, pe.Line, pe.Error)
 	}
 	for _, cfg := range payload.Config {
 		for _, ce := range cfg.Errors {
-			adicionar(cfg.File, ce.Line, ce.Error)
+			add(cfg.File, ce.Line, ce.Error)
 		}
 	}
 
-	if len(problemas) == 0 {
-		problemas = append(problemas, ParseError{Message: "parse failed without detailing the error"})
+	if len(problems) == 0 {
+		problems = append(problems, ParseError{Message: "parse failed without detailing the error"})
 	}
-	return problemas
+	return problems
 }
 
-// cacheFonte keeps, per file path, the bytes crossplane actually read during
+// sourceCache keeps, per file path, the bytes crossplane actually read during
 // the parse. Without it, Source would come from a second disk read
 // independent of the one crossplane tokenized: the two could diverge (file
 // changed between the reads, single-use Open, and so on), and Task 9 would
 // match the spans against content that is not what was in fact parsed.
-type cacheFonte struct {
-	mu       sync.Mutex
-	dados    map[string][]byte
-	erros    map[string]error
-	recusasV ParseErrors
+type sourceCache struct {
+	mu          sync.Mutex
+	data        map[string][]byte
+	errs        map[string]error
+	refusalList ParseErrors
 }
 
-func novaCacheFonte() *cacheFonte {
-	return &cacheFonte{dados: map[string][]byte{}, erros: map[string]error{}}
+func newSourceCache() *sourceCache {
+	return &sourceCache{data: map[string][]byte{}, errs: map[string]error{}}
 }
 
-// decora wraps the original open function: it reads the whole file, keeps the
+// wrap wraps the original open function: it reads the whole file, keeps the
 // bytes read and hands crossplane a reader over those SAME bytes. Two things
 // depend on that.
 //
@@ -217,7 +217,7 @@ func novaCacheFonte() *cacheFonte {
 //
 // The second is the up-front validation: right here, before the first token
 // reaches the parser, is the only point where a malformed "if" can be refused
-// BEFORE prepareIfArgs brings the process down (see expressao_if.go). An
+// BEFORE prepareIfArgs brings the process down (see if_expression.go). An
 // earlier version mirrored the read in streaming fashion, and there was no
 // such point there: the parser already consumes tokens while the lexer is
 // still reading. Reading it all at once also removes the race between Read
@@ -229,9 +229,9 @@ func novaCacheFonte() *cacheFonte {
 // so that crossplane stops instead of tokenizing a prefix -- a truncated
 // Source would be worse than the error, because the spans would be coherent
 // with it and a v0.2 rewrite would truncate the user's file.
-func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) func(string) (io.ReadCloser, error) {
+func (c *sourceCache) wrap(openOriginal func(string) (io.ReadCloser, error)) func(string) (io.ReadCloser, error) {
 	return func(path string) (io.ReadCloser, error) {
-		rc, err := abrirOriginal(path)
+		rc, err := openOriginal(path)
 		if err != nil {
 			// Failing to OPEN is an I/O failure too, and has to be recorded
 			// like the read ones. Locally opening almost always works, which
@@ -249,37 +249,37 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 			// here, because a file that never opened has no line at all to
 			// offer.
 			if !errors.Is(err, fs.ErrNotExist) {
-				c.guardarErro(path, err)
+				c.storeErr(path, err)
 			}
 			return nil, err
 		}
 
-		if problemas := recusarAlvoNaoRegular(path, rc); len(problemas) > 0 {
+		if problems := rejectNonRegularTarget(path, rc); len(problems) > 0 {
 			_ = rc.Close()
-			c.guardarRecusas(problemas)
-			return nil, problemas
+			c.storeRefusals(problems)
+			return nil, problems
 		}
 
-		conteudo, err := io.ReadAll(rc)
-		if erroFechar := rc.Close(); err == nil {
-			err = erroFechar
+		content, err := io.ReadAll(rc)
+		if closeErr := rc.Close(); err == nil {
+			err = closeErr
 		}
 		if err != nil {
-			c.guardarErro(path, err)
+			c.storeErr(path, err)
 			return nil, err
 		}
 
-		if problemas := validarExpressoesIf(path, conteudo); len(problemas) > 0 {
-			c.guardarRecusas(problemas)
-			return nil, problemas
+		if problems := validateIfExpressions(path, content); len(problems) > 0 {
+			c.storeRefusals(problems)
+			return nil, problems
 		}
 
-		c.guardar(path, conteudo)
-		return io.NopCloser(bytes.NewReader(conteudo)), nil
+		c.store(path, content)
+		return io.NopCloser(bytes.NewReader(content)), nil
 	}
 }
 
-// recusarAlvoNaoRegular refuses a path that opened but is not a regular file
+// rejectNonRegularTarget refuses a path that opened but is not a regular file
 // -- directory, socket, fifo, device.
 //
 // Crossplane accepts it: for an include target with no glob character,
@@ -299,121 +299,121 @@ func (c *cacheFonte) decora(abrirOriginal func(string) (io.ReadCloser, error)) f
 // The check depends on the io.ReadCloser being able to describe itself
 // (os.File can). A ParseOptions.Open that returns an in-memory reader has no
 // target on the filesystem and simply never gets here.
-func recusarAlvoNaoRegular(path string, rc io.ReadCloser) ParseErrors {
-	comStat, ok := rc.(interface{ Stat() (os.FileInfo, error) })
+func rejectNonRegularTarget(path string, rc io.ReadCloser) ParseErrors {
+	statter, ok := rc.(interface{ Stat() (os.FileInfo, error) })
 	if !ok {
 		return nil
 	}
-	info, err := comStat.Stat()
+	info, err := statter.Stat()
 	if err != nil || info.Mode().IsRegular() {
 		return nil
 	}
 
-	tipo := "not a regular file"
+	kind := "not a regular file"
 	if info.IsDir() {
-		tipo = "is a directory"
+		kind = "is a directory"
 	}
 	return ParseErrors{{
 		File:    path,
-		Message: fmt.Sprintf("%s: a configuration has to be a regular file", tipo),
+		Message: fmt.Sprintf("%s: a configuration has to be a regular file", kind),
 		Classe:  RecusaAlvoNaoERegular,
 	}}
 }
 
-func (c *cacheFonte) guardarRecusas(problemas ParseErrors) {
+func (c *sourceCache) storeRefusals(problems ParseErrors) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.recusasV = append(c.recusasV, problemas...)
+	c.refusalList = append(c.refusalList, problems...)
 }
 
-func (c *cacheFonte) recusas() ParseErrors {
+func (c *sourceCache) refusals() ParseErrors {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.recusasV
+	return c.refusalList
 }
 
-// errosDeLeitura turns the I/O failures recorded during the parse into
+// readErrors turns the I/O failures recorded during the parse into
 // refusals of our own: one per file, with the path of whoever actually failed
 // and a message of ours. The raw runtime string ("read tcp ...: connection
 // reset by peer") is kept out of the diagnostic for the same reason as in
-// recusarAlvoNaoRegular: in a CLI read by an agent the message is a contract,
+// rejectNonRegularTarget: in a CLI read by an agent the message is a contract,
 // it has to be ours and it has to carry a class.
 //
 // The order comes out by path so that two parses of the same broken
 // configuration produce the same diagnostic -- map iteration in Go is random.
-func (c *cacheFonte) errosDeLeitura() ParseErrors {
+func (c *sourceCache) readErrors() ParseErrors {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.erros) == 0 {
+	if len(c.errs) == 0 {
 		return nil
 	}
 
-	caminhos := make([]string, 0, len(c.erros))
-	for path := range c.erros {
-		caminhos = append(caminhos, path)
+	paths := make([]string, 0, len(c.errs))
+	for path := range c.errs {
+		paths = append(paths, path)
 	}
-	slices.Sort(caminhos)
+	slices.Sort(paths)
 
-	problemas := make(ParseErrors, 0, len(caminhos))
-	for _, path := range caminhos {
-		problemas = append(problemas, ParseError{
+	problems := make(ParseErrors, 0, len(paths))
+	for _, path := range paths {
+		problems = append(problems, ParseError{
 			File:    path,
-			Message: mensagemDeFalhaDeLeitura(c.erros[path]),
-			Classe:  classeDeFalhaDeLeitura(c.erros[path]),
+			Message: readFailureMessage(c.errs[path]),
+			Classe:  readFailureClass(c.errs[path]),
 		})
 	}
-	return problemas
+	return problems
 }
 
-func (c *cacheFonte) obter(path string) ([]byte, bool) {
+func (c *sourceCache) get(path string) ([]byte, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	b, ok := c.dados[path]
+	b, ok := c.data[path]
 	return b, ok
 }
 
-func (c *cacheFonte) obterErro(path string) (error, bool) {
+func (c *sourceCache) getErr(path string) (error, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e, ok := c.erros[path]
+	e, ok := c.errs[path]
 	return e, ok
 }
 
-func (c *cacheFonte) guardar(path string, b []byte) {
+func (c *sourceCache) store(path string, b []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.dados[path] = b
+	c.data[path] = b
 }
 
-func (c *cacheFonte) guardarErro(path string, err error) {
+func (c *sourceCache) storeErr(path string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.erros[path] = err
+	c.errs[path] = err
 }
 
-// lerFonte returns the bytes crossplane read for path during the parse. If
-// that read recorded an error, lerFonte propagates the error instead of
+// readSource returns the bytes crossplane read for path during the parse. If
+// that read recorded an error, readSource propagates the error instead of
 // re-reading the file: a second read could succeed even when the original
 // read crossplane actually tokenized had failed -- a transient I/O failure,
 // for instance --, which would produce a Tree with a complete Source and
 // Nodes matching only the prefix the lexer reached before the error, with err
 // == nil hiding the problem.
 //
-// It only falls back to a direct read through opts.abrir (which still honors
+// It only falls back to a direct read through opts.open (which still honors
 // ParseOptions.Open) when the cache has neither bytes nor an error for that
 // path -- a Config present in the payload with no corresponding read
 // recorded, which should not happen on crossplane's normal path, but serves
 // as a safety net.
-func lerFonte(opts ParseOptions, cache *cacheFonte, path string) ([]byte, error) {
-	if erroLeitura, ok := cache.obterErro(path); ok {
-		return nil, fmt.Errorf("while reading %s: %w", path, erroLeitura)
+func readSource(opts ParseOptions, cache *sourceCache, path string) ([]byte, error) {
+	if readErr, ok := cache.getErr(path); ok {
+		return nil, fmt.Errorf("while reading %s: %w", path, readErr)
 	}
 
-	if b, ok := cache.obter(path); ok {
+	if b, ok := cache.get(path); ok {
 		return b, nil
 	}
 
-	rc, err := opts.abrir(path)
+	rc, err := opts.open(path)
 	if err != nil {
 		return nil, fmt.Errorf("while reading %s: %w", path, err)
 	}
@@ -426,37 +426,37 @@ func lerFonte(opts ParseOptions, cache *cacheFonte, path string) ([]byte, error)
 	return b, nil
 }
 
-func converterDirectives(ds crossplane.Directives, file string) []*Node {
+func convertDirectives(ds crossplane.Directives, file string) []*Node {
 	nodes := make([]*Node, 0, len(ds))
 	for _, d := range ds {
 		n := &Node{
 			Directive: d.Directive,
-			Args:      clonarArgs(d.Args),
+			Args:      cloneArgs(d.Args),
 			File:      file,
 			Line:      d.Line,
 			Comment:   d.Comment,
-			temBloco:  d.Block != nil,
+			hasBlock:  d.Block != nil,
 		}
 		if d.Block != nil {
-			n.Block = converterDirectives(d.Block, file)
+			n.Block = convertDirectives(d.Block, file)
 		}
 		nodes = append(nodes, n)
 	}
 	return nodes
 }
 
-// clonarArgs copies the directive arguments so that nodes built by future
+// cloneArgs copies the directive arguments so that nodes built by future
 // tasks (Task 12 builds new nodes out of these ones) do not share the backing
 // array with crossplane's tree: an append on a copied Args could overwrite
 // the neighbour.
-func clonarArgs(args []string) []string {
+func cloneArgs(args []string) []string {
 	if args == nil {
 		return []string{}
 	}
 	return slices.Clone(args)
 }
 
-// mensagemDeFalhaDeLeitura classifies the cause instead of forwarding the
+// readFailureMessage classifies the cause instead of forwarding the
 // runtime string.
 //
 // Both things matter. The raw string is unstable -- it changes across systems
@@ -469,17 +469,17 @@ func clonarArgs(args []string) []string {
 // The distinction only started to matter with remote access. Verified against
 // a real server that the SFTP error matches fs.ErrPermission, so the same
 // check serves both the local and the remote target.
-// classeDeFalhaDeLeitura separates permission from every other read failure.
+// readFailureClass separates permission from every other read failure.
 // The distinction is not cosmetic: --sudo fixes one and does nothing for the
 // other, so a caller needs to tell them apart without reading the message.
-func classeDeFalhaDeLeitura(err error) ClasseRecusa {
+func readFailureClass(err error) ClasseRecusa {
 	if errors.Is(err, fs.ErrPermission) {
 		return RecusaPermissaoNegada
 	}
 	return RecusaFalhaDeLeitura
 }
 
-func mensagemDeFalhaDeLeitura(err error) string {
+func readFailureMessage(err error) string {
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		// "ngx" and not "the connection user": the same message goes out

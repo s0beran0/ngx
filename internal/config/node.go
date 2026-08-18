@@ -44,10 +44,10 @@ type Node struct {
 	Block        []*Node `json:"block,omitempty"`
 	Origin       *Origin `json:"origin,omitempty"`
 
-	// temBloco tells "server {}" apart from "server;". The Block field
+	// hasBlock tells "server {}" apart from "server;". The Block field
 	// cannot do it: an empty block is an empty slice, indistinguishable
 	// from nil once serialized.
-	temBloco bool
+	hasBlock bool
 }
 
 // IsComment reports whether the node stands for a comment.
@@ -61,7 +61,7 @@ type Node struct {
 func (n *Node) IsComment() bool { return n.Directive == "#" && n.Comment != nil }
 
 // HasBlock reports whether the node opens a block, empty ones included.
-func (n *Node) HasBlock() bool { return n.temBloco }
+func (n *Node) HasBlock() bool { return n.hasBlock }
 
 // File is a configuration file with its original source preserved. The source
 // is what makes it possible to resolve spans back into text.

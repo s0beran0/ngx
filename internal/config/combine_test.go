@@ -17,25 +17,25 @@ func parseCombine(t *testing.T) *config.Tree {
 	return tree
 }
 
-func TestParseSemCombineMantemArquivosSeparados(t *testing.T) {
+func TestParseWithoutCombineKeepsFilesSeparate(t *testing.T) {
 	tree := parseCombine(t)
 
 	require.Len(t, tree.Files, 3, "nginx.conf, conf.d/api.conf and snippets/proxy.conf")
 }
 
-func TestCombineProduzUmUnicoArquivo(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineProducesASingleFile(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
-	require.Len(t, combinado.Files, 1)
+	require.Len(t, combined.Files, 1)
 }
 
-func TestCombineSubstituiIncludePelosNosIncluidos(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineReplacesIncludeWithIncludedNodes(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
 	var http *config.Node
-	combinado.Walk(func(n *config.Node) bool {
+	combined.Walk(func(n *config.Node) bool {
 		if n.Directive == "http" {
 			http = n
 			return false
@@ -44,22 +44,22 @@ func TestCombineSubstituiIncludePelosNosIncluidos(t *testing.T) {
 	})
 	require.NotNil(t, http)
 
-	var nomes []string
-	for _, filho := range http.Block {
-		nomes = append(nomes, filho.Directive)
+	var names []string
+	for _, child := range http.Block {
+		names = append(names, child.Directive)
 	}
-	require.Equal(t, []string{"server", "server"}, nomes,
+	require.Equal(t, []string{"server", "server"}, names,
 		"the include is gone and became the server of the included file")
 }
 
 // Origin is what lets the agent know which real file to edit after seeing the
 // resolved configuration.
-func TestCombinePreencheOriginComOArquivoReal(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineFillsOriginWithTheRealFile(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
 	var api *config.Node
-	combinado.Walk(func(n *config.Node) bool {
+	combined.Walk(func(n *config.Node) bool {
 		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "api.exemplo.com" {
 			api = n
 			return false
@@ -73,50 +73,50 @@ func TestCombinePreencheOriginComOArquivoReal(t *testing.T) {
 	require.Greater(t, api.Origin.Line, 0)
 }
 
-func TestCombineMantemOriginDoArquivoPrincipal(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineKeepsOriginOfTopFile(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
-	var legado *config.Node
-	combinado.Walk(func(n *config.Node) bool {
+	var legacy *config.Node
+	combined.Walk(func(n *config.Node) bool {
 		if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legado.exemplo.com" {
-			legado = n
+			legacy = n
 			return false
 		}
 		return true
 	})
-	require.NotNil(t, legado)
+	require.NotNil(t, legacy)
 
-	require.NotNil(t, legado.Origin)
-	require.Contains(t, legado.Origin.File, "nginx.conf")
+	require.NotNil(t, legacy.Origin)
+	require.Contains(t, legacy.Origin.File, "nginx.conf")
 }
 
 // The IDs of the combined tree are renumbered over the resolved structure:
 // that is the structure the agent sees and the one it operates on.
-func TestCombineRenumeraIDsSobreAEstruturaResolvida(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineRenumbersIDsOverResolvedStructure(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
-	api := config.FindByID(combinado, "h.s0")
+	api := config.FindByID(combined, "h.s0")
 	require.NotNil(t, api)
 	require.Equal(t, "server", api.Directive)
 	require.Contains(t, api.Origin.File, "api.conf",
 		"the first server of the resolved tree comes from the include")
 
-	legado := config.FindByID(combinado, "h.s1")
-	require.NotNil(t, legado)
-	require.Contains(t, legado.Origin.File, "nginx.conf")
+	legacy := config.FindByID(combined, "h.s1")
+	require.NotNil(t, legacy)
+	require.Contains(t, legacy.Origin.File, "nginx.conf")
 }
 
 // The hash of the combined tree differs from the uncombined one: they are
 // different views, and conflating them would invalidate IDs for no reason.
-func TestCombineRecalculaOHash(t *testing.T) {
+func TestCombineRecomputesTheHash(t *testing.T) {
 	original := parseCombine(t)
-	combinado, err := config.Combine(original)
+	combined, err := config.Combine(original)
 	require.NoError(t, err)
 
-	require.NotEmpty(t, combinado.Hash)
-	require.NotEqual(t, original.Hash, combinado.Hash)
+	require.NotEmpty(t, combined.Hash)
+	require.NotEqual(t, original.Hash, combined.Hash)
 }
 
 // Include nested two levels deep: nginx.conf includes conf.d/api.conf, which
@@ -126,12 +126,12 @@ func TestCombineRecalculaOHash(t *testing.T) {
 // the same rule crossplane uses (p.configDir, fixed for the whole parse).
 // Standard Debian layout: /etc/nginx/conf.d/*.conf including something in
 // /etc/nginx/snippets/, not in /etc/nginx/conf.d/snippets/.
-func TestCombineResolveIncludeAninhadoDoisNiveis(t *testing.T) {
-	combinado, err := config.Combine(parseCombine(t))
+func TestCombineResolvesNestedIncludeTwoLevels(t *testing.T) {
+	combined, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
 
 	var proxy *config.Node
-	combinado.Walk(func(n *config.Node) bool {
+	combined.Walk(func(n *config.Node) bool {
 		if n.Directive == "proxy_pass" {
 			proxy = n
 			return false
@@ -149,17 +149,17 @@ func TestCombineResolveIncludeAninhadoDoisNiveis(t *testing.T) {
 // bug in our path comparison: Parse already fails loudly when crossplane
 // cannot open a literal include, so this case should never survive silently
 // all the way to Combine.
-func TestCombineIncludeLiteralSemArquivoCorrespondenteFalha(t *testing.T) {
-	arquivoTopo := filepath.Join("testdata", "combine", "nginx.conf")
+func TestCombineLiteralIncludeWithNoMatchingFileFails(t *testing.T) {
+	topPath := filepath.Join("testdata", "combine", "nginx.conf")
 	tree := &config.Tree{
 		Files: []*config.File{
 			{
-				Path: arquivoTopo,
+				Path: topPath,
 				Nodes: []*config.Node{
 					{
 						Directive: "include",
 						Args:      []string{"nao-existe.conf"},
-						File:      arquivoTopo,
+						File:      topPath,
 						Line:      3,
 					},
 				},
@@ -175,30 +175,30 @@ func TestCombineIncludeLiteralSemArquivoCorrespondenteFalha(t *testing.T) {
 // Args is cloned in the copy: mutating the combined tree must not change the
 // original tree, because both stay alive at the same time (the original holds
 // the real spans used for editing).
-func TestCombineNaoCompartilhaArgsComAArvoreOriginal(t *testing.T) {
+func TestCombineDoesNotShareArgsWithOriginalTree(t *testing.T) {
 	original := parseCombine(t)
-	combinado, err := config.Combine(original)
+	combined, err := config.Combine(original)
 	require.NoError(t, err)
 
-	acharLegado := func(t *config.Tree) *config.Node {
-		var achado *config.Node
+	findLegacy := func(t *config.Tree) *config.Node {
+		var found *config.Node
 		t.Walk(func(n *config.Node) bool {
 			if n.Directive == "server_name" && len(n.Args) > 0 && n.Args[0] == "legado.exemplo.com" {
-				achado = n
+				found = n
 				return false
 			}
 			return true
 		})
-		return achado
+		return found
 	}
 
-	legadoOriginal := acharLegado(original)
-	require.NotNil(t, legadoOriginal)
+	legacyOriginal := findLegacy(original)
+	require.NotNil(t, legacyOriginal)
 
-	legadoCombinado := acharLegado(combinado)
-	require.NotNil(t, legadoCombinado)
+	legacyCombined := findLegacy(combined)
+	require.NotNil(t, legacyCombined)
 
-	legadoCombinado.Args[0] = "mutado.invalido"
-	require.Equal(t, "legado.exemplo.com", legadoOriginal.Args[0],
+	legacyCombined.Args[0] = "mutado.invalido"
+	require.Equal(t, "legado.exemplo.com", legacyOriginal.Args[0],
 		"mutating Args of the combined tree must not affect the original tree")
 }

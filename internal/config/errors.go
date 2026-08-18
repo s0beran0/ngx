@@ -7,7 +7,7 @@ import "fmt"
 // crossplane and needs to tell "deliberate refusal, with a known token shape"
 // apart from "over-rejection, which is a bug". Each class below is one
 // enumerated, narrow divergence with a unit test of its own -- see
-// divergenciasConhecidas in fuzz_test.go. A refusal with no class
+// knownDivergence in fuzz_test.go. A refusal with no class
 // (RecusaCrossplane) is the refusal crossplane itself reported, and is never
 // a divergence.
 type ClasseRecusa string
@@ -93,17 +93,17 @@ func (e ParseErrors) Error() string {
 		return "parse failed without detailing the error"
 	}
 
-	primeiro := e[0]
+	first := e[0]
 
 	// Line zero means "there is no line", not "line zero": a file that never
 	// even opened has no position to offer. Printing `file:0` invents a
 	// reference that does not exist and reads like a defect -- and the rule
 	// of this project is to omit what is unavailable, never to make it up.
-	local := primeiro.File
-	if primeiro.Line > 0 {
-		local = fmt.Sprintf("%s:%d", primeiro.File, primeiro.Line)
+	loc := first.File
+	if first.Line > 0 {
+		loc = fmt.Sprintf("%s:%d", first.File, first.Line)
 	}
-	msg := fmt.Sprintf("%s: %s", local, primeiro.Message)
+	msg := fmt.Sprintf("%s: %s", loc, first.Message)
 	if len(e) > 1 {
 		msg = fmt.Sprintf("%s (and %d more error(s))", msg, len(e)-1)
 	}

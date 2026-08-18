@@ -21,35 +21,35 @@ func Hash(t *Tree) string {
 		// moving the configuration to another directory does not change its
 		// meaning, and the absolute path varies per environment
 		// (t.TempDir() in the tests, for instance).
-		escreverCampo(h, filepath.Base(f.Path))
-		escreverNodes(h, f.Nodes)
+		writeField(h, filepath.Base(f.Path))
+		writeNodes(h, f.Nodes)
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
-func escreverNodes(h hash.Hash, nodes []*Node) {
+func writeNodes(h hash.Hash, nodes []*Node) {
 	for _, n := range nodes {
 		if n.IsComment() {
 			continue
 		}
-		escreverCampo(h, n.Directive)
-		escreverCampo(h, strconv.Itoa(len(n.Args)))
+		writeField(h, n.Directive)
+		writeField(h, strconv.Itoa(len(n.Args)))
 		for _, a := range n.Args {
-			escreverCampo(h, a)
+			writeField(h, a)
 		}
 		if n.HasBlock() {
-			escreverCampo(h, "{")
-			escreverNodes(h, n.Block)
-			escreverCampo(h, "}")
+			writeField(h, "{")
+			writeNodes(h, n.Block)
+			writeField(h, "}")
 		} else {
-			escreverCampo(h, ";")
+			writeField(h, ";")
 		}
 	}
 }
 
-// escreverCampo uses a separator that cannot show up inside a directive, so
+// writeField uses a separator that cannot show up inside a directive, so
 // that "ab c" and "a bc" never collide.
-func escreverCampo(h hash.Hash, s string) {
+func writeField(h hash.Hash, s string) {
 	_, _ = h.Write([]byte(s))
 	_, _ = h.Write([]byte{0})
 }

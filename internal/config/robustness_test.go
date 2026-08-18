@@ -11,34 +11,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// escrever writes src to a temporary file and returns the path.
-func escrever(t *testing.T, src string) string {
+// writeConf writes src to a temporary file and returns the path.
+func writeConf(t *testing.T, src string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "f.conf")
 	require.NoError(t, os.WriteFile(p, []byte(src), 0o644))
 	return p
 }
 
-// recusa runs Parse and returns the first ParseError, demanding that the
+// refusal runs Parse and returns the first ParseError, demanding that the
 // refusal be typed -- and not a loose error, which the CLI would translate
 // into exit 1.
-func recusa(t *testing.T, src string) config.ParseError {
+func refusal(t *testing.T, src string) config.ParseError {
 	t.Helper()
-	tree, err := config.Parse(config.ParseOptions{Path: escrever(t, src)})
+	tree, err := config.Parse(config.ParseOptions{Path: writeConf(t, src)})
 	require.Error(t, err)
 	require.Nil(t, tree)
 
-	var problemas config.ParseErrors
-	require.True(t, errors.As(err, &problemas), "a refusal has to be ParseErrors (exit 3), the error was: %v", err)
-	require.NotEmpty(t, problemas)
-	return problemas[0]
+	var problems config.ParseErrors
+	require.True(t, errors.As(err, &problems), "a refusal has to be ParseErrors (exit 3), the error was: %v", err)
+	require.NotEmpty(t, problems)
+	return problems[0]
 }
 
-// aceitaNoCrossplane documents, by running it, that the input is accepted by
+// acceptedByCrossplane documents, by running it, that the input is accepted by
 // the dependency. That is what makes an ngx refusal an enumerated DIVERGENCE
 // and not an accidental over-rejection: every test using this helper matches
-// one entry of divergenciasConhecidas in fuzz_test.go.
-func aceitaNoCrossplane(t *testing.T, path string) {
+// one entry of knownDivergence in fuzz_test.go.
+func acceptedByCrossplane(t *testing.T, path string) {
 	t.Helper()
 	payload, err := crossplane.Parse(path, &crossplane.ParseOptions{
 		ParseComments:             true,
@@ -57,7 +57,7 @@ func aceitaNoCrossplane(t *testing.T, path string) {
 // prepareIfArgs (util.go:71-86) reaches d.Args[1:0] on line 83: slice bounds
 // out of range. The process died with a stack trace from the dependency --
 // for a consumer reading stdout as JSON, the worst possible output.
-func TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic(t *testing.T) {
+func TestIfWithEmptyExpressionIsTypedRefusalNotPanic(t *testing.T) {
 	for _, src := range []string{
 		"if () { return 404; }\n",
 		"if (){}\n",
@@ -66,7 +66,7 @@ func TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic(t *testing.T) {
 		"if $a {}\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			pe := recusa(t, src)
+			pe := refusal(t, src)
 			require.Equal(t, config.RecusaExpressaoIfInvalida, pe.Classe)
 			require.NotZero(t, pe.Line)
 		})
@@ -75,7 +75,7 @@ func TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic(t *testing.T) {
 
 // A valid expression still goes through: the replicated guard must not refuse
 // anything nginx accepts.
-func TestIfComExpressaoValidaContinuaAceito(t *testing.T) {
+func TestIfWithValidExpressionStaysAccepted(t *testing.T) {
 	for _, src := range []string{
 		"http { server { if ($a = b) { return 404; } } }\n",
 		"http { server { if ( $a = b ) { return 404; } } }\n",
@@ -83,7 +83,7 @@ func TestIfComExpressaoValidaContinuaAceito(t *testing.T) {
 		"http { server { if (!-f $request_filename) { return 404; } } }\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			tree, err := config.Parse(config.ParseOptions{Path: escrever(t, src)})
+			tree, err := config.Parse(config.ParseOptions{Path: writeConf(t, src)})
 			require.NoError(t, err)
 			require.NotNil(t, tree)
 		})
@@ -93,10 +93,10 @@ func TestIfComExpressaoValidaContinuaAceito(t *testing.T) {
 // Inside a map-like body crossplane never even reaches prepareIfArgs
 // (parse.go:304-321 does continue before analyze), so an "if ()" in there is a
 // map parameter like any other. Refusing it would be over-rejection.
-func TestIfDentroDeCorpoMapLikeNaoEValidado(t *testing.T) {
+func TestIfInsideMapLikeBodyIsNotValidated(t *testing.T) {
 	src := "map $a $b {\n  if ();\n}\n"
-	p := escrever(t, src)
-	aceitaNoCrossplane(t, p)
+	p := writeConf(t, src)
+	acceptedByCrossplane(t, p)
 
 	_, err := config.Parse(config.ParseOptions{Path: p})
 	require.NoError(t, err)
@@ -107,20 +107,20 @@ func TestIfDentroDeCorpoMapLikeNaoEValidado(t *testing.T) {
 // emitted: parse.go:319 does continue before the loop of parse.go:436. With no
 // "#" node to claim the queue, the next standalone comment matched the wrong
 // token and ngx refused a file both nginx and crossplane accept.
-func TestComentarioNosArgumentosDeCorpoMapLike(t *testing.T) {
-	casos := map[string]string{
-		"map com comentario avulso depois":   "map $a $b {\n  default # x\n  0;\n  # real\n}\n",
-		"map com dois comentarios avulsos":   "map $a $b {\n  default # x\n  0;\n  # r1\n  # r2\n}\n",
-		"map sem comentario avulso":          "map $a $b {\n  default # x\n  0;\n}\n",
-		"types":                              "types {\n  text/html # t\n  html;\n}\n",
-		"split_clients":                      "split_clients $a $b {\n  0.5% # c\n  x;\n  # depois\n}\n",
-		"geo dentro de http":                 "http {\n  geo $a {\n    default # c\n    0;\n    # depois\n  }\n}\n",
-		"bloco normal depois de um map-like": "map $a $b {\n  default # x\n  0;\n}\nserver_name a # y\n  b;\n# depois\n",
+func TestCommentInArgsOfMapLikeBody(t *testing.T) {
+	cases := map[string]string{
+		"map with standalone comment after": "map $a $b {\n  default # x\n  0;\n  # real\n}\n",
+		"map with two standalone comments":  "map $a $b {\n  default # x\n  0;\n  # r1\n  # r2\n}\n",
+		"map without standalone comment":    "map $a $b {\n  default # x\n  0;\n}\n",
+		"types":                             "types {\n  text/html # t\n  html;\n}\n",
+		"split_clients":                     "split_clients $a $b {\n  0.5% # c\n  x;\n  # depois\n}\n",
+		"geo inside http":                   "http {\n  geo $a {\n    default # c\n    0;\n    # depois\n  }\n}\n",
+		"normal block after a map-like":     "map $a $b {\n  default # x\n  0;\n}\nserver_name a # y\n  b;\n# depois\n",
 	}
-	for nome, src := range casos {
-		t.Run(nome, func(t *testing.T) {
-			p := escrever(t, src)
-			aceitaNoCrossplane(t, p)
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := writeConf(t, src)
+			acceptedByCrossplane(t, p)
 
 			tree, err := config.Parse(config.ParseOptions{Path: p})
 			require.NoError(t, err)
@@ -135,30 +135,30 @@ func TestComentarioNosArgumentosDeCorpoMapLike(t *testing.T) {
 // criterion, otherwise the aligner takes the comment branch and either
 // consumes a TokenComment that does not exist or pulls the span of an earlier
 // comment off the queue.
-func TestDiretivaComNomeHashCitadoNaoEComentario(t *testing.T) {
-	casos := []string{
+func TestDirectiveNamedQuotedHashIsNotAComment(t *testing.T) {
+	cases := []string{
 		"\"#\" a;\n",
 		"\"#\" a { }\n",
 		"d 1 # c\n;\n\"#\" b;\n",
 		"map $a $b {\n  \"#\" 1;\n}\n",
 	}
-	for _, src := range casos {
+	for _, src := range cases {
 		t.Run(src, func(t *testing.T) {
-			p := escrever(t, src)
-			aceitaNoCrossplane(t, p)
+			p := writeConf(t, src)
+			acceptedByCrossplane(t, p)
 
 			tree, err := config.Parse(config.ParseOptions{Path: p})
 			require.NoError(t, err)
 
-			var achou bool
+			var found bool
 			tree.Walk(func(n *config.Node) bool {
 				if n.Directive == "#" && n.Comment == nil {
-					achou = true
+					found = true
 					require.False(t, n.IsComment(), "a quoted directive is not a comment")
 				}
 				return true
 			})
-			require.True(t, achou, "the fixture has to contain the directive named \"#\"")
+			require.True(t, found, "the fixture has to contain the directive named \"#\"")
 		})
 	}
 }
@@ -167,9 +167,9 @@ func TestDiretivaComNomeHashCitadoNaoEComentario(t *testing.T) {
 // comment ("default # x\n 0"), and v0.2 rewrites HeadSpan by byte
 // replacement: with no record of it, that rewrite would erase a comment the
 // user wrote. HeadComments makes it visible in the tree.
-func TestHeadSpanRegistraComentariosInternos(t *testing.T) {
+func TestHeadSpanRecordsInnerComments(t *testing.T) {
 	src := "map $a $b {\n  default # x\n  0;\n}\n"
-	tree, err := config.Parse(config.ParseOptions{Path: escrever(t, src)})
+	tree, err := config.Parse(config.ParseOptions{Path: writeConf(t, src)})
 	require.NoError(t, err)
 
 	var def *config.Node
@@ -181,26 +181,26 @@ func TestHeadSpanRegistraComentariosInternos(t *testing.T) {
 	})
 	require.NotNil(t, def)
 
-	fonte := tree.Files[0].Source
-	require.Contains(t, string(fonte[def.HeadSpan.Start:def.HeadSpan.End]), "# x")
+	source := tree.Files[0].Source
+	require.Contains(t, string(source[def.HeadSpan.Start:def.HeadSpan.End]), "# x")
 	require.Len(t, def.HeadComments, 1)
-	require.Equal(t, "# x", string(fonte[def.HeadComments[0].Start:def.HeadComments[0].End]))
+	require.Equal(t, "# x", string(source[def.HeadComments[0].Start:def.HeadComments[0].End]))
 	require.GreaterOrEqual(t, def.HeadComments[0].Start, def.HeadSpan.Start)
 	require.LessOrEqual(t, def.HeadComments[0].End, def.HeadSpan.End)
 }
 
 // A comment AFTER the last argument falls outside HeadSpan and must not be
 // recorded: recording it would be lying about the range.
-func TestComentarioForaDaCabecaNaoERegistrado(t *testing.T) {
+func TestCommentOutsideHeadIsNotRecorded(t *testing.T) {
 	src := "server_name a # y\n  ;\n"
-	tree, err := config.Parse(config.ParseOptions{Path: escrever(t, src)})
+	tree, err := config.Parse(config.ParseOptions{Path: writeConf(t, src)})
 	require.NoError(t, err)
 	require.Empty(t, tree.Files[0].Nodes[0].HeadComments)
 }
 
 // --- enumerated divergences against crossplane ---------------------------
 //
-// Each test below matches exactly one entry of divergenciasConhecidas
+// Each test below matches exactly one entry of knownDivergence
 // (fuzz_test.go). These are the only ngx refusals the fuzz oracle accepts
 // without failing.
 
@@ -208,7 +208,7 @@ func TestComentarioForaDaCabecaNaoERegistrado(t *testing.T) {
 // (lex.go:325-327) and emits no token at all when the content is empty, which
 // turns a dangling quote into Status "ok" with zero directives. nginx refuses
 // it; we refuse it too.
-func TestDivergenciaAspaNaoFechada(t *testing.T) {
+func TestDivergenceUnclosedQuote(t *testing.T) {
 	// Only an EMPTY quote at the end of the source diverges: lex.go:325-327
 	// emits the token when token.Len() > 0, so "a \"b" or "\"\n" become a
 	// quoted token that leaves the statement with no terminator and
@@ -216,14 +216,14 @@ func TestDivergenciaAspaNaoFechada(t *testing.T) {
 	// too.
 	for _, src := range []string{`"`, `'`, "server {}\n\""} {
 		t.Run(src, func(t *testing.T) {
-			p := escrever(t, src)
-			aceitaNoCrossplane(t, p)
+			p := writeConf(t, src)
+			acceptedByCrossplane(t, p)
 
 			_, err := config.Parse(config.ParseOptions{Path: p})
 			require.Error(t, err)
-			var problemas config.ParseErrors
-			require.True(t, errors.As(err, &problemas))
-			require.Equal(t, config.RecusaAspaNaoFechada, problemas[0].Classe)
+			var problems config.ParseErrors
+			require.True(t, errors.As(err, &problems))
+			require.Equal(t, config.RecusaAspaNaoFechada, problems[0].Classe)
 		})
 	}
 }
@@ -231,11 +231,11 @@ func TestDivergenciaAspaNaoFechada(t *testing.T) {
 // Crossplane builds the statement out of t.Value without checking that the
 // first token is a word (parse.go:256-261), so "{}" becomes for it a directive
 // named "{". nginx refuses it; we refuse it, recording the exact token.
-func TestDivergenciaChaveComoNomeDeDiretiva(t *testing.T) {
-	p := escrever(t, "{}\n")
-	aceitaNoCrossplane(t, p)
+func TestDivergenceBraceAsDirectiveName(t *testing.T) {
+	p := writeConf(t, "{}\n")
+	acceptedByCrossplane(t, p)
 
-	pe := recusa(t, "{}\n")
+	pe := refusal(t, "{}\n")
 	require.Equal(t, config.RecusaTokenNoLugarDeDiretiva, pe.Classe)
 	require.Equal(t, "{", pe.Token)
 }
@@ -244,11 +244,11 @@ func TestDivergenciaChaveComoNomeDeDiretiva(t *testing.T) {
 // a directive named ";" with the argument "0". Found by the fuzz after the
 // enumerated list came into force -- which is exactly the payoff of not
 // silencing the whole class by a substring of the message.
-func TestDivergenciaPontoEVirgulaComoNomeDeDiretiva(t *testing.T) {
-	p := escrever(t, ";0;\n")
-	aceitaNoCrossplane(t, p)
+func TestDivergenceSemicolonAsDirectiveName(t *testing.T) {
+	p := writeConf(t, ";0;\n")
+	acceptedByCrossplane(t, p)
 
-	pe := recusa(t, ";0;\n")
+	pe := refusal(t, ";0;\n")
 	require.Equal(t, config.RecusaTokenNoLugarDeDiretiva, pe.Classe)
 	require.Equal(t, ";", pe.Token)
 }
@@ -257,11 +257,11 @@ func TestDivergenciaPontoEVirgulaComoNomeDeDiretiva(t *testing.T) {
 // "is not terminated by \";\"" (analyze.go:224-227) does not run under
 // SkipDirectiveArgsCheck, so "server { listen 80 }" is accepted by it. nginx
 // refuses it; we refuse it, recording the "}".
-func TestDivergenciaDiretivaSemPontoEVirgula(t *testing.T) {
-	p := escrever(t, "server { listen 80 }\n")
-	aceitaNoCrossplane(t, p)
+func TestDivergenceDirectiveWithoutSemicolon(t *testing.T) {
+	p := writeConf(t, "server { listen 80 }\n")
+	acceptedByCrossplane(t, p)
 
-	pe := recusa(t, "server { listen 80 }\n")
+	pe := refusal(t, "server { listen 80 }\n")
 	require.Equal(t, config.RecusaTerminadorAusente, pe.Classe)
 	require.Equal(t, "}", pe.Token)
 }
@@ -273,21 +273,21 @@ func TestDivergenciaDiretivaSemPontoEVirgula(t *testing.T) {
 // the payload comes out with Status "ok" and zero directives. nginx reads the
 // target and fails. Found by the fuzz after include coverage (A8) landed; the
 // raw Go error ("read ...: is a directory") was leaking into the diagnostic.
-func TestDivergenciaIncludeDeDiretorio(t *testing.T) {
+func TestDivergenceIncludeOfDirectory(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
 	p := filepath.Join(dir, "f.conf")
 	require.NoError(t, os.WriteFile(p, []byte("include sub;\n"), 0o644))
-	aceitaNoCrossplane(t, p)
+	acceptedByCrossplane(t, p)
 
 	tree, err := config.Parse(config.ParseOptions{Path: p})
 	require.Error(t, err)
 	require.Nil(t, tree)
 
-	var problemas config.ParseErrors
-	require.True(t, errors.As(err, &problemas), "the raw Go error must not leak: %v", err)
-	require.Equal(t, config.RecusaAlvoNaoERegular, problemas[0].Classe)
-	require.Equal(t, filepath.Join(dir, "sub"), problemas[0].File)
+	var problems config.ParseErrors
+	require.True(t, errors.As(err, &problems), "the raw Go error must not leak: %v", err)
+	require.Equal(t, config.RecusaAlvoNaoERegular, problems[0].Classe)
+	require.Equal(t, filepath.Join(dir, "sub"), problems[0].File)
 	// The guard is about the raw Go error LEAKING, not about the words. In
 	// Portuguese the two were easy to tell apart; translated, our message
 	// legitimately says "is a directory" too, and the old assertion started
@@ -297,15 +297,15 @@ func TestDivergenciaIncludeDeDiretorio(t *testing.T) {
 	// `read /some/path: is a directory`, carrying the syscall name and the
 	// path. That is what must never reach a diagnostic, because it changes
 	// between operating systems and Go versions.
-	require.NotContains(t, problemas[0].Message, "read "+dir,
+	require.NotContains(t, problems[0].Message, "read "+dir,
 		"the raw syscall error must not leak into the message")
-	require.NotRegexp(t, `\b(read|open|stat) /`, problemas[0].Message,
+	require.NotRegexp(t, `\b(read|open|stat) /`, problems[0].Message,
 		"a diagnostic must not carry a raw syscall error")
 }
 
 // The same class must not fire for a regular file: that is what keeps it
 // narrow enough to be enumerated without an exact token.
-func TestIncludeDeArquivoRegularContinuaAceito(t *testing.T) {
+func TestIncludeOfRegularFileStaysAccepted(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub.conf"), []byte("listen 80;\n"), 0o644))
 	p := filepath.Join(dir, "f.conf")
@@ -320,12 +320,12 @@ func TestIncludeDeArquivoRegularContinuaAceito(t *testing.T) {
 // position of the terminator: without stopping at "}" as well, the refusal
 // came out as an unexpected token -- the class reserved for aligner bugs.
 // Input found by the fuzz.
-func TestDivergenciaIfSemTerminadorAntesDeFecharBloco(t *testing.T) {
+func TestDivergenceIfWithoutTerminatorBeforeClosingBlock(t *testing.T) {
 	src := "a {\n  b { if (c) }\n}\n"
-	p := escrever(t, src)
-	aceitaNoCrossplane(t, p)
+	p := writeConf(t, src)
+	acceptedByCrossplane(t, p)
 
-	pe := recusa(t, src)
+	pe := refusal(t, src)
 	require.Equal(t, config.RecusaTerminadorAusente, pe.Classe)
 	require.Equal(t, "}", pe.Token)
 }

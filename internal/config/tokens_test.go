@@ -13,7 +13,7 @@ import (
 // The invariant that holds up everything else: the text between Start and End
 // has to be exactly the Raw of the token. If that holds, the spans are
 // trustworthy.
-func TestTokenSpansApontamParaOTextoOriginal(t *testing.T) {
+func TestTokenSpansPointToOriginalText(t *testing.T) {
 	src := []byte("server {\n    listen 443 ssl;\n}\n")
 
 	toks, err := config.Tokenize(src)
@@ -25,7 +25,7 @@ func TestTokenSpansApontamParaOTextoOriginal(t *testing.T) {
 	}
 }
 
-func TestTokenizeSeparaDelimitadores(t *testing.T) {
+func TestTokenizeSeparatesDelimiters(t *testing.T) {
 	toks, err := config.Tokenize([]byte("server {\n    listen 443;\n}\n"))
 	require.NoError(t, err)
 
@@ -46,7 +46,7 @@ func TestTokenizeSeparaDelimitadores(t *testing.T) {
 
 // Quotes hide ; and { from the tokenizer. Getting this wrong breaks the whole
 // alignment at the first add_header with a semicolon inside.
-func TestAspasProtegemDelimitadores(t *testing.T) {
+func TestQuotesProtectDelimiters(t *testing.T) {
 	src := []byte(`add_header X-A "b; c { d }";`)
 
 	toks, err := config.Tokenize(src)
@@ -61,7 +61,7 @@ func TestAspasProtegemDelimitadores(t *testing.T) {
 	require.Equal(t, config.TokenSemicolon, toks[3].Kind)
 }
 
-func TestAspasSimplesTambemFuncionam(t *testing.T) {
+func TestSingleQuotesAlsoWork(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`return 200 'ok; end';`))
 	require.NoError(t, err)
 
@@ -69,14 +69,14 @@ func TestAspasSimplesTambemFuncionam(t *testing.T) {
 	require.True(t, toks[2].Quoted)
 }
 
-func TestEscapeDentroDeAspas(t *testing.T) {
+func TestEscapeInsideQuotes(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`msg "says \"hi\"";`))
 	require.NoError(t, err)
 
 	require.Equal(t, `says "hi"`, toks[1].Value)
 }
 
-func TestComentarioVaiAteOFimDaLinha(t *testing.T) {
+func TestCommentRunsToEndOfLine(t *testing.T) {
 	src := []byte("# a comment; with a semicolon\nlisten 80;\n")
 
 	toks, err := config.Tokenize(src)
@@ -89,7 +89,7 @@ func TestComentarioVaiAteOFimDaLinha(t *testing.T) {
 	require.Equal(t, "listen", toks[1].Value)
 }
 
-func TestLinhaEColunaSaoBaseUm(t *testing.T) {
+func TestLineAndColumnAreOneBased(t *testing.T) {
 	src := []byte("server {\n    listen 80;\n}\n")
 
 	toks, err := config.Tokenize(src)
@@ -104,7 +104,7 @@ func TestLinhaEColunaSaoBaseUm(t *testing.T) {
 	require.Equal(t, 5, toks[2].Column)
 }
 
-func TestAspasNaoFechadasVirarErro(t *testing.T) {
+func TestUnclosedQuoteBecomesError(t *testing.T) {
 	_, err := config.Tokenize([]byte(`msg "sem fim;`))
 
 	require.Error(t, err)
@@ -114,7 +114,7 @@ func TestAspasNaoFechadasVirarErro(t *testing.T) {
 // and keeps it inside the same word. Without this, "http://${backend}" turns
 // into four tokens with phantom "{" and "}", and Task 9 rejects the whole file
 // at the first proxy_pass with a Docker/envsubst template variable.
-func TestExpansaoDeParametroNaoQuotadaFicaNumSoToken(t *testing.T) {
+func TestUnquotedParameterExpansionStaysOneToken(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`proxy_pass http://${backend};`))
 	require.NoError(t, err)
 
@@ -128,7 +128,7 @@ func TestExpansaoDeParametroNaoQuotadaFicaNumSoToken(t *testing.T) {
 
 // Parameter expansion also works inside quotes, where it is just one more
 // character of the value (there is no inVar state inside quotes).
-func TestExpansaoDeParametroDentroDeAspas(t *testing.T) {
+func TestParameterExpansionInsideQuotes(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`set $a "${b}c";`))
 	require.NoError(t, err)
 
@@ -140,17 +140,17 @@ func TestExpansaoDeParametroDentroDeAspas(t *testing.T) {
 // (strings.TrimSpace / unicode.IsSpace), not just the four ascii bytes. NBSP
 // gets into a .conf by copying from web documentation and is invisible;
 // without this adjustment the argument count diverges from crossplane's.
-func TestConjuntoDeEspacosCobreNBSPTabVerticalEFormFeed(t *testing.T) {
+func TestWhitespaceSetCoversNBSPVerticalTabAndFormFeed(t *testing.T) {
 	src := []byte("listen 80;\vserver_name\fa;")
 
 	toks, err := config.Tokenize(src)
 	require.NoError(t, err)
 
-	var valores []string
+	var values []string
 	for _, tok := range toks {
-		valores = append(valores, tok.Value)
+		values = append(values, tok.Value)
 	}
-	require.Equal(t, []string{"listen", "80", ";", "server_name", "a", ";"}, valores,
+	require.Equal(t, []string{"listen", "80", ";", "server_name", "a", ";"}, values,
 		"NBSP, vertical tab and form feed have to separate arguments, just like in crossplane")
 }
 
@@ -158,7 +158,7 @@ func TestConjuntoDeEspacosCobreNBSPTabVerticalEFormFeed(t *testing.T) {
 // span (nor into the Value) of a comment. If it did, rewriting that comment in
 // v0.2 would erase the CR and convert the line from CRLF to LF -- an
 // off-target change the project promises never to make.
-func TestComentarioCRLFExcluiCRDoSpanEDoValue(t *testing.T) {
+func TestCommentCRLFExcludesCRFromSpanAndValue(t *testing.T) {
 	src := []byte("# comment\r\nlisten 80;\r\n")
 
 	toks, err := config.Tokenize(src)
@@ -177,7 +177,7 @@ func TestComentarioCRLFExcluiCRDoSpanEDoValue(t *testing.T) {
 // is unescaped; any other escape stays literal in Value, just like in
 // crossplane. msg "a\nb"; yields Value a\nb (a literal backslash and n), not a
 // real line break.
-func TestEscapeDentroDeAspasSoDesescapaAAspaAtiva(t *testing.T) {
+func TestEscapeInsideQuotesOnlyUnescapesActiveQuote(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`msg "a\nb";`))
 	require.NoError(t, err)
 
@@ -187,7 +187,7 @@ func TestEscapeDentroDeAspasSoDesescapaAAspaAtiva(t *testing.T) {
 
 // Fix round 1 -- Important: Column counts runes, not bytes -- it is the visual
 // position an editor would show. Start stays mandatorily in bytes.
-func TestColumnContaRunesNaoBytes(t *testing.T) {
+func TestColumnCountsRunesNotBytes(t *testing.T) {
 	src := []byte(`msg "çãé";`)
 
 	toks, err := config.Tokenize(src)
@@ -203,7 +203,7 @@ func TestColumnContaRunesNaoBytes(t *testing.T) {
 // file (with no possible escape pair) is swallowed by crossplane -- it
 // produces no token at all. Without this handling we produced a phantom "\"
 // token crossplane never produces, throwing the count of Task 9 off.
-func TestBarraInvertidaNoFimDoArquivoNaoGeraTokenFantasma(t *testing.T) {
+func TestTrailingBackslashProducesNoPhantomToken(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`foo \`))
 	require.NoError(t, err)
 
@@ -215,7 +215,7 @@ func TestBarraInvertidaNoFimDoArquivoNaoGeraTokenFantasma(t *testing.T) {
 // middle of an unquoted word is invisible to crossplane -- it never ends the
 // word. Only a real \n ends it. Without this, "0\r0" became two tokens
 // instead of one, throwing the count of Task 9 off.
-func TestBarraCRSoltaNoMeioDaPalavraNaoTerminaAPalavra(t *testing.T) {
+func TestStrayCRInsideWordDoesNotEndTheWord(t *testing.T) {
 	toks, err := config.Tokenize([]byte("0\r0;"))
 	require.NoError(t, err)
 
@@ -228,18 +228,18 @@ func TestBarraCRSoltaNoMeioDaPalavraNaoTerminaAPalavra(t *testing.T) {
 // the whole word (nothing else left to tokenize), produces no token at all --
 // just like crossplane, which also swallows both without ever merging anything
 // into the pending escape.
-func TestBarraSeguidaDeCRSemMaisNadaNaoGeraToken(t *testing.T) {
+func TestBackslashFollowedByCRAloneProducesNoToken(t *testing.T) {
 	toks, err := config.Tokenize([]byte(" \\\r"))
 	require.NoError(t, err)
 	require.Empty(t, toks)
 }
 
-// Fix round 2 -- Important: the CRLF fix in lerComentario was not mirrored in
-// lerPalavra nor in lerVar, leaving the CR inside the span of an ordinary
+// Fix round 2 -- Important: the CRLF fix in readComment was not mirrored in
+// readWord nor in readVar, leaving the CR inside the span of an ordinary
 // word. A future rewrite by byte replacement would erase that CR and convert
 // the line from CRLF to LF -- the same off-target change the comment case
 // already avoids.
-func TestPalavraCRLFExcluiCRDoSpan(t *testing.T) {
+func TestWordCRLFExcludesCRFromSpan(t *testing.T) {
 	src := []byte("proxy_set_header Host\r\n  $host;\r\n")
 
 	toks, err := config.Tokenize(src)
@@ -252,37 +252,37 @@ func TestPalavraCRLFExcluiCRDoSpan(t *testing.T) {
 // Fix round 2 -- Important: an explicit regression net for the termination of
 // ${...} mode by whitespace. A reviewer mutated that condition and the whole
 // suite passed without this test.
-func TestExpansaoDeParametroTerminaPorEspaco(t *testing.T) {
+func TestParameterExpansionEndsOnWhitespace(t *testing.T) {
 	toks, err := config.Tokenize([]byte(`a ${b c;`))
 	require.NoError(t, err)
 
-	var valores []string
+	var values []string
 	for _, tok := range toks {
-		valores = append(valores, tok.Value)
+		values = append(values, tok.Value)
 	}
-	require.Equal(t, []string{"a", "${b c", ";"}, valores)
+	require.Equal(t, []string{"a", "${b c", ";"}, values)
 }
 
 // Coverage: every byte that is not whitespace belongs to some token.
-func TestTokensCobremTodoByteSignificativo(t *testing.T) {
+func TestTokensCoverEverySignificantByte(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))
 	require.NoError(t, err)
 
 	toks, err := config.Tokenize(src)
 	require.NoError(t, err)
 
-	coberto := make([]bool, len(src))
+	covered := make([]bool, len(src))
 	prev := 0
 	for _, tok := range toks {
 		require.GreaterOrEqual(t, tok.Start, prev, "tokens out of order")
 		for i := tok.Start; i < tok.End; i++ {
-			coberto[i] = true
+			covered[i] = true
 		}
 		prev = tok.End
 	}
 
 	for i, b := range src {
-		if coberto[i] {
+		if covered[i] {
 			continue
 		}
 		require.True(t, unicode.IsSpace(rune(b)),

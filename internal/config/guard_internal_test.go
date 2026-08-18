@@ -9,30 +9,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The barrier is the second layer of defect 1: even with validarExpressoesIf
+// The barrier is the second layer of defect 1: even with validateIfExpressions
 // blocking the known case, no panic coming from the dependency may escape as a
 // stack trace out of a CLI that an agent reads as JSON. Here the panic is
 // forced by an Open that panics -- it runs on the parser goroutine, which is
 // the one the barrier covers.
-func TestBarreiraConvertePanicEmRecusaTipada(t *testing.T) {
-	payload, err := parseComBarreira("qualquer.conf", &crossplane.ParseOptions{
+func TestGuardTurnsPanicIntoTypedRefusal(t *testing.T) {
+	payload, err := parseGuarded("qualquer.conf", &crossplane.ParseOptions{
 		Open: func(string) (io.ReadCloser, error) { panic("boom from the dependency") },
 	})
 
 	require.Nil(t, payload)
 	require.Error(t, err)
 
-	var problemas ParseErrors
-	require.True(t, errors.As(err, &problemas))
-	require.Equal(t, RecusaPanicoDoCrossplane, problemas[0].Classe)
-	require.Contains(t, problemas[0].Message, "boom from the dependency")
+	var problems ParseErrors
+	require.True(t, errors.As(err, &problems))
+	require.Equal(t, RecusaPanicoDoCrossplane, problems[0].Classe)
+	require.Contains(t, problems[0].Message, "boom from the dependency")
 }
 
 // The up-front validation is the root-cause fix: it has to refuse exactly
 // what validExpr (crossplane/util.go:57-67) used to refuse, no more and no
 // less -- this test pins the equivalence table argument by argument.
-func TestExpressaoValidaReplicaValidExpr(t *testing.T) {
-	casos := []struct {
+func TestValidIfExprReplicatesValidExpr(t *testing.T) {
+	cases := []struct {
 		args []string
 		ok   bool
 	}{
@@ -47,7 +47,7 @@ func TestExpressaoValidaReplicaValidExpr(t *testing.T) {
 		{[]string{"($a"}, false},         // does not close
 		{[]string{"$a)"}, false},         // does not open
 	}
-	for _, c := range casos {
-		require.Equal(t, c.ok, expressaoValida(c.args), "args=%q", c.args)
+	for _, c := range cases {
+		require.Equal(t, c.ok, validIfExpr(c.args), "args=%q", c.args)
 	}
 }
