@@ -45,7 +45,7 @@ $UrlReleases  = "https://github.com/$Repositorio/releases"
 #
 # Enquanto o placeholder estiver aqui, o script RECUSA instalar: ausencia de
 # verificacao e falha, nunca um "segui em frente".
-$ChavePublicaMinisign = 'PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2'
+$ChavePublicaMinisign = 'RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW'
 $PlaceholderChave     = 'PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2'
 
 function Show-Ajuda {

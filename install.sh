@@ -32,7 +32,7 @@ URL_RELEASES="https://github.com/${REPOSITORIO}/releases"
 #
 # Enquanto o placeholder estiver aqui, o script RECUSA instalar: ausencia de
 # verificacao e falha, nunca um "segui em frente".
-CHAVE_PUBLICA_MINISIGN="PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2"
+CHAVE_PUBLICA_MINISIGN="RWSZFXRcIf6p0xLvenNPLgltwYLa/qRAjNH3sA238fWZIy49RGIbtgAW"
 PLACEHOLDER_CHAVE="PLACEHOLDER-CHAVE-MINISIGN-NAO-GERADA-VER-TASK-D2"
 
 # Configuravel por ambiente. Sem valores default surpreendentes.
