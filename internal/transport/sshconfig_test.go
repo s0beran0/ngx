@@ -13,7 +13,7 @@ import (
 	"github.com/s0beran0/ngx/internal/output"
 )
 
-// escreverConfig cria um ~/.ssh/config de teste e devolve o caminho.
+// escreverConfig writes a test ~/.ssh/config and returns its path.
 func escreverConfig(t *testing.T, conteudo string) string {
 	t.Helper()
 	caminho := filepath.Join(t.TempDir(), "config")
@@ -21,8 +21,9 @@ func escreverConfig(t *testing.T, conteudo string) string {
 	return caminho
 }
 
-// usuarioEsperado calcula o usuario corrente por conta propria, sem chamar a
-// funcao sob teste: comparar a implementacao com ela mesma nao provaria nada.
+// usuarioEsperado works out the current user on its own, without calling the
+// function under test: comparing the implementation against itself would prove
+// nothing.
 func usuarioEsperado(t *testing.T) string {
 	t.Helper()
 	u, err := user.Current()
@@ -48,7 +49,7 @@ Host web1
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
-	assert.Equal(t, "10.0.0.1", opts.Host, "HostName traduz o alias para o alvo real")
+	assert.Equal(t, "10.0.0.1", opts.Host, "HostName maps the alias to the real target")
 	assert.Equal(t, "deploy", opts.User)
 	assert.Equal(t, 2222, opts.Port)
 	assert.Equal(t, "/keys/web1_ed25519", opts.KeyPath)
@@ -65,7 +66,7 @@ Host web*
 
 	require.NoError(t, err)
 	assert.Empty(t, diags)
-	assert.Equal(t, "web42", opts.Host, "sem HostName o alvo continua sendo o alias")
+	assert.Equal(t, "web42", opts.Host, "with no HostName the target stays the alias")
 	assert.Equal(t, "deploy", opts.User)
 	assert.Equal(t, 2222, opts.Port)
 }
@@ -80,7 +81,7 @@ Host web1
 	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "db1"}, caminho)
 
 	require.NoError(t, err)
-	assert.Empty(t, diags, "host ausente do arquivo nao e anomalia")
+	assert.Empty(t, diags, "a host missing from the file is not an anomaly")
 	assert.Equal(t, "db1", opts.Host)
 	assert.Equal(t, PortaSSHPadrao, opts.Port)
 	assert.Equal(t, usuarioEsperado(t), opts.User)
@@ -92,13 +93,14 @@ func TestResolverArquivoAusenteUsaDefaultsSemAviso(t *testing.T) {
 	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1"}, caminho)
 
 	require.NoError(t, err)
-	assert.Empty(t, diags, "quem nao tem ~/.ssh/config nao merece aviso")
+	assert.Empty(t, diags, "whoever has no ~/.ssh/config does not deserve a warning")
 	assert.Equal(t, 22, opts.Port)
 	assert.Equal(t, usuarioEsperado(t), opts.User)
 }
 
-// TestResolverPrecedenciaDR2 prova os tres niveis num arquivo so: a flag vence
-// o arquivo, o arquivo vence o default, e o default cobre o que ninguem disse.
+// TestResolverPrecedenciaDR2 proves the three levels in a single file: the flag
+// beats the file, the file beats the default, and the default covers whatever
+// nobody stated.
 func TestResolverPrecedenciaDR2(t *testing.T) {
 	caminho := escreverConfig(t, `
 Host web1
@@ -106,29 +108,29 @@ Host web1
   Port 2222
 `)
 
-	// Flag vence arquivo: User e Port vem da flag.
+	// Flag beats file: User and Port come from the flag.
 	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1", User: "root", Port: 22022}, caminho)
 	require.NoError(t, err)
 	assert.Empty(t, diags)
 	assert.Equal(t, "root", opts.User)
 	assert.Equal(t, 22022, opts.Port)
 
-	// Arquivo vence default: sem flag, valem os valores do arquivo.
+	// File beats default: with no flag, the file's values hold.
 	opts, _, err = ResolverSSHConfig(SSHOptions{Host: "web1"}, caminho)
 	require.NoError(t, err)
 	assert.Equal(t, "deploy", opts.User)
 	assert.Equal(t, 2222, opts.Port)
 
-	// Default cobre o resto: host que o arquivo nao menciona.
+	// The default covers the rest: a host the file does not mention.
 	opts, _, err = ResolverSSHConfig(SSHOptions{Host: "outro"}, caminho)
 	require.NoError(t, err)
 	assert.Equal(t, usuarioEsperado(t), opts.User)
 	assert.Equal(t, PortaSSHPadrao, opts.Port)
 }
 
-// TestResolverFlagVaziaNaoSobrescreveArquivo trava o erro classico de
-// precedencia: tratar "" e 0 como escolha do usuario apaga o que o arquivo
-// diz e manda a conexao para o lugar errado.
+// TestResolverFlagVaziaNaoSobrescreveArquivo locks down the classic precedence
+// bug: treating "" and 0 as a user choice erases what the file says and sends
+// the connection to the wrong place.
 func TestResolverFlagVaziaNaoSobrescreveArquivo(t *testing.T) {
 	caminho := escreverConfig(t, `
 Host web1
@@ -148,48 +150,49 @@ Host web1
 	assert.Equal(t, "/keys/web1_ed25519", opts.KeyPath)
 }
 
-// TestResolverMatchNaoSuportadoDegradaComAviso e a DR7. Um `Match user` e
-// valido para o ssh e faz a kevinburke/ssh_config falhar o arquivo INTEIRO —
-// inclusive os blocos Host que ela entenderia. O ngx tem que resolver assim
-// mesmo e dizer o que perdeu, com arquivo e linha.
+// TestResolverMatchNaoSuportadoDegradaComAviso is DR7. A `Match user` is valid
+// for ssh and makes kevinburke/ssh_config fail the WHOLE file — including the
+// Host blocks it would have understood. ngx has to resolve anyway and say what
+// it lost, with file and line.
 func TestResolverMatchNaoSuportadoDegradaComAviso(t *testing.T) {
 	caminho := escreverConfig(t,
-		"Host web1\n"+ // linha 1
-			"  HostName 10.0.0.1\n"+ // linha 2
-			"  User deploy\n"+ // linha 3
-			"  Port 2222\n"+ // linha 4
-			"\n"+ // linha 5
-			"Match user deploy\n"+ // linha 6
-			"  IdentityFile /keys/deploy\n") // linha 7
+		"Host web1\n"+ // line 1
+			"  HostName 10.0.0.1\n"+ // line 2
+			"  User deploy\n"+ // line 3
+			"  Port 2222\n"+ // line 4
+			"\n"+ // line 5
+			"Match user deploy\n"+ // line 6
+			"  IdentityFile /keys/deploy\n") // line 7
 
 	opts, diags, err := ResolverSSHConfig(SSHOptions{Host: "web1", User: "root"}, caminho)
 
-	// Lado 1: resolve mesmo assim, com a flag e os defaults. Nada do arquivo
-	// entra — nem o bloco Host web1, que sozinho seria legivel.
-	require.NoError(t, err, "arquivo ilegivel nunca aborta")
-	assert.Equal(t, "web1", opts.Host, "o HostName do arquivo nao foi lido")
-	assert.Equal(t, "root", opts.User, "a flag explicita continua valendo")
-	assert.Equal(t, PortaSSHPadrao, opts.Port, "o Port do arquivo nao foi lido")
+	// Side 1: it resolves anyway, from the flag and the defaults. Nothing
+	// from the file gets in — not even the Host web1 block, which on its
+	// own would be readable.
+	require.NoError(t, err, "an unreadable file never aborts")
+	assert.Equal(t, "web1", opts.Host, "the HostName from the file was not read")
+	assert.Equal(t, "root", opts.User, "the explicit flag still holds")
+	assert.Equal(t, PortaSSHPadrao, opts.Port, "the Port from the file was not read")
 
-	// Lado 2: o aviso sai, e diz onde. Um resolvedor que so nao aborta,
-	// e segue calado, passa no lado 1 e falha aqui — e esse e o defeito
-	// que a DR7 existe para impedir.
+	// Side 2: the warning comes out, and says where. A resolver that merely
+	// avoids aborting, and stays quiet, passes side 1 and fails here — and
+	// that is the defect DR7 exists to prevent.
 	require.Len(t, diags, 1)
 	d := diags[0]
-	assert.Equal(t, output.SeverityWarning, d.Severity, "aviso, nao erro: o comando segue")
+	assert.Equal(t, output.SeverityWarning, d.Severity, "warning, not error: the command carries on")
 	assert.Equal(t, CodigoAvisoSSHConfig, d.Code)
 	assert.Equal(t, caminho, d.File)
-	assert.Equal(t, 6, d.Line, "a linha do Match que a biblioteca nao entende")
+	assert.Equal(t, 6, d.Line, "the line of the Match the library does not understand")
 	assert.Positive(t, d.Column)
 	assert.Contains(t, d.Message, caminho)
 	assert.Contains(t, d.Message, `unsupported Match criterion "user"`,
-		"a mensagem diz o que nao foi entendido, nao apenas que falhou")
-	assert.Contains(t, d.Message, "--host", "e diz o que continua funcionando")
+		"the message says what was not understood, not just that it failed")
+	assert.Contains(t, d.Message, "--host", "and says what still works")
 }
 
-// TestResolverMatchExecDegradaComAviso cobre o outro criterio rejeitado — a
-// biblioteca recusa `Match exec` de proposito, para nao rodar comando de um
-// arquivo nao confiavel, e o ngx concorda com a recusa.
+// TestResolverMatchExecDegradaComAviso covers the other rejected criterion —
+// the library refuses `Match exec` on purpose, so as not to run a command out
+// of an untrusted file, and ngx agrees with the refusal.
 func TestResolverMatchExecDegradaComAviso(t *testing.T) {
 	caminho := escreverConfig(t, "Match exec \"true\"\n  User deploy\n")
 
@@ -204,7 +207,7 @@ func TestResolverMatchExecDegradaComAviso(t *testing.T) {
 
 func TestResolverArquivoIlegivelDegradaComAviso(t *testing.T) {
 	if os.Getuid() == 0 {
-		t.Skip("root le qualquer arquivo; o caso nao existe")
+		t.Skip("root reads any file; the case does not exist")
 	}
 	caminho := escreverConfig(t, "Host web1\n  User deploy\n")
 	require.NoError(t, os.Chmod(caminho, 0o000))
@@ -217,7 +220,7 @@ func TestResolverArquivoIlegivelDegradaComAviso(t *testing.T) {
 	assert.Equal(t, output.SeverityWarning, diags[0].Severity)
 	assert.Equal(t, CodigoAvisoSSHConfig, diags[0].Code)
 	assert.Equal(t, caminho, diags[0].File)
-	assert.Zero(t, diags[0].Line, "sem linha quando o problema nao esta numa linha")
+	assert.Zero(t, diags[0].Line, "no line when the problem is not on a line")
 	assert.Equal(t, PortaSSHPadrao, opts.Port)
 }
 
@@ -271,5 +274,5 @@ func TestResolverSemHostEErroDeUso(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, output.ExitUsage, output.CodeOf(err))
-	assert.NotNil(t, diags, "a lista de diagnosticos nunca e nil")
+	assert.NotNil(t, diags, "the diagnostics list is never nil")
 }

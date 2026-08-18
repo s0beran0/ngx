@@ -14,9 +14,9 @@ import (
 	"github.com/s0beran0/ngx/internal/transport"
 )
 
-// fake responde leitura e execucao gravadas, e registra o que foi executado.
-// Provar que algo NAO foi escalado exige olhar os comandos, nao so o
-// resultado.
+// fake answers reads and executions from canned data, and records what got
+// executed. Proving that something was NOT escalated means looking at the
+// commands, not just at the result.
 type fake struct {
 	arquivos   map[string]string
 	negados    map[string]bool
@@ -68,10 +68,10 @@ func (f *fake) Run(_ context.Context, argv []string) ([]byte, []byte, int, error
 func (f *fake) Close() error     { return nil }
 func (f *fake) Describe() string { return "fake" }
 
-// TestSemSudoNadaEEscalado e a metade da regra que a DR5 exige: sem a flag, o
-// transporte tem de ficar exatamente como estava, e nenhum comando pode ser
-// executado. Um teste que so verificasse o caminho COM sudo deixaria a
-// escalada silenciosa passar despercebida.
+// TestSemSudoNadaEEscalado is the half of the rule DR5 demands: with no flag,
+// the transport has to come back exactly as it was, and no command may run. A
+// test that only checked the path WITH sudo would let a silent escalation slip
+// by unnoticed.
 func TestSemSudoNadaEEscalado(t *testing.T) {
 	f := novoFake()
 	f.negados["/etc/nginx/nginx.conf"] = true
@@ -80,13 +80,13 @@ func TestSemSudoNadaEEscalado(t *testing.T) {
 	_, err := tr.Open("/etc/nginx/nginx.conf")
 
 	require.ErrorIs(t, err, fs.ErrPermission)
-	assert.Empty(t, f.executados, "sem --sudo nenhum comando pode ser executado")
-	assert.Same(t, transport.Transport(f), tr, "sem a flag o transporte volta intocado")
+	assert.Empty(t, f.executados, "with no --sudo no command may run")
+	assert.Same(t, transport.Transport(f), tr, "with no flag the transport comes back untouched")
 }
 
-// A escalada e MINIMA: so o arquivo recusado e relido com privilegio. Numa
-// configuracao de 132 arquivos onde um e restrito, os outros 131 nao podem
-// passar por sudo nenhum.
+// The escalation is MINIMAL: only the refused file is re-read with privilege.
+// In a 132-file configuration where one is restricted, the other 131 must not
+// go through sudo at all.
 func TestComSudoSoORecusadoEElevado(t *testing.T) {
 	f := novoFake()
 	f.arquivos["/etc/nginx/aberto.conf"] = "worker_processes 1;\n"
@@ -98,7 +98,7 @@ func TestComSudoSoORecusadoEElevado(t *testing.T) {
 	rc, err := tr.Open("/etc/nginx/aberto.conf")
 	require.NoError(t, err)
 	_ = rc.Close()
-	assert.Empty(t, f.executados, "arquivo legivel nao pode disparar sudo")
+	assert.Empty(t, f.executados, "a readable file must not trigger sudo")
 
 	rc, err = tr.Open("/etc/nginx/restrito.conf")
 	require.NoError(t, err)
@@ -108,18 +108,18 @@ func TestComSudoSoORecusadoEElevado(t *testing.T) {
 	require.Len(t, f.executados, 1)
 	assert.Equal(t,
 		[]string{"sudo", "-n", "cat", "--", "/etc/nginx/restrito.conf"}, f.executados[0],
-		"argv explicito, sem shell: nome de arquivo nao pode virar injecao")
+		"explicit argv, no shell: a file name must not turn into an injection")
 
 	diags := transport.Diagnosticos(tr)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityInfo, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "/etc/nginx/restrito.conf",
-		"ler config de servidor com privilegio nao pode acontecer calado")
+		"reading a server configuration with privilege cannot happen silently")
 }
 
-// Servidor endurecido libera no sudoers comandos especificos -- tipicamente o
-// nginx -- e recusa `cat`. Ali o dump e o unico caminho, e sem ele a leitura
-// privilegiada seria inutil justamente onde o sudo esta bem configurado.
+// A hardened server allows specific commands in sudoers -- typically nginx --
+// and refuses `cat`. There the dump is the only way through, and without it
+// privileged reading would be useless exactly where sudo is well configured.
 func TestQuandoOSudoNaoPermiteCatODumpResolve(t *testing.T) {
 	f := novoFake()
 	f.negados["/etc/nginx/nginx.conf"] = true
@@ -139,11 +139,11 @@ func TestQuandoOSudoNaoPermiteCatODumpResolve(t *testing.T) {
 	diags := transport.Diagnosticos(tr)
 	require.NotEmpty(t, diags)
 	assert.Equal(t, transport.CodigoLeituraPeloDump, diags[0].Code,
-		"a origem do conteudo tem de aparecer: veio do nginx -T, nao do arquivo")
+		"the origin of the content has to show: it came from nginx -T, not from the file")
 }
 
-// Sem dump e sem `cat`, o desfecho e recusa com o motivo — nunca uma arvore
-// parcial apresentada como completa.
+// With no dump and no `cat`, the outcome is a refusal with the reason — never a
+// partial tree presented as complete.
 func TestSemCaminhoNenhumRecusaEmVezDeApresentarParcial(t *testing.T) {
 	f := novoFake()
 	f.negados["/etc/nginx/nginx.conf"] = true
@@ -152,20 +152,20 @@ func TestSemCaminhoNenhumRecusaEmVezDeApresentarParcial(t *testing.T) {
 	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
 	_, err := tr.Open("/etc/nginx/nginx.conf")
 
-	require.ErrorIs(t, err, fs.ErrPermission, "a causa continua sendo permissao")
+	require.ErrorIs(t, err, fs.ErrPermission, "the cause is still permission")
 	diags := transport.Diagnosticos(tr)
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "sudo")
 }
 
-// Caminho que comeca com `-` e o caso de injecao de ARGUMENTO: sem o `--`
-// separando as opcoes, o cat leria "-rf" como flag em vez de como arquivo.
-// Argv explicito resolve injecao de shell e nao resolve esta -- sao defeitos
-// diferentes, e o comando aqui roda com privilegio.
+// A path starting with `-` is the ARGUMENT injection case: without the `--`
+// closing the options, cat would read "-rf" as a flag instead of as a file.
+// Explicit argv solves shell injection and does not solve this one -- they are
+// different defects, and the command here runs with privilege.
 //
-// O caminho vem de diretiva `include` da configuracao do alvo, que nao e
-// entrada confiavel.
+// The path comes from an `include` directive in the target's configuration,
+// which is not trusted input.
 func TestCaminhoComTracoNaoViraFlag(t *testing.T) {
 	f := novoFake()
 	suspeito := "/etc/nginx/-rf"
@@ -179,9 +179,9 @@ func TestCaminhoComTracoNaoViraFlag(t *testing.T) {
 
 	require.Len(t, f.executados, 1)
 	argv := f.executados[0]
-	require.Contains(t, argv, "--", "o separador de fim de opcoes tem de estar presente")
+	require.Contains(t, argv, "--", "the end-of-options separator has to be there")
 	assert.Less(t, indiceDe(argv, "--"), indiceDe(argv, suspeito),
-		"o separador precisa vir ANTES do caminho para valer de alguma coisa")
+		"the separator has to come BEFORE the path to be worth anything")
 }
 
 func indiceDe(lista []string, alvo string) int {
@@ -193,13 +193,14 @@ func indiceDe(lista []string, alvo string) int {
 	return -1
 }
 
-// A arvore de confianca e DERIVADA da configuracao, nunca uma lista fixa de
-// caminhos: lista fixa quebraria instalacao fora do padrao, e um servidor
-// real medido inclui de /etc/letsencrypt, fora de /etc/nginx.
+// The trust tree is DERIVED from the configuration, never a fixed list of
+// paths: a fixed list would break a non-standard installation, and a real
+// server we measured includes from /etc/letsencrypt, outside /etc/nginx.
 //
-// O par de casos e o ponto: elevar um irmao de arquivo ja alcancado e
-// rotina e sai como info; elevar num diretorio que a configuracao nunca
-// tinha tocado e novidade, e novidade envolvendo sudo sai como aviso.
+// The pair of cases is the point: elevating for a sibling of a file already
+// reached is routine and comes out as info; elevating inside a directory the
+// configuration had never touched is news, and news involving sudo comes out
+// as a warning.
 func TestElevacaoForaDaArvoreViraAviso(t *testing.T) {
 	severidadeDe := func(diags []output.Diagnostic, codigo string) output.Severity {
 		for _, d := range diags {
@@ -228,7 +229,7 @@ func TestElevacaoForaDaArvoreViraAviso(t *testing.T) {
 		assert.Equal(t, output.SeverityInfo,
 			severidadeDe(diags, transport.CodigoLeituraPrivilegiada))
 		assert.Empty(t, severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
-			"conf.d fica abaixo de /etc/nginx, que a configuracao ja alcancava")
+			"conf.d sits under /etc/nginx, which the configuration already reached")
 	})
 
 	t.Run("diretorio nunca tocado sai como aviso", func(t *testing.T) {
@@ -248,7 +249,7 @@ func TestElevacaoForaDaArvoreViraAviso(t *testing.T) {
 		diags := transport.Diagnosticos(tr)
 		assert.Equal(t, output.SeverityWarning,
 			severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
-			"elevar em diretorio novo e a anomalia que o aviso existe para mostrar")
+			"elevating in a new directory is the anomaly the warning exists to show")
 	})
 
 	t.Run("o proprio arquivo de topo nunca e anomalia", func(t *testing.T) {
@@ -263,6 +264,6 @@ func TestElevacaoForaDaArvoreViraAviso(t *testing.T) {
 
 		diags := transport.Diagnosticos(tr)
 		assert.Empty(t, severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
-			"a configuracao que o operador nomeou nao e novidade, esteja onde estiver")
+			"the configuration the operator named is not news, wherever it lives")
 	})
 }
