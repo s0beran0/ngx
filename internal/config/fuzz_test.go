@@ -15,13 +15,13 @@ import (
 	"github.com/s0beran0/ngx/internal/config"
 )
 
-// O fuzz garante que, para qualquer entrada que o tokenizador aceite, os
-// spans continuam apontando para o texto real e em ordem crescente, todo
-// byte fica coberto por algum token ou e espaco, Kind e Raw sao coerentes,
-// a coluna reconstruida a partir do texto bate com a coluna reportada, o
-// resultado e o mesmo em duas passagens, e -- a propriedade que realmente
-// sustenta a Task 9 -- os tokens casam com os do lexer do
-// nginx-go-crossplane, contagem e valor, ignorando comentarios.
+// The fuzz guarantees that, for any input the tokenizer accepts, the spans
+// keep pointing at the real text and in increasing order, every byte is
+// covered by some token or is whitespace, Kind and Raw are coherent, the
+// column rebuilt from the text matches the reported column, the result is the
+// same over two passes, and -- the property that really holds Task 9 up --
+// the tokens match those of the nginx-go-crossplane lexer, in count and in
+// value, ignoring comments.
 func FuzzTokenizeSpans(f *testing.F) {
 	f.Add("server { listen 80; }")
 	f.Add(`add_header X "a; b";`)
@@ -43,7 +43,7 @@ func FuzzTokenizeSpans(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		toks, err := config.Tokenize([]byte(s))
 		if err != nil {
-			return // entrada fora de escopo: o nosso tokenizador a recusou
+			return // out-of-scope input: our own tokenizer refused it
 		}
 
 		verificarSpansEOrdem(t, s, toks)
@@ -56,47 +56,47 @@ func FuzzTokenizeSpans(f *testing.F) {
 	})
 }
 
-// verificarCRLFNuncaTerminaSpan e a propriedade que sustenta a correcao do
-// CR de CRLF em lerPalavra e lerVar (fix round 2): nenhum token pode
-// terminar num \r que seja seguido de \n na fonte. Esse CR pertence ao
-// espaco em branco depois do token, nunca ao span do token -- senao uma
-// reescrita por substituicao de bytes converteria a linha de CRLF para LF.
+// verificarCRLFNuncaTerminaSpan is the property holding up the CR-of-CRLF fix
+// in lerPalavra and lerVar (fix round 2): no token may end on a \r that is
+// followed by \n in the source. That CR belongs to the whitespace after the
+// token, never to the token's span -- otherwise a rewrite by byte replacement
+// would convert the line from CRLF to LF.
 func verificarCRLFNuncaTerminaSpan(t *testing.T, s string, toks []config.Token) {
 	for _, tok := range toks {
 		if tok.End == 0 || s[tok.End-1] != '\r' {
 			continue
 		}
 		if tok.End < len(s) && s[tok.End] == '\n' {
-			t.Fatalf("token %q em [%d,%d) termina num \\r seguido de \\n na fonte %q",
+			t.Fatalf("token %q at [%d,%d) ends on a \\r followed by \\n in source %q",
 				tok.Value, tok.Start, tok.End, s)
 		}
 	}
 }
 
-// verificarSpansEOrdem confere a higiene basica dos spans: ordem crescente,
-// limites dentro da fonte e Raw == fatia da fonte.
+// verificarSpansEOrdem checks the basic hygiene of the spans: increasing
+// order, bounds inside the source and Raw == the slice of the source.
 func verificarSpansEOrdem(t *testing.T, s string, toks []config.Token) {
 	prev := 0
 	for _, tok := range toks {
 		if tok.Start < prev {
-			t.Fatalf("token comeca em %d, antes do fim anterior %d", tok.Start, prev)
+			t.Fatalf("token starts at %d, before the previous end %d", tok.Start, prev)
 		}
 		if tok.End > len(s) || tok.Start > tok.End {
-			t.Fatalf("span invalido [%d,%d) para fonte de %d bytes", tok.Start, tok.End, len(s))
+			t.Fatalf("invalid span [%d,%d) for a source of %d bytes", tok.Start, tok.End, len(s))
 		}
 		if got := s[tok.Start:tok.End]; got != tok.Raw {
-			t.Fatalf("raw %q difere da fonte %q em [%d,%d)", tok.Raw, got, tok.Start, tok.End)
+			t.Fatalf("raw %q differs from the source %q at [%d,%d)", tok.Raw, got, tok.Start, tok.End)
 		}
 		if tok.Line < 1 || tok.Column < 1 {
-			t.Fatalf("linha/coluna base zero: %d:%d", tok.Line, tok.Column)
+			t.Fatalf("zero-based line/column: %d:%d", tok.Line, tok.Column)
 		}
 		prev = tok.End
 	}
 }
 
-// verificarCobertura confere que todo byte fora de algum span e espaco em
-// branco (decodificando rune a rune, para nao confundir byte de continuacao
-// UTF-8 com "nao e espaco").
+// verificarCobertura checks that every byte outside any span is whitespace
+// (decoding rune by rune, so as not to mistake a UTF-8 continuation byte for
+// "not whitespace").
 func verificarCobertura(t *testing.T, s string, toks []config.Token) {
 	coberto := make([]bool, len(s))
 	for _, tok := range toks {
@@ -110,13 +110,13 @@ func verificarCobertura(t *testing.T, s string, toks []config.Token) {
 			i++
 			continue
 		}
-		// uma barra invertida pode ficar de fora de qualquer token: sozinha
-		// no ultimo byte da fonte (sem caractere seguinte para formar par de
-		// escape), ou junto com o \r que a segue quando os dois formam a
-		// palavra inteira (o crossplane tambem nao produz token nenhum
-		// nesse caso -- ver barraFinalDeArquivo e o tratamento de \\+\r em
-		// tokens.go). Nao e espaco, mas e um gap legitimo, do mesmo jeito
-		// que o proprio crossplane deixa.
+		// a backslash may fall outside every token: alone on the last byte
+		// of the source (with no following character to form an escape
+		// pair), or together with the \r after it when the two make up the
+		// whole word (crossplane produces no token at all in that case
+		// either -- see barraFinalDeArquivo and the handling of \\+\r in
+		// tokens.go). It is not whitespace, but it is a legitimate gap, the
+		// same one crossplane itself leaves.
 		if s[i] == '\\' {
 			i++
 			continue
@@ -126,32 +126,32 @@ func verificarCobertura(t *testing.T, s string, toks []config.Token) {
 			tam = 1
 		}
 		if !unicode.IsSpace(r) {
-			t.Fatalf("byte %d (%q) nao coberto por nenhum token e nao e espaco", i, s[i])
+			t.Fatalf("byte %d (%q) covered by no token and not whitespace", i, s[i])
 		}
 		i += tam
 	}
 }
 
-// verificarCoerenciaKindRaw confere que Kind e Raw (e Value, para palavras
-// nao-quotadas) nunca se contradizem.
+// verificarCoerenciaKindRaw checks that Kind and Raw (and Value, for unquoted
+// words) never contradict each other.
 func verificarCoerenciaKindRaw(t *testing.T, toks []config.Token) {
 	for _, tok := range toks {
 		switch tok.Kind {
 		case config.TokenSemicolon:
 			if tok.Raw != ";" {
-				t.Fatalf("TokenSemicolon com raw %q", tok.Raw)
+				t.Fatalf("TokenSemicolon with raw %q", tok.Raw)
 			}
 		case config.TokenBlockStart:
 			if tok.Raw != "{" {
-				t.Fatalf("TokenBlockStart com raw %q", tok.Raw)
+				t.Fatalf("TokenBlockStart with raw %q", tok.Raw)
 			}
 		case config.TokenBlockEnd:
 			if tok.Raw != "}" {
-				t.Fatalf("TokenBlockEnd com raw %q", tok.Raw)
+				t.Fatalf("TokenBlockEnd with raw %q", tok.Raw)
 			}
 		case config.TokenComment:
 			if len(tok.Raw) == 0 || tok.Raw[0] != '#' {
-				t.Fatalf("TokenComment com raw %q sem # inicial", tok.Raw)
+				t.Fatalf("TokenComment with raw %q and no leading #", tok.Raw)
 			}
 		case config.TokenWord:
 			if tok.Quoted {
@@ -159,20 +159,20 @@ func verificarCoerenciaKindRaw(t *testing.T, toks []config.Token) {
 			}
 			esperado := valorEsperadoParaPalavra(tok.Raw)
 			if tok.Value != esperado {
-				t.Fatalf("TokenWord nao-quotado com value %q != esperado %q (raw %q)",
+				t.Fatalf("unquoted TokenWord with value %q != expected %q (raw %q)",
 					tok.Value, esperado, tok.Raw)
 			}
 		}
 	}
 }
 
-// valorEsperadoParaPalavra recalcula, a partir do Raw de um TokenWord
-// nao-quotado, o Value que a producao deveria ter gerado -- espelhando
-// consumirEscape em tokens.go: uma barra pula qualquer \r que vier logo
-// depois (invisivel) e forma o par de escape com a rune real seguinte
-// (literal, os dois bytes, com o byte invalido substituido por U+FFFD); se
-// a fonte acabar antes de achar essa rune, a barra e os \r somem sem deixar
-// conteudo. Um \r solto (fora de um par de escape) tambem fica invisivel.
+// valorEsperadoParaPalavra recomputes, from the Raw of an unquoted TokenWord,
+// the Value the production should have generated -- mirroring consumirEscape
+// in tokens.go: a backslash skips any \r coming right after it (invisible)
+// and forms the escape pair with the next real rune (literal, both bytes,
+// with an invalid byte replaced by U+FFFD); if the source ends before finding
+// that rune, the backslash and the \r vanish leaving no content. A stray \r
+// (outside an escape pair) is invisible too.
 func valorEsperadoParaPalavra(raw string) string {
 	var saida strings.Builder
 	i := 0
@@ -183,9 +183,9 @@ func valorEsperadoParaPalavra(raw string) string {
 				j++
 			}
 			if j >= len(raw) {
-				// nunca achou a rune do par: barra e \r somem sem deixar
-				// conteudo (isso so pode acontecer no fim absoluto do
-				// arquivo, que e onde a fonte de fato acaba).
+				// never found the rune of the pair: backslash and \r vanish
+				// leaving no content (this can only happen at the absolute
+				// end of the file, which is where the source really ends).
 				return saida.String()
 			}
 			saida.WriteByte('\\')
@@ -214,16 +214,16 @@ func valorEsperadoParaPalavra(raw string) string {
 	return saida.String()
 }
 
-// verificarLinhaEColuna reconstroi linha e coluna a partir do texto e
-// compara com o que cada token reportou. Coluna conta runes, nao bytes.
+// verificarLinhaEColuna rebuilds line and column from the text and compares
+// them against what each token reported. Column counts runes, not bytes.
 //
-// Faz isso num unico passe O(n) pela fonte, avancando um cursor byte a byte
-// (nunca reescaneando do inicio da linha ou do arquivo a cada token) --
-// tokens vem em ordem crescente de Start, entao o cursor so precisa andar
-// para frente. A primeira versao deste helper reescaneava o prefixo inteiro
-// a cada token (O(n) por token, O(n^2) no total) e um fuzz de 60s achava
-// uma entrada com muitos tokens numa linha so que travava o processo ate o
-// timeout do proprio go test -fuzz.
+// It does so in a single O(n) pass over the source, advancing a cursor byte
+// by byte (never rescanning from the start of the line or of the file for
+// each token) -- tokens come in increasing order of Start, so the cursor only
+// ever needs to move forward. The first version of this helper rescanned the
+// whole prefix for each token (O(n) per token, O(n^2) overall) and a 60s fuzz
+// found an input with many tokens on a single line that hung the process
+// until go test -fuzz's own timeout.
 func verificarLinhaEColuna(t *testing.T, s string, toks []config.Token) {
 	pos, linha, coluna := 0, 1, 1
 	for _, tok := range toks {
@@ -241,39 +241,39 @@ func verificarLinhaEColuna(t *testing.T, s string, toks []config.Token) {
 			}
 		}
 		if tok.Line != linha {
-			t.Fatalf("linha %d != esperada %d para token %q em %d", tok.Line, linha, tok.Value, tok.Start)
+			t.Fatalf("line %d != expected %d for token %q at %d", tok.Line, linha, tok.Value, tok.Start)
 		}
 		if tok.Column != coluna {
-			t.Fatalf("coluna %d != esperada %d para token %q em %d", tok.Column, coluna, tok.Value, tok.Start)
+			t.Fatalf("column %d != expected %d for token %q at %d", tok.Column, coluna, tok.Value, tok.Start)
 		}
 	}
 }
 
-// verificarIdempotencia confere que tokenizar a mesma fonte duas vezes
-// produz exatamente o mesmo resultado.
+// verificarIdempotencia checks that tokenizing the same source twice produces
+// exactly the same result.
 func verificarIdempotencia(t *testing.T, s string, toks []config.Token) {
 	outra, err := config.Tokenize([]byte(s))
 	if err != nil {
-		t.Fatalf("tokenizar de novo produziu erro: %v", err)
+		t.Fatalf("tokenizing again produced an error: %v", err)
 	}
 	if !reflect.DeepEqual(toks, outra) {
-		t.Fatalf("tokenizar duas vezes produziu resultados diferentes:\nprimeira: %+v\nsegunda:  %+v", toks, outra)
+		t.Fatalf("tokenizing twice produced different results:\nfirst:  %+v\nsecond: %+v", toks, outra)
 	}
 }
 
-// verificarDiferencialContraCrossplane e a propriedade que sustenta a Task
-// 9: o aligner casa nossos tokens com os do crossplane por contagem e tipo,
-// sem nunca comparar valores -- entao qualquer divergencia aqui e uma
-// divergencia real de alinhamento. Se o crossplane rejeitar a entrada (erro
-// em algum token), ela esta fora de escopo e a comparacao e pulada.
+// verificarDiferencialContraCrossplane is the property that holds Task 9 up:
+// the aligner matches our tokens against crossplane's by count and by kind,
+// never comparing values -- so any divergence here is a real alignment
+// divergence. If crossplane rejects the input (an error on some token), that
+// input is out of scope and the comparison is skipped.
 func verificarDiferencialContraCrossplane(t *testing.T, s string, toks []config.Token) {
 	ch := crossplane.Lex(strings.NewReader(s))
 
 	var referencia []crossplane.NgxToken
 	for tok := range ch {
 		if tok.Error != nil {
-			// drena o resto do canal para nao deixar a goroutine do
-			// crossplane vazando, e sai: entrada fora de escopo.
+			// drain the rest of the channel so crossplane's goroutine is
+			// not left leaking, and get out: input is out of scope.
 			for range ch {
 			}
 			return
@@ -298,36 +298,36 @@ func verificarDiferencialContraCrossplane(t *testing.T, s string, toks []config.
 	}
 
 	if len(nossos) != len(deles) {
-		t.Fatalf("contagem de tokens diverge do crossplane para %q: nosso=%d crossplane=%d\nnosso=%v\ncrossplane=%v",
+		t.Fatalf("token count diverges from crossplane for %q: ours=%d crossplane=%d\nours=%v\ncrossplane=%v",
 			s, len(nossos), len(deles), nossos, deles)
 	}
 	for i := range nossos {
 		if nossos[i].Value != deles[i].Value {
-			t.Fatalf("token %d diverge do crossplane para %q: nosso=%q crossplane=%q",
+			t.Fatalf("token %d diverges from crossplane for %q: ours=%q crossplane=%q",
 				i, s, nossos[i].Value, deles[i].Value)
 		}
 		if nossos[i].Quoted != deles[i].IsQuoted {
-			t.Fatalf("token %d diverge do crossplane em Quoted para %q: nosso=%v crossplane=%v (valor %q)",
+			t.Fatalf("token %d diverges from crossplane on Quoted for %q: ours=%v crossplane=%v (value %q)",
 				i, s, nossos[i].Quoted, deles[i].IsQuoted, nossos[i].Value)
 		}
 	}
 }
 
-// FuzzAlinhamento verifica propriedades do casamento token-arvore (Task 9)
-// que podem de fato falhar num alinhamento incorreto. "Span dentro dos
-// limites da fonte" nao esta entre elas de proposito: Tokenize ja garante
-// isso sozinho (Task 8), e um alinhador que so copiasse [0,len(src)) para
-// todo no passaria nesse teste sem alinhar nada. As quatro propriedades
-// abaixo dependem de COMO os offsets sao distribuidos entre os nos, que e
-// onde um bug de alinhamento realmente vive:
+// FuzzAlinhamento checks properties of the token-tree matching (Task 9) that
+// can actually fail on an incorrect alignment. "Span within the bounds of the
+// source" is deliberately not among them: Tokenize already guarantees that on
+// its own (Task 8), and an aligner that merely copied [0,len(src)) into every
+// node would pass such a test without aligning anything. The four properties
+// below depend on HOW the offsets are distributed among the nodes, which is
+// where an alignment bug really lives:
 //
-//  1. cobertura: todo byte nao-espaco de nivel raiz pertence ao Span de
-//     algum no raiz;
-//  2. contencao/nao-sobreposicao: o Span de um filho vive dentro do Span do
-//     pai, e irmaos nao se sobrepoem;
-//  3. HeadSpan e exatamente "nome + argumentos": retokenizar o texto do
-//     HeadSpan produz 1+len(Args) TokenWord e nada mais;
-//  4. terminador: Span de uma diretiva nao-comentario termina em ';' ou '}'.
+//  1. coverage: every non-whitespace byte at root level belongs to the Span
+//     of some root node;
+//  2. containment/non-overlap: the Span of a child lives inside the Span of
+//     the parent, and siblings do not overlap;
+//  3. HeadSpan is exactly "name + arguments": retokenizing the text of the
+//     HeadSpan produces 1+len(Args) TokenWord and nothing else;
+//  4. terminator: the Span of a non-comment directive ends in ';' or '}'.
 func FuzzAlinhamento(f *testing.F) {
 	f.Add("server { listen 80; }")
 	f.Add("http { server { location / { proxy_pass http://a; } } }")
@@ -339,10 +339,10 @@ func FuzzAlinhamento(f *testing.F) {
 	f.Add("server_name a.com # prod\n  b.com;")
 	f.Add("location /api # gw\n{ proxy_pass http://a; }")
 	f.Add("http { server { if ( $a = b ) { return 404; } } }")
-	// Sem estas duas seeds o fuzz nunca exercitava arvore multi-arquivo: um
-	// include gerado pelo fuzzer nao casa com arquivo nenhum, entao tree.Files
-	// tinha sempre um elemento so e o alinhamento por arquivo -- o que a Task
-	// 12 introduziu -- ficava sem cobertura de propriedade.
+	// Without these two seeds the fuzz never exercised a multi-file tree: an
+	// include generated by the fuzzer matches no file at all, so tree.Files
+	// always had a single element and the per-file alignment -- what Task 12
+	// introduced -- was left with no property coverage.
 	f.Add("include incluido.conf;")
 	f.Add("http { include incluido.conf; }\n# depois\n")
 
@@ -352,21 +352,21 @@ func FuzzAlinhamento(f *testing.F) {
 		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
 			t.Skip()
 		}
-		// O arquivo incluido e fixo: o que varia e o texto que o inclui.
+		// The included file is fixed: what varies is the text including it.
 		incluido := "server_name incluido.exemplo; # do include\nlisten 8080;\n"
 		if err := os.WriteFile(filepath.Join(dir, "incluido.conf"), []byte(incluido), 0o644); err != nil {
 			t.Skip()
 		}
 
-		// Nenhum recover aqui, de proposito: panic e falha do fuzz. Uma CLI
-		// consumida por agente nao pode emitir stack trace, entao "config.Parse
-		// nunca entra em panico" e propriedade, nao ruido a ser pulado.
+		// No recover here, on purpose: a panic is a fuzz failure. A CLI
+		// consumed by an agent cannot emit a stack trace, so "config.Parse
+		// never panics" is a property, not noise to be skipped.
 		tree, err := config.Parse(config.ParseOptions{Path: p})
 		if err != nil {
-			// erro do nosso lado nao e "fora de escopo" por si so: pode ser
-			// sobre-rejeicao, a classe de bug que este fuzz existe para
-			// achar. So esta de fato fora de escopo se o crossplane tambem
-			// recusar a mesma entrada.
+			// an error on our side is not "out of scope" by itself: it may
+			// be over-rejection, the class of bug this fuzz exists to find.
+			// It is only really out of scope if crossplane refuses the same
+			// input too.
 			verificarNaoSobreRejeicao(t, p, err)
 			return
 		}
@@ -380,7 +380,7 @@ func FuzzAlinhamento(f *testing.F) {
 	})
 }
 
-// soTemCR informa se o resto da fonte e so \r (ou nada).
+// soTemCR reports whether the rest of the source is only \r (or nothing).
 func soTemCR(resto []byte) bool {
 	for _, b := range resto {
 		if b != '\r' {
@@ -390,14 +390,14 @@ func soTemCR(resto []byte) bool {
 	return true
 }
 
-// verificarNaoSobreRejeicao e a propriedade que sustenta esta rodada de
-// conserto: antes dela, "if err != nil { return }" tratava todo erro do
-// nosso Parse como entrada fora de escopo, o que descarta por construcao
-// exatamente a classe de bug que o aligner tinha -- sobre-rejeicao de
-// configuracao valida. Aqui o oraculo e o proprio crossplane, rodado com as
-// mesmas opcoes que internal/config/parse.go usa (Parse, parse.go:43-51):
-// se ele aceita a entrada (sem erro e com Status != "failed") e o nosso
-// Parse a recusa, isso e falha real, nao entrada invalida.
+// verificarNaoSobreRejeicao is the property that holds this round of fixes
+// up: before it, "if err != nil { return }" treated every error from our
+// Parse as an out-of-scope input, which discards by construction exactly the
+// class of bug the aligner had -- over-rejection of valid configuration. Here
+// the oracle is crossplane itself, run with the same options
+// internal/config/parse.go uses (Parse, parse.go:43-51): if it accepts the
+// input (no error and Status != "failed") and our Parse refuses it, that is a
+// real failure, not an invalid input.
 func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
 	var problemas config.ParseErrors
 	if errors.As(nossoErro, &problemas) && len(problemas) > 0 && divergenciaConhecida(problemas[0]) {
@@ -406,23 +406,23 @@ func verificarNaoSobreRejeicao(t *testing.T, path string, nossoErro error) {
 
 	payload, err := parseNoOraculo(path)
 	if err != nil {
-		return // crossplane tambem recusou: entrada legitimamente fora de escopo
+		return // crossplane refused it too: input legitimately out of scope
 	}
 	if payload == nil {
-		return // crossplane entrou em panico: nao e aceitacao
+		return // crossplane panicked: that is not acceptance
 	}
 	if payload.Status != "ok" {
-		return // crossplane aceitou o arquivo mas registrou erro de parse: idem
+		return // crossplane took the file but recorded a parse error: same
 	}
-	t.Fatalf("sobre-rejeicao: crossplane aceitou a entrada mas o ngx recusou: %v\narquivo: %s",
+	t.Fatalf("over-rejection: crossplane accepted the input but ngx refused it: %v\nfile: %s",
 		nossoErro, path)
 }
 
-// parseNoOraculo roda o crossplane com as mesmas opcoes de parse.go:43-51.
-// O recover nao e complacencia: uma entrada que derruba o parser da
-// dependencia (prepareIfArgs, util.go:83) nao esta sendo "aceita" por ela, e
-// tratar isso como aceitacao acusaria o ngx de sobre-rejeitar justamente
-// quando ele evitou um crash.
+// parseNoOraculo runs crossplane with the same options as parse.go:43-51.
+// The recover is not complacency: an input that brings the dependency's
+// parser down (prepareIfArgs, util.go:83) is not being "accepted" by it, and
+// treating that as acceptance would accuse ngx of over-rejecting precisely
+// when it avoided a crash.
 func parseNoOraculo(path string) (payload *crossplane.Payload, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -439,90 +439,92 @@ func parseNoOraculo(path string) (payload *crossplane.Payload, err error) {
 	})
 }
 
-// divergenciaConhecida e a lista FECHADA de recusas do ngx que o crossplane
-// nao faz. Ela existe porque o oraculo tem que continuar acusando
-// sobre-rejeicao: a versao anterior deste arquivo silenciava por substring da
-// mensagem ("aspa", "token inesperado", "esperava", "sobraram"), o que
-// apagava a classe inteira de bug que o fuzz existe para achar -- qualquer
-// recusa nova do aligner cairia numa daquelas substrings.
+// divergenciaConhecida is the CLOSED list of ngx refusals crossplane does not
+// make. It exists because the oracle has to keep flagging over-rejection: an
+// earlier version of this file silenced by substring of the message
+// ("quote", "unexpected token", "expected", "left over"), which erased the
+// whole class of bug the fuzz exists to find -- any new refusal from the
+// aligner would land in one of those substrings.
 //
-// Cada entrada casa a CLASSE mais a forma exata do token, tem citacao do
-// fonte do crossplane e tem teste unitario proprio em robustez_test.go. Uma
-// recusa que nao esteja aqui -- inclusive uma nova recusa da mesma classe com
-// outro token -- e falha do fuzz, como tem que ser. Classes deliberadamente
-// FORA da lista: RecusaTokenInesperado, RecusaTokensSobrando,
-// RecusaFimInesperado e RecusaPanicoDoCrossplane, que so aparecem quando o
-// casamento entre arvore e tokens saiu do lugar -- isto e, quando ha bug.
+// Each entry matches the CLASS plus the exact shape of the token, cites
+// crossplane's source and has a unit test of its own in robustez_test.go. A
+// refusal that is not here -- including a new refusal of the same class with
+// a different token -- is a fuzz failure, as it has to be. Classes
+// deliberately OUT of the list: RecusaTokenInesperado, RecusaTokensSobrando,
+// RecusaFimInesperado and RecusaPanicoDoCrossplane, which only show up when
+// the matching between tree and tokens has slipped -- that is, when there is
+// a bug.
 func divergenciaConhecida(pe config.ParseError) bool {
 	switch pe.Classe {
 	case config.RecusaAspaNaoFechada:
-		// lex.go:325-327 fecha a aspa implicitamente no fim do arquivo e nao
-		// emite token nenhum se o conteudo estiver vazio: uma aspa solta e
-		// "ok" para o crossplane. O nginx recusa. Ver
+		// lex.go:325-327 closes the quote implicitly at end of file and
+		// emits no token at all when the content is empty: a dangling quote
+		// is "ok" for crossplane. nginx refuses it. See
 		// TestDivergenciaAspaNaoFechada.
 		return pe.Token == `"` || pe.Token == "'"
 
 	case config.RecusaTokenNoLugarDeDiretiva:
-		// parse.go:256-261 monta o statement com t.Value sem exigir que o
-		// primeiro token seja uma palavra: so "}" (parse.go:237) e comentario
-		// (parse.go:264) sao tratados a parte, entao "{", "}" e ";" viram
-		// nome de diretiva para ele. Esses tres sao TODOS os tokens que nao
-		// sao palavra nem comentario -- a lista e exaustiva sobre os Kind do
-		// tokenizador, e uma palavra recusada nessa posicao continua sendo
-		// bug. Ver TestDivergenciaChaveComoNomeDeDiretiva e
+		// parse.go:256-261 builds the statement out of t.Value without
+		// requiring the first token to be a word: only "}" (parse.go:237)
+		// and comments (parse.go:264) are handled apart, so "{", "}" and ";"
+		// become directive names for it. Those three are ALL the tokens that
+		// are neither word nor comment -- the list is exhaustive over the
+		// tokenizer's Kind, and a word refused in that position is still a
+		// bug. See TestDivergenciaChaveComoNomeDeDiretiva and
 		// TestDivergenciaPontoEVirgulaComoNomeDeDiretiva.
 		return pe.Token == "{" || pe.Token == "}" || pe.Token == ";"
 
 	case config.RecusaTerminadorAusente:
-		// O laco de argumentos para em "}" (parse.go:285) e a checagem
-		// "is not terminated by \";\"" (analyze.go:224-227) nao roda com
-		// SkipDirectiveArgsCheck (analyze.go:202-204). So o "}" diverge. Ver
-		// TestDivergenciaDiretivaSemPontoEVirgula.
+		// The argument loop stops at "}" (parse.go:285) and the
+		// "is not terminated by \";\"" check (analyze.go:224-227) does not
+		// run under SkipDirectiveArgsCheck (analyze.go:202-204). Only the "}"
+		// diverges. See TestDivergenciaDiretivaSemPontoEVirgula.
 		return pe.Token == "}"
 
 	case config.RecusaExpressaoIfInvalida:
-		// Guarda validExpr (analyze.go:212, util.go:57-67) que
-		// SkipDirectiveArgsCheck suprime e sem a qual prepareIfArgs
-		// (util.go:83) derruba o processo. O token e sempre o nome "if",
-		// citado ou nao (parse.go:352-354 compara sem olhar IsQuoted). Ver
-		// TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic.
+		// The validExpr guard (analyze.go:212, util.go:57-67) that
+		// SkipDirectiveArgsCheck suppresses and without which prepareIfArgs
+		// (util.go:83) brings the process down. The token is always the name
+		// "if", quoted or not (parse.go:352-354 compares without looking at
+		// IsQuoted). See TestIfComExpressaoVaziaEhRecusaTipadaENaoPanic.
 		return pe.Token == "if" || pe.Token == `"if"` || pe.Token == "'if'"
 
 	case config.RecusaAlvoNaoERegular:
-		// "include .;" -- unica entrada enumerada SO pela classe, sem token
-		// exato, porque o alvo do include e um caminho arbitrario e nao ha
-		// lexema fixo para casar. So e aceitavel porque a classe ja e
-		// estreita: ela dispara exclusivamente quando o caminho abriu e nao e
-		// arquivo regular.
+		// "include .;" -- the only entry enumerated by CLASS alone, with no
+		// exact token, because the include target is an arbitrary path and
+		// there is no fixed lexeme to match against. It is only acceptable
+		// because the class is already narrow: it fires exclusively when the
+		// path opened and is not a regular file.
 		//
-		// Padrao sem magic vai para parse.go:385-395, que so confere que o
-		// os.Open funciona -- e abrir um diretorio funciona --, entao o alvo
-		// entra em fnames e e lexado no laco de parse.go:161-168; o lexer nao
-		// consulta o erro de leitura e devolve zero token, com Status "ok". O
-		// nginx, no lugar disso, LE o alvo, e ler diretorio falha. Ver
+		// A pattern with no magic goes to parse.go:385-395, which only
+		// checks that os.Open works -- and opening a directory works --, so
+		// the target gets into fnames and is lexed in the loop of
+		// parse.go:161-168; the lexer never consults the read error and
+		// hands back zero tokens, with Status "ok". nginx, in its place,
+		// READS the target, and reading a directory fails. See
 		// TestDivergenciaIncludeDeDiretorio.
 		return true
 	}
 	return false
 }
 
-// verificarCoberturaDeRaiz confere que nenhum byte significativo de nivel
-// raiz escapa do Span de todo no raiz -- a formulacao concreta de que o
-// casamento nao "perdeu" nenhum trecho do documento.
+// verificarCoberturaDeRaiz checks that no significant byte of the root level
+// escapes the Span of every root node -- the concrete formulation of the
+// matching not having "lost" any stretch of the document.
 //
-// "Significativo" usa a mesma nocao de espaco que o tokenizador (unicode.
-// IsSpace, decodificado rune a rune) -- nao so os quatro bytes ascii. Uma
-// primeira versao deste helper checava so ' ', '\t', '\n', '\r' e o fuzz
-// achou "\v" (vertical tab) como falso positivo em minutos: o tokenizador
-// corretamente trata \v como espaco (tokens.go, espacoAqui) e nao emite
-// token nenhum para ele, entao ele fica fora de qualquer span de proposito
-// -- o defeito era no teste, nao no alinhamento.
+// "Significant" uses the same notion of whitespace as the tokenizer
+// (unicode.IsSpace, decoded rune by rune) -- not just the four ascii bytes. A
+// first version of this helper checked only ' ', '\t', '\n', '\r' and the
+// fuzz found "\v" (vertical tab) as a false positive within minutes: the
+// tokenizer correctly treats \v as whitespace (tokens.go, espacoAqui) and
+// emits no token at all for it, so it stays outside any span on purpose --
+// the defect was in the test, not in the alignment.
 //
-// Uma barra invertida sozinha (sem par de escape, tipicamente no ultimo
-// byte do arquivo) e o mesmo gap legitimo documentado em verificarCobertura
-// no fuzz do tokenizador: consumida pelo tokenizador (avanca a posicao) mas
-// sem formar token nenhum, entao nao e espaco e nao esta em span nenhum --
-// o fuzz achou esse caso tambem, na mesma rodada.
+// A lone backslash (with no escape pair, typically on the last byte of the
+// file) is the same legitimate gap documented in verificarCobertura in the
+// tokenizer fuzz: consumed by the tokenizer (it advances the position) but
+// forming no token, so it is not whitespace and is in no span -- the fuzz
+// found that case too, in the same round.
 func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
 	src := arquivo.Source
 	coberto := make([]bool, len(src))
@@ -536,11 +538,12 @@ func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
 			i++
 			continue
 		}
-		// A valvula da barra invertida so vale para a barra SEM par de escape,
-		// que consumirEscape (tokens.go:134-143) so devolve como ok == false
-		// no fim da fonte -- \r e invisivel e nao conta como par. Antes ela
-		// pulava qualquer '\' fora de span, o que tambem perdoaria uma barra
-		// no meio do arquivo deixada de fora por outro motivo.
+		// The backslash valve only applies to the backslash WITHOUT an escape
+		// pair, which consumirEscape (tokens.go:134-143) only returns as
+		// ok == false at the end of the source -- \r is invisible and does
+		// not count as a pair. It used to skip any '\' outside a span, which
+		// would also forgive a backslash in the middle of the file left out
+		// for some other reason.
 		if src[i] == '\\' && soTemCR(src[i+1:]) {
 			i++
 			continue
@@ -550,40 +553,40 @@ func verificarCoberturaDeRaiz(t *testing.T, arquivo *config.File) {
 			tam = 1
 		}
 		if !unicode.IsSpace(r) {
-			t.Fatalf("byte %d (%q) fora de qualquer span de nivel raiz e nao e espaco", i, string(src[i]))
+			t.Fatalf("byte %d (%q) outside every root-level span and not whitespace", i, string(src[i]))
 		}
 		i += tam
 	}
 }
 
-// verificarContencaoENaoSobreposicao confere, recursivamente, que o Span de
-// cada filho vive dentro do Span do pai e que irmaos nao se sobrepoem --
-// sem essa propriedade, uma reescrita por substituicao de bytes na v0.2
-// corromperia o arquivo.
+// verificarContencaoENaoSobreposicao checks, recursively, that the Span of
+// each child lives inside the Span of the parent and that siblings do not
+// overlap -- without this property, a rewrite by byte replacement in v0.2
+// would corrupt the file.
 //
-// Excecao deliberada para nao-comentario vs comentario: um comentario
-// encontrado no meio dos argumentos de uma diretiva (Task 9, defeito 1)
-// chega aqui como IRMAO da diretiva anterior, mas seu texto fica
-// fisicamente DENTRO do span dela -- e assim que o proprio crossplane
-// estrutura a arvore (parse.go:286-290 poe o comentario fora de Args,
-// parse.go:435-445 o anexa como no "#" depois da diretiva e do bloco dela),
-// nao um defeito de alinhamento. Por isso a checagem de nao-sobreposicao
-// contra o irmao anterior so vale para nos que nao sao comentario.
+// Deliberate exception for non-comment vs comment: a comment found in the
+// middle of a directive's arguments (Task 9, defect 1) arrives here as a
+// SIBLING of the preceding directive, but its text sits physically INSIDE
+// that directive's span -- that is how crossplane itself structures the tree
+// (parse.go:286-290 puts the comment outside Args, parse.go:435-445 attaches
+// it as a "#" node after the directive and after its block), not an alignment
+// defect. That is why the non-overlap check against the previous sibling only
+// applies to nodes that are not comments.
 func verificarContencaoENaoSobreposicao(t *testing.T, src []byte, nodes []*config.Node, pai *config.Node) {
 	anteriorFim := -1
 	for _, n := range nodes {
 		if n.Span.Start < 0 || n.Span.End > len(src) || n.Span.Start > n.Span.End {
-			t.Fatalf("span invalido [%d,%d) para %q em fonte de %d bytes",
+			t.Fatalf("invalid span [%d,%d) for %q in a source of %d bytes",
 				n.Span.Start, n.Span.End, n.Directive, len(src))
 		}
 		if pai != nil {
 			if n.Span.Start < pai.Span.Start || n.Span.End > pai.Span.End {
-				t.Fatalf("span de %q [%d,%d) nao esta contido no do pai %q [%d,%d)",
+				t.Fatalf("span of %q [%d,%d) is not contained in the parent's %q [%d,%d)",
 					n.Directive, n.Span.Start, n.Span.End, pai.Directive, pai.Span.Start, pai.Span.End)
 			}
 		}
 		if !n.IsComment() && n.Span.Start < anteriorFim {
-			t.Fatalf("span de %q comeca em %d, antes do fim do irmao anterior em %d",
+			t.Fatalf("span of %q starts at %d, before the previous sibling's end at %d",
 				n.Directive, n.Span.Start, anteriorFim)
 		}
 		if n.Span.End > anteriorFim {
@@ -593,20 +596,20 @@ func verificarContencaoENaoSobreposicao(t *testing.T, src []byte, nodes []*confi
 	}
 }
 
-// verificarHeadSpanEhNomeMaisArgumentos confere que o HeadSpan cobre
-// exatamente o nome da diretiva e seus argumentos, nada mais e nada menos:
-// retokenizar o texto do HeadSpan tem que produzir so TokenWord (e, desde a
-// Task 9 defeito 1, TokenComment tambem — um comentario no meio dos
-// argumentos fica fisicamente dentro do HeadSpan, ver align.go) e nenhum
-// outro tipo de token. Um alinhador que incluisse o proximo token (';' ou
-// '{') seria pego aqui de qualquer forma, comentario ou nao.
+// verificarHeadSpanEhNomeMaisArgumentos checks that the HeadSpan covers
+// exactly the directive name and its arguments, nothing more and nothing
+// less: retokenizing the text of the HeadSpan has to produce only TokenWord
+// (and, since Task 9 defect 1, TokenComment as well -- a comment in the
+// middle of the arguments sits physically inside the HeadSpan, see align.go)
+// and no other kind of token. An aligner that took in the next token (';' or
+// '{') would be caught here either way, comment or not.
 //
-// A contagem exata "1 diretiva + len(Args) palavras" vale para toda
-// diretiva, exceto "if": prepareIfArgs (crossplane/util.go:71-86) remove de
-// Args os tokens "(" e ")" quando vem isolados, entao len(n.Args) nao conta
-// os tokens-palavra reais entre o nome e o terminador (Task 9, defeito 2).
-// Para "if" a checagem de tipo de token acima (nada alem de palavra ou
-// comentario) e o que pega um alinhador que avancasse demais.
+// The exact count "1 directive + len(Args) words" holds for every directive
+// except "if": prepareIfArgs (crossplane/util.go:71-86) strips the "(" and
+// ")" tokens out of Args when they come isolated, so len(n.Args) does not
+// count the real word tokens between the name and the terminator (Task 9,
+// defect 2). For "if" it is the token kind check above (nothing beyond word
+// or comment) that catches an aligner advancing too far.
 func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 	var percorrer func(nodes []*config.Node)
 	percorrer = func(nodes []*config.Node) {
@@ -616,14 +619,14 @@ func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 				continue
 			}
 			if n.HeadSpan.Start < n.Span.Start || n.HeadSpan.End > n.Span.End {
-				t.Fatalf("head span de %q [%d,%d) fora do span do no [%d,%d)",
+				t.Fatalf("head span of %q [%d,%d) outside the node's span [%d,%d)",
 					n.Directive, n.HeadSpan.Start, n.HeadSpan.End, n.Span.Start, n.Span.End)
 			}
 
 			texto := string(arquivo.Source[n.HeadSpan.Start:n.HeadSpan.End])
 			toks, err := config.Tokenize([]byte(texto))
 			if err != nil {
-				t.Fatalf("head span de %q nao retokeniza (%v); texto=%q", n.Directive, err, texto)
+				t.Fatalf("head span of %q does not retokenize (%v); text=%q", n.Directive, err, texto)
 			}
 
 			var palavras int
@@ -632,14 +635,14 @@ func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 					continue
 				}
 				if tk.Kind != config.TokenWord {
-					t.Fatalf("head span de %q contem token %v que nao e palavra nem comentario; texto=%q",
+					t.Fatalf("head span of %q holds token %v that is neither word nor comment; text=%q",
 						n.Directive, tk.Kind, texto)
 				}
 				palavras++
 			}
 			if n.Directive != "if" {
 				if esperado := 1 + len(n.Args); palavras != esperado {
-					t.Fatalf("head span de %q tem %d palavras, esperava %d (1 diretiva + %d args); texto=%q",
+					t.Fatalf("head span of %q has %d words, expected %d (1 directive + %d args); text=%q",
 						n.Directive, palavras, esperado, len(n.Args), texto)
 				}
 			}
@@ -650,10 +653,10 @@ func verificarHeadSpanEhNomeMaisArgumentos(t *testing.T, arquivo *config.File) {
 	percorrer(arquivo.Nodes)
 }
 
-// verificarTerminadorDoSpan confere que o Span de toda diretiva
-// nao-comentario termina no delimitador esperado -- ';' para diretiva
-// simples, '}' para bloco. Um alinhador que parasse um token antes ou
-// depois do delimitador real seria pego aqui.
+// verificarTerminadorDoSpan checks that the Span of every non-comment
+// directive ends on the expected delimiter -- ';' for a simple directive, '}'
+// for a block. An aligner that stopped one token before or after the real
+// delimiter would be caught here.
 func verificarTerminadorDoSpan(t *testing.T, arquivo *config.File) {
 	src := arquivo.Source
 	var percorrer func(nodes []*config.Node)
@@ -661,12 +664,12 @@ func verificarTerminadorDoSpan(t *testing.T, arquivo *config.File) {
 		for _, n := range nodes {
 			if !n.IsComment() {
 				if n.Span.End < 1 || n.Span.End > len(src) {
-					t.Fatalf("span fim invalido para %q: %d (fonte tem %d bytes)",
+					t.Fatalf("invalid span end for %q: %d (source has %d bytes)",
 						n.Directive, n.Span.End, len(src))
 				}
 				ultimo := src[n.Span.End-1]
 				if ultimo != ';' && ultimo != '}' {
-					t.Fatalf("span de %q termina em %q, esperava ';' ou '}'", n.Directive, string(ultimo))
+					t.Fatalf("span of %q ends in %q, expected ';' or '}'", n.Directive, string(ultimo))
 				}
 			}
 			percorrer(n.Block)

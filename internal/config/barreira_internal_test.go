@@ -16,7 +16,7 @@ import (
 // the one the barrier covers.
 func TestBarreiraConvertePanicEmRecusaTipada(t *testing.T) {
 	payload, err := parseComBarreira("qualquer.conf", &crossplane.ParseOptions{
-		Open: func(string) (io.ReadCloser, error) { panic("boom da dependencia") },
+		Open: func(string) (io.ReadCloser, error) { panic("boom from the dependency") },
 	})
 
 	require.Nil(t, payload)
@@ -25,7 +25,7 @@ func TestBarreiraConvertePanicEmRecusaTipada(t *testing.T) {
 	var problemas ParseErrors
 	require.True(t, errors.As(err, &problemas))
 	require.Equal(t, RecusaPanicoDoCrossplane, problemas[0].Classe)
-	require.Contains(t, problemas[0].Message, "boom da dependencia")
+	require.Contains(t, problemas[0].Message, "boom from the dependency")
 }
 
 // The up-front validation is the root-cause fix: it has to refuse exactly
