@@ -8,12 +8,12 @@ OpenSSH, not the memory of who wrote it.
 
 Versions investigated (the ones that `go.mod` should fix):
 
-| Módulo | Versão | Papel |
+| Module | Version | Paper |
 | --- | --- | --- |
 | `golang.org/x/crypto` | v0.55.0 | `ssh`, `ssh/agent`, `ssh/knownhosts` |
-| `github.com/pkg/sftp` | v1.13.11 | leitura e glob remotos |
-| `github.com/kevinburke/ssh_config` | v1.6.0 | parse de `~/.ssh/config` |
-| `github.com/Microsoft/go-winio` | v0.6.2 | named pipe do `ssh-agent` no Windows |
+| `github.com/pkg/sftp` | v1.13.11 | remote read and glob |
+| `github.com/kevinburke/ssh_config` | v1.6.0 | parse `~/.ssh/config` |
+| `github.com/Microsoft/go-winio` | v0.6.2 | named pipe of `ssh-agent` on Windows |
 
 Terminology reminder: `ssh-agent` is the operating system program that
 Keep unlocked keys. It has no relation to the *AI agent* that consumes the
@@ -33,7 +33,7 @@ CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build ./...
 
 Result, with Go 1.25.9:
 
-| Plataforma | Resultado |
+| Platform | Result |
 | --- | --- |
 | linux/amd64 | OK |
 | linux/arm64 | OK |
@@ -173,11 +173,11 @@ func (u *KeyError) Error() string {
 
 Therefore:
 
-| Situação | Como detectar | Mensagem do `ngx` |
+| Situation | How to detect | Message from `ngx` |
 | --- | --- | --- |
-| Host desconhecido | `errors.As(err, &ke)` e `len(ke.Want) == 0` | atrito normal: diga o host e a linha a acrescentar |
-| **Chave alterada** | `errors.As(err, &ke)` e `len(ke.Want) > 0` | **possível ataque**: diga isso com todas as letras, e mostre `ke.Want[i]` |
-| Chave revogada | `errors.As(err, &re)` com `*knownhosts.RevokedError` (`knownhosts.go:333-339`) | recusa, informando o arquivo e a linha |
+| Unknown host | `errors.As(err, &ke)` e `len(ke.Want) == 0` | normal friction: say the host and line to add |
+| **Key changed** | `errors.As(err, &ke)` e `len(ke.Want) > 0` | **possible attack**: say this in all letters, and show `ke.Want[i]` |
+| Key revoked | `errors.As(err, &re)` com `*knownhosts.RevokedError` (`knownhosts.go:333-339`) | refuses, informing the file and line |
 
 `**KeyError` — that is, a `var ke *knownhosts.KeyError` variable.The error is always returned by pointer (`&KeyError{}` in `knownhosts.go:375` and
 `&RevokedError{...}` in `knownhosts.go:345`), then `errors.As` needs
@@ -231,15 +231,15 @@ The project's README states that "the `Match` directive is currently unsupported
 
 ### What is honorable
 
-| Recurso | Situação | Fonte |
+| Feature | Situation | Source |
 | --- | --- | --- |
-| `Host` com wildcard (`web*`, `?`) | sim | `config.go:491` (`NewPattern`), `config.go:550` (`Matches`) |
-| `Host` com negação (`!web9`) | sim — casar com um padrão negado descarta o bloco inteiro | `config.go:550-568` |
-| `Include`, inclusive com wildcard no caminho | sim, até 5 níveis de recursão (`ErrDepthExceeded`) | `config.go:705-795` |
-| `Match all` | sim, tratado como `Host *` | `parser.go:184-195` |
-| `Match Host <padrões>` | sim | `parser.go:196-222` |
-| `IdentityFile` múltiplo | sim, via `GetAll` | `config.go:406` |
-| Chaves case-insensitive | sim | `config.go:376` |
+| `Host` com wildcard (`web*`, `?`) | Yes | `config.go:491` (`NewPattern`), `config.go:550` (`Matches`) |
+| `Host` com negação (`!web9`) | yes — matching a negated pattern discards the entire block | `config.go:550-568` |
+| `Include`, inclusive com wildcard no caminho | yes, up to 5 levels of recursion (`ErrDepthExceeded`) | `config.go:705-795` |
+| `Match all` | yes, treated as `Host*` | `parser.go:184-195` |
+| `Match Host <padrões>` | Yes | `parser.go:196-222` |
+| `IdentityFile` múltiplo | yes, via `GetAll` | `config.go:406` |
+| Case-insensitive keys | Yes | `config.go:376` |
 
 ### What Isn't Honorable — and How It Fails
 

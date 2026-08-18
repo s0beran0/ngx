@@ -12,13 +12,13 @@ Nothing in this release changes the configuration of a running server.
 
 Enter v0.1:
 
-| Área | Entrega |
+| Area | Delivery |
 |---|---|
-| Fundação | envelope JSON, exit codes, carregamento de config do ngx, redação |
-| Parse | árvore canônica com IDs estáveis, spans de byte, resolução de `include` |
-| Seletores | linguagem completa de leitura (`get`) |
-| Runtime | detecção do nginx, `nginx -t` estruturado, sinal de drift |
-| Comandos | `status`, `inspect`, `get`, `tree`, `fmt`, `test`, `diff` |
+| Foundation | JSON envelope, exit codes, ngx config loading, writing |
+| Parsee | Canonical tree with stable IDs, byte spans, `include` resolution |
+| Selectors | complete reading language (`get`) |
+| Runtime | nginx detection, structured `nginx -t`, drift signal |
+| Commands | `status`, `inspect`, `get`, `tree`, `fmt`, `test`, `diff` |
 
 They are outside of v0.1, by version: mutation and transaction (v0.2), `lint` (v0.3),
 `route` (v0.4), MCP (v0.5), `logs` and `upstreams` (v0.6).
@@ -126,7 +126,7 @@ internal/
   selector/  lexer · parser · eval
   runtime/   detect (-V) · test (-t) · dump (-T) · exec · process
   drift/     comparação disco ↔ carregado
-  settings/  arquivo de configuração do ngx (koanf)
+  settings/  ngx configuration file (koanf)
 ```
 
 Future release packages — `plan`, `patch`, `snapshot`, `lint`, `route`,
@@ -191,7 +191,7 @@ directive**, base 0.
 
 Abbreviation table:
 
-| Diretiva | Abrev |
+| Directive | Abbrev |
 |---|---|
 | `http` | `h` |
 | `stream` | `st` |
@@ -201,7 +201,7 @@ Abbreviation table:
 | `location` | `l` |
 | `upstream` | `u` |
 | `map` | `mp` |
-| qualquer outra | nome completo da diretiva |
+| any other | full name of the directive |
 
 Simple (non-block) directives use `d<N>` counted among the simple directives
 sisters. The root-level context blocks — `http`, `events`, `mail`, `stream`
@@ -247,11 +247,11 @@ integer selector character selects by ID.
 
 The spec examples mix the two cases. The rule:
 
-| Forma | Significado |
+| Shape | Meaning |
 |---|---|
-| `[/api]` | açúcar para `arg0=/api` — argumento do próprio nó |
-| `[arg0=/api]`, `[arg1=ssl]` | argumento do próprio nó, explícito |
-| `[server_name=api.com]` | diretiva **filha** `server_name` com algum arg casando |
+| `[/api]` | sugar for `arg0=/api` — node's own argument |
+| `[arg0=/api]`, `[arg1=ssl]` | argument of the node itself, explicit |
+| `[server_name=api.com]` | **child** directive `server_name` with some arg matching |
 
 directive name.There is no ambiguity because `argN` is reserved; any other key can only be
 
@@ -264,12 +264,12 @@ implicit is a predictable source of bug.
 
 ### Operators
 
-| Op | Semântica |
+| Op | Semantics |
 |---|---|
-| `=` | igualdade exata |
-| `~` | contém |
-| `^=` | prefixo |
-| `!=` | nenhum argumento é igual |
+| `=` | exact equality |
+| `~` | contains |
+| `^=` | prefix |
+| `!=` | no arguments are the same |
 
 Multiple predicates within a filter are conjunction (logical AND).
 
@@ -281,12 +281,12 @@ Multiple predicates within a filter are conjunction (logical AND).
 
 The `code` of a `Diagnostic` is **public interface**: an agent consuming the output branches through it. Therefore, the format is fixed, `NGX-` followed by four digits, and the allocation is by range:
 
-| Faixa | Domínio |
+| Range | Domain |
 |---|---|
-| `0001`–`0009` | genéricos, alinhados ao exit code de mesmo número |
-| `0100`–`0199` | configuração e parse |
-| `0200`–`0299` | transporte e SSH |
-| `0300`–`0399` | atualização e distribuição |
+| `0001`–`0009` | generic, aligned to the exit code of the same number |
+| `0100`–`0199` | configuration and parse |
+| `0200`–`0299` | transport and SSH |
+| `0300`–`0399` | update and distribution |
 
 **The severity is never included in the code.** `Diagnostic` already has the `severity` field; repeating the information as a prefix (`NGX-W001`, `NGX-E001`) creates two sources of truth that may disagree, and forces the consumer to *parse* the string to discover something that is already structured.
 
@@ -321,13 +321,13 @@ JSON is the default when stdout is not TTY; `--human` and `--json` force.
 
 v0.1 only emits the codes that its commands can produce:
 
-| Código | Significado |
+| Code | Meaning |
 |---|---|
-| 0 | sucesso |
-| 1 | erro interno / IO |
-| 2 | erro de uso (flag inválida, seletor malformado) |
-| 3 | configuração inválida (`nginx -t` falhou) |
-| 7 | drift detectado |
+| 0 | success |
+| 1 | internal error/IO |
+| 2 | usage error (invalid flag, malformed selector) |
+| 3 | invalid configuration (`nginx -t` failed) |
+| 7 | drift detected |
 | 9 | `config_hash` divergente do ID apresentado |
 
 Codes 4, 5, 6 and 8 belong to commands that do not yet exist and are not
@@ -434,15 +434,15 @@ disk. When there is content comparison, it is between normalized trees.
 `--profile`.Global flags as per §4.1 of the spec: `--config/-c`, `--json`, `--human`,
 `--quiet/-q`, `--no-color`, `--nginx-bin`, `--nginx-version`, `--timeout`,
 
-| Comando | Contrato | Exit |
+| Command | Contract | Exit |
 |---|---|---|
-| `status` | estado de runtime + drift | 0, ou 7 se drift |
-| `inspect` | runtime + árvore completa + resumo | 0, 3 |
-| `get <seletor>` | subconjunto da árvore; seletor obrigatório | 0, 2 se malformado, 9 se hash divergente |
-| `tree` | hierarquia resumida de server/location/upstream com IDs | 0 |
-| `fmt` | formata; `--check` não escreve, `--write` escreve | 0, ou 7 com `--check` se houver diferença |
-| `test` | wrapper estruturado de `nginx -t` | 0, 3 |
-| `diff` | drift textual e/ou o que `fmt` mudaria | 0, ou 7 se houver diferença |
+| `status` | runtime state + drift | 0, or 7 if drift |
+| `inspect` | runtime + full tree + summary | 0, 3 |
+| `get <seletor>` | subset of the tree; mandatory selector | 0, 2 if malformed, 9 if hash divergent |
+| `tree` | summarized server/location/upstream hierarchy with IDs | 0 |
+| `fmt` | format; `--check` does not write, `--write` writes | 0, or 7 with `--check` if there is a difference |
+| `test` | structured wrapper of `nginx -t` | 0, 3 |
+| `diff` | textual drift and/or what `fmt` would change | 0, or 7 if there is a difference |
 
 `get` without selector is a usage error, not a total dump — consistent with the principle of
 context economy, and anticipates the restriction that the MCP will make mandatory.
@@ -531,13 +531,13 @@ and would treat them as server configuration.
 
 v0.1 dependencies:
 
-| Uso | Pacote |
+| Use | Package |
 |---|---|
-| parse de configuração | `github.com/nginxinc/nginx-go-crossplane` |
+| configuration parse | `github.com/nginxinc/nginx-go-crossplane` |
 | CLI | `github.com/spf13/cobra` |
-| configuração do ngx | `github.com/knadh/koanf` |
+| ngx configuration | `github.com/knadh/koanf` |
 | diff | `github.com/hexops/gotextdiff` |
-| testes | `github.com/stretchr/testify` |
+| tests | `github.com/stretchr/testify` |
 
 ---
 
@@ -545,15 +545,15 @@ v0.1 dependencies:
 
 Registered so that the spec can be updated.
 
-| # | Ponto | Divergência |
+| # | Point | Divergence |
 |---|---|---|
-| 1 | §3.2 `config_loaded_hash` | Não é obtenível: `nginx -T` lê do disco, não da memória do master. Substituído pelo modelo de evidência (D4). |
-| 2 | §3.1 IDs | Ancorados em `config_hash`, com rejeição explícita quando o hash diverge (D3). |
-| 3 | §5 gramática | Quatro ambiguidades resolvidas por regra explícita (R1–R4). |
-| 4 | §6 exit codes | A v0.1 documenta apenas os códigos que emite. |
-| 5 | §13 `redact` | Os três formatos unificados num único matcher; `**.` aceito como redundante. |
-| 6 | §14 redação | Adicionado: `--no-redact` recusado quando stdout não é TTY. |
-| 7 | roadmap v0.1 | `diff` reinterpretado como drift + formatação, já que não há mutação nesta versão. |
+| 1 | §3.2 `config_loaded_hash` | Not obtainable: `nginx -T` reads from disk, not from master memory. Replaced by evidence model (D4). |
+| 2 | §3.1 IDs | Anchored in `config_hash`, with explicit rejection when the hash diverges (D3). |
+| 3 | §5 grammar | Four ambiguities resolved by explicit rule (R1–R4). |
+| 4 | §6 exit codes | v0.1 only documents the codes it issues. |
+| 5 | §13 `redact` | The three formats unified in a single matcher; `**.` accepted as redundant. |
+| 6 | §14 writing | Added: `--no-redact` refused when stdout is not TTY. |
+| 7 | v0.1 roadmap | `diff` reinterpreted as drift + formatting, since there is no mutation in this version. |
 
 ---
 

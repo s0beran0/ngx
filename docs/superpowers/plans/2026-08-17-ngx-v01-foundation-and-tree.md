@@ -56,8 +56,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Um agente consumindo a saída faz `.diagnostics.length`. Uma lista nula
-// quebra esse acesso, então lista vazia precisa serializar como [].
+// An agent consuming the output does `.diagnostics.length`. A null list
+// breaks this access, so empty list needs to serialize as [].
 func TestEnvelopeSerializaDiagnosticsVaziosComoArray(t *testing.T) {
 	env := output.New("status")
 
@@ -76,12 +76,12 @@ func TestEnvelopeNasceOK(t *testing.T) {
 	require.NotEmpty(t, env.NgxVersion)
 }
 
-// A severidade error é o que derruba o ok do envelope. Warning e info não.
+// The error severity is what knocks the ok out of the envelope. Warning and info no.
 func TestAddDiagnosticErrorDerrubaOK(t *testing.T) {
 	env := output.New("test")
 
 	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityWarning, Message: "cuidado"})
-	require.True(t, env.OK, "warning nao deve derrubar ok")
+	require.True(t, env.OK, "a warning must not bring ok down")
 
 	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityError, Message: "falhou"})
 	require.False(t, env.OK, "error deve derrubar ok")
@@ -89,7 +89,7 @@ func TestAddDiagnosticErrorDerrubaOK(t *testing.T) {
 	require.Len(t, env.Diagnostics, 2)
 }
 
-// Campos opcionais ausentes nao devem poluir a saida do agente.
+// Missing optional fields should not pollute the agent's output.
 func TestDiagnosticOmiteCamposVazios(t *testing.T) {
 	b, err := json.Marshal(output.Diagnostic{
 		Severity: output.SeverityError,
@@ -115,15 +115,15 @@ Expected: FAIL — package `internal/output` does not exist yet.
 Create `internal/output/envelope.go`:
 
 ```go
-// Package output define o envelope de saida do ngx, os diagnosticos e a
-// traducao de erro para exit code. E a unica camada que serializa.
+// Package output defines the ngx output envelope, the diagnostics and the
+// error translation for exit code. It is the only layer that serializes.
 package output
 
-// Version e a versao do ngx. Sobrescrita no build via -ldflags.
+// Version is the version of ngx. Overridden in build via -ldflags.
 var Version = "0.1.0-dev"
 
 // Severity classifica um diagnostico. Apenas SeverityError derruba o ok
-// do envelope.
+// of the envelope.
 type Severity string
 
 const (
@@ -132,8 +132,8 @@ const (
 	SeverityInfo    Severity = "info"
 )
 
-// Diagnostic e um achado localizado. Os campos selector e id existem para
-// que o agente aja sobre o achado sem reparsear a configuracao.
+// Diagnosis is a localized finding. The selector and id fields exist to
+// that the agent acts on the finding without reviewing the configuration.
 type Diagnostic struct {
 	Severity Severity `json:"severity"`
 	Code     string   `json:"code"`
@@ -147,14 +147,14 @@ type Diagnostic struct {
 }
 
 // Meta carrega dados sobre a execucao. ConfigHash ancora os IDs devolvidos
-// nesta resposta: um ID so e valido contra o hash que veio junto com ele.
+// in this answer: an ID is only valid against the hash that came with it.
 type Meta struct {
 	DurationMS   int64  `json:"duration_ms"`
 	NginxVersion string `json:"nginx_version,omitempty"`
 	ConfigHash   string `json:"config_hash,omitempty"`
 }
 
-// Envelope e o formato unico de toda saida JSON do ngx.
+// Envelope is the unique format of all JSON output from ngx.
 type Envelope struct {
 	OK          bool         `json:"ok"`
 	Command     string       `json:"command"`
@@ -164,7 +164,7 @@ type Envelope struct {
 	Meta        Meta         `json:"meta"`
 }
 
-// New cria um envelope de sucesso para o comando dado.
+// New creates a success envelope for the given command.
 func New(command string) *Envelope {
 	return &Envelope{
 		OK:          true,
@@ -226,7 +226,7 @@ func TestCodeOfNilEhSucesso(t *testing.T) {
 	require.Equal(t, output.ExitOK, output.CodeOf(nil))
 }
 
-// Um erro que nao carrega codigo e um erro interno, nao um sucesso.
+// An error that does not load code is an internal error, not a success.
 func TestCodeOfErroDesconhecidoEhInterno(t *testing.T) {
 	require.Equal(t, output.ExitInternal, output.CodeOf(errors.New("boom")))
 }
@@ -251,7 +251,7 @@ func TestConstrutoresCarregamSeuCodigo(t *testing.T) {
 	}
 }
 
-// O codigo precisa sobreviver ao wrapping, senao um erro embrulhado por uma
+// The code needs to survive wrapping, otherwise it is an error wrapped in a
 // camada intermediaria vira exit 1 silenciosamente.
 func TestCodeOfAtravessaWrapping(t *testing.T) {
 	err := fmt.Errorf("ao carregar configuracao: %w", output.Usage("flag invalida"))
@@ -270,8 +270,8 @@ func TestErroExpoeDiagnostico(t *testing.T) {
 	require.Contains(t, e.Diag.Message, "http..server")
 }
 
-// HashMismatch e o erro que impede o agente de agir sobre um ID envelhecido.
-// A mensagem precisa mostrar os dois hashes para ele saber o que aconteceu.
+// HashMismatch is the error that prevents the agent from acting on an aged ID.
+// The message needs to show both hashes so he knows what happened.
 func TestHashMismatchMostraOsDoisHashes(t *testing.T) {
 	err := output.HashMismatch("sha256:esperado", "sha256:atual")
 
@@ -297,9 +297,9 @@ import (
 	"fmt"
 )
 
-// ExitCode e o codigo de saida do processo. A v0.1 emite apenas os codigos
+// ExitCode is the process exit code. v0.1 only issues the codes
 // abaixo; 4 (lint), 5 e 6 (apply) e 8 (mutacao ambigua) pertencem a comandos
-// que ainda nao existem e nao sao documentados como suportados ate que sejam
+// that do not yet exist and are not documented as supported until they are
 // emitiveis.
 type ExitCode int
 
@@ -312,7 +312,7 @@ const (
 	ExitHashMismatch  ExitCode = 9
 )
 
-// Error e um erro que carrega seu proprio exit code e o diagnostico
+// Error is an error that carries its own exit code and diagnoses it
 // correspondente. Comandos nunca escolhem exit code diretamente: eles
 // devolvem um destes, e main.go traduz num unico ponto.
 type Error struct {
@@ -342,32 +342,32 @@ func Usage(format string, args ...any) *Error {
 	return newError(ExitUsage, "NGX-0002", format, args...)
 }
 
-// InvalidConfig sinaliza que a configuracao do nginx nao e valida.
+// InvalidConfig signals that the nginx configuration is not valid.
 func InvalidConfig(format string, args ...any) *Error {
 	return newError(ExitInvalidConfig, "NGX-0003", format, args...)
 }
 
-// Drift sinaliza que a configuracao em disco difere da que esta carregada.
+// Drift signals that the configuration on disk is different from the one loaded.
 func Drift(format string, args ...any) *Error {
 	return newError(ExitDrift, "NGX-0007", format, args...)
 }
 
-// HashMismatch sinaliza que um ID foi apresentado contra uma versao da
-// configuracao diferente daquela em que foi gerado. Os IDs anteriores sao
-// invalidos e o agente precisa reler antes de agir.
+// HashMismatch signals that an ID has been presented against a version of the
+// configuration different from the one in which it was generated. The previous IDs are
+// invalid and the agent needs to reread it before acting.
 func HashMismatch(esperado, atual string) *Error {
 	return newError(ExitHashMismatch, "NGX-0009",
 		"a configuracao mudou desde a leitura: esperado %s, atual %s", esperado, atual)
 }
 
-// Internal envolve uma falha de IO ou um defeito do proprio ngx.
+// Internal involves an IO failure or a defect in ngx itself.
 func Internal(err error, format string, args ...any) *Error {
 	e := newError(ExitInternal, "NGX-0001", format, args...)
 	e.Err = err
 	return e
 }
 
-// CodeOf extrai o exit code de um erro, atravessando wrapping. Um erro sem
+// Code Of extracts the exit code from an iron, going through wrapping. An error without
 // codigo e tratado como falha interna, nunca como sucesso.
 func CodeOf(err error) ExitCode {
 	if err == nil {
@@ -418,8 +418,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A spec usa tres formatos para a mesma coisa. Todos precisam funcionar como
-// escritos, para que uma configuracao copiada da spec nao falhe em silencio.
+// The spec uses three formats for the same thing. Everyone needs to function as
+// written, so that a configuration copied from the spec does not fail silently.
 func TestParseRedactRuleAceitaOsTresFormatosDaSpec(t *testing.T) {
 	casos := []struct {
 		entrada     string
@@ -460,9 +460,9 @@ func TestRuleComPrefixoDeArgsExigeOsArgs(t *testing.T) {
 
 	require.True(t, r.Matches("proxy_set_header", []string{"Authorization", "Bearer xyz"}))
 	require.False(t, r.Matches("proxy_set_header", []string{"Host", "$host"}),
-		"outro header nao deve ser redigido")
+		"another header must not be redacted")
 	require.False(t, r.Matches("proxy_set_header", nil),
-		"sem args nao pode casar uma regra que exige prefixo")
+		"with no args it cannot match a rule that requires a prefix")
 }
 
 func TestRedactSetCasaQualquerRegra(t *testing.T) {
@@ -509,31 +509,31 @@ import (
 	"strings"
 )
 
-// RedactedValue substitui o valor de uma diretiva sensivel. A diretiva, o id
-// e a linha permanecem visiveis: sumir com o no inteiro faria o agente
-// concluir que a diretiva nao existe, o que e pior que esconder o valor.
+// RedactedValue overrides the value of a sensitive directive. The directive, the id
+// and the line remain visible: disappearing the entire node would make the agent
+// conclude that the directive does not exist, which is worse than hiding the value.
 const RedactedValue = "***"
 
-// Redactable e implementado por qualquer dado que saiba produzir uma copia
-// redigida de si mesmo. A redacao acontece na serializacao, nunca na arvore
-// em memoria: se a arvore fosse redigida no parse, fmt gravaria *** dentro
-// do .conf do usuario.
+// Redactable and implemented by any data that knows how to produce a copy
+// written by yourself. Writing happens in serialization, never in the tree
+// in memory: if the tree were written in parse, fmt would write *** inside
+// from the user's .conf.
 type Redactable interface {
 	Redacted(rs RedactSet) any
 }
 
-// RedactRule casa uma diretiva pelo nome, opcionalmente exigindo um prefixo
+// RedactRule matches a directive by name, optionally requiring a prefix
 // de argumentos.
 type RedactRule struct {
 	Directive string
 	ArgPrefix []string
 }
 
-// ParseRedactRule le uma entrada de output.redact. Aceita os tres formatos
-// que a spec usa: nome de diretiva, nome com prefixo de argumentos, e o
-// prefixo de contexto "**." — que e redundante, porque regras ja valem em
-// qualquer contexto, mas e aceito para nao quebrar configuracoes escritas a
-// partir da spec.
+// ParseRedactRule reads an input from output.redact. Accepts all three formats
+// that the spec uses: directive name, name prefixed with arguments, and the
+// context prefix "**." — which is redundant, because rules already apply in
+// any context, but it is accepted to not break configurations written to
+// from the spec.
 func ParseRedactRule(s string) (RedactRule, error) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "**.")
 
@@ -565,7 +565,7 @@ func (r RedactRule) Matches(directive string, args []string) bool {
 	return true
 }
 
-// RedactSet e o conjunto de regras ativas.
+// RedactSet and the active rule set.
 type RedactSet struct {
 	rules []RedactRule
 }
@@ -655,7 +655,7 @@ func (dadoHumano) RenderHuman(w io.Writer) error {
 	return err
 }
 
-// Formato auto sem TTY tem que virar JSON: e o caso do agente lendo um pipe.
+// Auto format without TTY has to become JSON: what about the case of the agent reading a pipe.
 func TestFormatAutoSemTTYProduzJSON(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatAuto, IsTTY: false}
@@ -667,8 +667,8 @@ func TestFormatAutoSemTTYProduzJSON(t *testing.T) {
 	require.Equal(t, "status", env.Command)
 }
 
-// Com TTY e sem renderer humano no dado, cai para JSON indentado em vez de
-// imprimir a struct crua do Go.
+// With TTY and no human renderer in the data, it falls to indented JSON instead of
+// print the raw Go struct.
 func TestFormatAutoComTTYUsaRenderHumanQuandoDisponivel(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatAuto, IsTTY: true}
@@ -680,8 +680,8 @@ func TestFormatAutoComTTYUsaRenderHumanQuandoDisponivel(t *testing.T) {
 	require.Contains(t, buf.String(), "saida humana")
 }
 
-// O portao que a redacao existe para fechar: um humano no terminal pode ver o
-// segredo, um agente lendo o pipe nao consegue nem pedir.
+// The gate that the newsroom exists to close: a human at the terminal can see the
+// secret, an agent reading the pipe cannot even ask for it.
 func TestNoRedactEhRecusadoSemTTY(t *testing.T) {
 	var buf bytes.Buffer
 	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, NoRedact: true}
@@ -709,7 +709,7 @@ func TestNoRedactEhAceitoComTTY(t *testing.T) {
 	require.Contains(t, buf.String(), "/etc/ssl/priv.key")
 }
 
-// Sem --no-redact, o dado passa pela redacao antes de ser serializado.
+// Without --no-redact, the data goes through redacting before being serialized.
 func TestRenderAplicaRedacaoNoDado(t *testing.T) {
 	var buf bytes.Buffer
 	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
@@ -726,7 +726,7 @@ func TestRenderAplicaRedacaoNoDado(t *testing.T) {
 }
 
 // Quiet suprime a saida de sucesso mas nunca a de erro: um agente precisa
-// saber o que deu errado.
+// know what went wrong.
 func TestQuietSuprimeSucessoMasNaoErro(t *testing.T) {
 	var sucesso bytes.Buffer
 	r := &output.Renderer{Out: &sucesso, Format: output.FormatJSON, Quiet: true}
@@ -769,14 +769,14 @@ const (
 	FormatHuman Format = "human"
 )
 
-// HumanRenderable e implementado por dados que sabem se apresentar a um
-// humano. Dados que nao implementam caem para JSON indentado, que e mais
-// util que imprimir a struct crua do Go.
+// HumanRenderable is implemented by data that knows how to present itself to a
+// human. Data that does not implement falls to indented JSON, which is more
+// Useful to print the raw Go struct.
 type HumanRenderable interface {
 	RenderHuman(w io.Writer) error
 }
 
-// Renderer serializa o envelope. E a unica camada que escreve saida.
+// Renderer serializes the envelope. It is the only layer that writes output.
 type Renderer struct {
 	Out      io.Writer
 	Format   Format
@@ -786,7 +786,7 @@ type Renderer struct {
 	Quiet    bool
 }
 
-// Render escreve o envelope no formato resolvido.
+// Render writes the envelope in resolved format.
 func (r *Renderer) Render(env *Envelope) error {
 	if r.NoRedact && !r.IsTTY {
 		return Usage("--no-redact so e aceito quando a saida e um terminal")
@@ -917,7 +917,7 @@ func escreve(t *testing.T, dir, nome, conteudo string) string {
 	return p
 }
 
-// Sem nenhum arquivo, os defaults precisam ser utilizaveis por conta propria.
+// Without any files, the defaults need to be usable on their own.
 func TestLoadSemArquivosUsaDefaults(t *testing.T) {
 	dir := t.TempDir()
 
@@ -946,7 +946,7 @@ output:
 	require.Equal(t, "json", s.Output.Format)
 }
 
-// A regra da spec: o local sobrescreve o global, chave a chave.
+// The spec rule: the local overrides the global, key by key.
 func TestLocalSobrescreveGlobal(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -965,12 +965,12 @@ nginx:
 
 	require.NoError(t, err)
 	require.Equal(t, "/tmp/teste/nginx.conf", s.Nginx.Config, "local vence")
-	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary, "chave nao sobrescrita sobrevive")
+	require.Equal(t, "/usr/sbin/nginx", s.Nginx.Binary, "a key that was not overridden survives")
 	require.Equal(t, "json", s.Output.Format)
 }
 
-// Um arquivo escrito a partir da spec completa contem chaves de versoes
-// futuras. Elas precisam ser ignoradas, nao virar erro.
+// A file written from the full spec contains version keys
+// future ones. They need to be ignored, not become a mistake.
 func TestChavesDeVersoesFuturasSaoIgnoradas(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -1004,7 +1004,7 @@ func TestYAMLInvalidoVirarErro(t *testing.T) {
 }
 
 // Se o usuario declara redact, a lista dele substitui a default em vez de
-// somar — senao ele nao consegue remover uma regra padrao.
+// add — otherwise it cannot remove a standard rule.
 func TestRedactDeclaradoSubstituiODefault(t *testing.T) {
 	dir := t.TempDir()
 	global := escreve(t, dir, "global.yaml", `
@@ -1030,9 +1030,9 @@ Expected: FAIL — package does not exist.
 Create `internal/settings/settings.go`:
 
 ```go
-// Package settings carrega o arquivo de configuracao do proprio ngx.
-// A v0.1 le apenas o subconjunto que seus comandos usam; chaves de versoes
-// futuras sao ignoradas sem erro, para que um arquivo escrito a partir da
+// Package settings loads the ngx configuration file itself.
+// v0.1 only reads the subset that your commands use; version keys
+// future ones are ignored without error, so that a file written from the
 // spec completa funcione hoje.
 package settings
 
@@ -1046,7 +1046,7 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
-// Nginx aponta para o binario e a configuracao principal.
+// Nginx points to the binary and main configuration.
 type Nginx struct {
 	Binary string `koanf:"binary"`
 	Config string `koanf:"config"`
@@ -1058,15 +1058,15 @@ type Output struct {
 	Redact []string `koanf:"redact"`
 }
 
-// Settings e a configuracao efetiva do ngx.
+// Settings is the effective configuration of ngx.
 type Settings struct {
 	Nginx  Nginx  `koanf:"nginx"`
 	Output Output `koanf:"output"`
 }
 
-// Defaults devolve a configuracao usada quando nenhum arquivo existe. A
-// redacao vem ligada: sem ela, um get pode vazar caminho de chave privada
-// para dentro do contexto de um LLM rodando em API de terceiro.
+// Defaults returns the configuration used when no file exists. The
+// wording is connected: without it, a get can leak private key path
+// into the context of an LLM running on a third-party API.
 func Defaults() *Settings {
 	return &Settings{
 		Output: Output{
@@ -1080,8 +1080,8 @@ func Defaults() *Settings {
 	}
 }
 
-// Load funde o arquivo global com o local, com o local vencendo chave a
-// chave. Arquivo ausente nao e erro.
+// Load merges the global file with the local one, with the local winning key
+// key. Missing file is not an error.
 func Load(globalPath, localPath string) (*Settings, error) {
 	k := koanf.New(".")
 
@@ -1116,7 +1116,7 @@ Expected: PASS — 6 tests.
 
 ```bash
 git add internal/settings/ go.mod go.sum
-git commit -m "feat(settings): carregamento do arquivo de configuracao do ngx"
+git commit -m "feat(settings): load the ngx configuration file"
 ```
 
 ---
@@ -1170,7 +1170,7 @@ func TestComandoDesconhecidoProduzExitDeUso(t *testing.T) {
 }
 
 // --json e --human sao mutuamente exclusivos; pedir os dois e erro de uso,
-// nao uma precedencia silenciosa.
+// not a silent precedence.
 func TestJSONEHumanJuntosSaoErroDeUso(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -1192,8 +1192,8 @@ func TestVersionSaiNoEnvelopeJSONSemTTY(t *testing.T) {
 	require.Equal(t, "version", env.Command)
 }
 
-// O erro precisa sair no envelope, no stdout, para o agente conseguir ler.
-// Escrever so no stderr obrigaria o agente a capturar dois streams.
+// The error needs to appear in the envelope, on stdout, for the agent to be able to read it.
+// Writing only to stderr would force the agent to capture two streams.
 func TestErroDeExecucaoSaiNoEnvelope(t *testing.T) {
 	var out, errBuf bytes.Buffer
 
@@ -1219,7 +1219,7 @@ Create `internal/cli/root.go`:
 
 ```go
 // Package cli monta a arvore de comandos. Comandos produzem valores e erros
-// tipados; a formatacao e o exit code sao responsabilidade de output.
+// typed; formatting and exit code are the responsibility of output.
 package cli
 
 import (
@@ -1231,13 +1231,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Caminhos padrao do arquivo de configuracao do proprio ngx.
+// Default paths to ngx's own configuration file.
 const (
 	GlobalSettingsPath = "/etc/ngx/ngx.yaml"
 	LocalSettingsPath  = ".ngx/config.yaml"
 )
 
-// GlobalFlags espelha as flags globais da spec.
+// GlobalFlags mirrors the spec's global flags.
 type GlobalFlags struct {
 	ConfigPath   string
 	JSON         bool
@@ -1251,7 +1251,7 @@ type GlobalFlags struct {
 	NoRedact     bool
 }
 
-// Context carrega o que todo comando precisa.
+// Context carries what every command needs.
 type Context struct {
 	Flags    *GlobalFlags
 	Settings *settings.Settings
@@ -1259,8 +1259,8 @@ type Context struct {
 	Command  string
 }
 
-// Execute roda o CLI e devolve o exit code. Nunca chama os.Exit: isso e
-// responsabilidade de main, o que mantem o CLI inteiro testavel.
+// Execute runs the CLI and returns the exit code. Never calls os.Exit: this and
+// responsibility of main, which keeps the entire CLI testable.
 func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCode {
 	flags := &GlobalFlags{}
 	ctx := &Context{
@@ -1278,7 +1278,7 @@ func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCod
 		return output.ExitOK
 	}
 
-	// Cobra devolve erro cru para flag e comando invalidos; tratamos como uso.
+	// Cobra returns raw error for invalid flag and command; We treat it as usage.
 	if _, ok := err.(*output.Error); !ok {
 		err = output.Usage("%s", err.Error())
 	}
@@ -1304,14 +1304,14 @@ func renderErro(ctx *Context, stdout io.Writer, isTTY bool, err error) {
 	if r == nil {
 		r = &output.Renderer{Out: stdout, IsTTY: isTTY}
 	}
-	// Um erro nunca e suprimido por --quiet nem bloqueado pelo portao de
-	// --no-redact: o agente precisa saber o que deu errado.
+	// An error is never suppressed by --quiet nor blocked by the security gate.
+	// --no-redact: the agent needs to know what went wrong.
 	r.Quiet = false
 	r.NoRedact = false
 	_ = r.Render(env)
 }
 
-// NewRoot monta o comando raiz com as flags globais.
+// NewRoot mounts the root command with global flags.
 func NewRoot(ctx *Context) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "ngx",
@@ -1333,7 +1333,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.StringVar(&f.NginxBin, "nginx-bin", "", "caminho do binario do nginx")
 	p.StringVar(&f.NginxVersion, "nginx-version", "", "assume esta versao do nginx")
 	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout das operacoes")
-	p.StringVar(&f.Profile, "profile", "", "perfil do arquivo de configuracao do ngx")
+	p.StringVar(&f.Profile, "profile", "", "profile of the ngx configuration file")
 	p.BoolVar(&f.NoRedact, "no-redact", false, "mostra valores sensiveis (so em terminal)")
 
 	root.AddCommand(newVersionCmd(ctx))
@@ -1408,10 +1408,10 @@ func asNgxError(err error, target **output.Error) bool {
 	return errors.As(err, target)
 }
 
-// comandoDe devolve o nome do comando que estava executando, para que o
-// envelope de erro identifique a operacao que falhou. Antes de o cobra
-// resolver o comando — flag global invalida, por exemplo — nao ha nome, e o
-// fallback e o proprio binario.
+// commandFrom returns the name of the command that was executing, so that the
+// error envelope identifies the operation that failed. Before the snake
+// resolve the command — global flag invalidates, for example — there is no name, and the
+// fallback is the binary itself.
 func comandoDe(ctx *Context) string {
 	if ctx == nil || ctx.Command == "" {
 		return "ngx"
@@ -1423,8 +1423,8 @@ func comandoDe(ctx *Context) string {
 Create `cmd/ngx/main.go`:
 
 ```go
-// Command ngx e o ponto de entrada. A unica responsabilidade aqui e o wiring
-// e a traducao do exit code.
+// Command ngx and the entry point. The only responsibility here is the wiring
+// and the translation of the exit code.
 package main
 
 import (
@@ -1547,7 +1547,7 @@ func TestParseProduzUmArquivoComFonte(t *testing.T) {
 	tree := parseSimples(t)
 
 	require.Len(t, tree.Files, 1)
-	require.NotEmpty(t, tree.Files[0].Source, "a fonte original precisa ser guardada para os spans")
+	require.NotEmpty(t, tree.Files[0].Source, "the original source has to be kept for the spans")
 	require.Contains(t, tree.Files[0].Path, "simples.conf")
 }
 
@@ -1618,8 +1618,8 @@ func TestParseArquivoInexistenteVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
-// A redacao acontece na saida: a arvore em memoria mantem o valor real, senao
-// fmt gravaria *** dentro do .conf do usuario.
+// The redaction happens at the exit: the tree in memory maintains the real value, otherwise
+// fmt would write *** into the user's .conf.
 func TestArvoreEmMemoriaNaoEhRedigida(t *testing.T) {
 	tree := parseSimples(t)
 
@@ -1645,30 +1645,30 @@ Expected: FAIL — package does not exist.
 Create `internal/config/node.go`:
 
 ```go
-// Package config e a representacao canonica da configuracao do nginx: a
-// arvore semantica vem do nginx-go-crossplane, os offsets de byte vem do
+// Package config is the canonical representation of nginx configuration: a
+// semantic tree comes from nginx-go-crossplane, byte offsets come from
 // tokenizador deste pacote, e as duas sao casadas por sequencia de tokens.
 package config
 
-// Span e um intervalo de bytes no arquivo de origem, com End exclusivo.
+// Span is a range of bytes in the source file, with unique End.
 type Span struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
 }
 
-// Len devolve o tamanho do intervalo em bytes.
+// Len returns the size of the range in bytes.
 func (s Span) Len() int { return s.End - s.Start }
 
-// Origin registra de onde um no veio depois de resolver include.
+// Origin records where a no came from after resolving include.
 type Origin struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
 }
 
-// Node e uma diretiva. Span cobre a diretiva inteira, incluindo o bloco e o
+// Node is a directive. Span covers the entire directive, including the block and the
 // delimitador final; HeadSpan cobre apenas o nome e os argumentos. Ter os
-// dois e o que torna a edicao da v0.2 uma substituicao de bytes em vez de
-// uma re-renderizacao do arquivo.
+// two is what makes the v0.2 edit a byte replacement rather than
+// a re-render of the file.
 type Node struct {
 	Directive string   `json:"directive"`
 	Args      []string `json:"args"`
@@ -1682,34 +1682,34 @@ type Node struct {
 	Block     []*Node  `json:"block,omitempty"`
 	Origin    *Origin  `json:"origin,omitempty"`
 
-	// temBloco distingue "server {}" de "server;". O campo Block nao serve
-	// para isso: um bloco vazio e uma slice vazia, indistinguivel de nil
-	// depois da serializacao.
+	// temBloco distinguishes "server {}" from "server;". The Block field does not work
+	// for this: an empty block and an empty slice, indistinguishable from nil
+	// after serialization.
 	temBloco bool
 }
 
-// IsComment informa se o no representa um comentario.
+// IsComment informs whether the no represents a comment.
 func (n *Node) IsComment() bool { return n.Directive == "#" }
 
-// HasBlock informa se o no abre um bloco, inclusive vazio.
+// HasBlock informs whether no opens a block, including an empty one.
 func (n *Node) HasBlock() bool { return n.temBloco }
 
-// File e um arquivo de configuracao com sua fonte original preservada. A
-// fonte e necessaria para que os spans possam ser resolvidos em texto.
+// File is a configuration file with its original source preserved. THE
+// font is necessary so that spans can be resolved into text.
 type File struct {
 	Path   string  `json:"file"`
 	Source []byte  `json:"-"`
 	Nodes  []*Node `json:"parsed"`
 }
 
-// Tree e o resultado completo de um parse.
+// Tree and the complete result of a parse.
 type Tree struct {
 	Files []*File `json:"config"`
 	Hash  string  `json:"-"`
 }
 
 // Walk percorre a arvore em pre-ordem. Se fn devolver false, os filhos
-// daquele no sao pulados.
+// from that they are not skipped.
 func (t *Tree) Walk(fn func(*Node) bool) {
 	for _, f := range t.Files {
 		walkNodes(f.Nodes, fn)
@@ -1741,8 +1741,8 @@ import (
 	crossplane "github.com/nginxinc/nginx-go-crossplane"
 )
 
-// ParseOptions controla a leitura. Open existe para permitir testes com
-// filesystem em memoria, sem tocar disco.
+// ParseOptions controls the reading. Open exists to allow testing with
+// filesystem in memory, without touching disk.
 type ParseOptions struct {
 	Path string
 	Open func(path string) (io.ReadCloser, error)
@@ -1755,10 +1755,10 @@ func (o ParseOptions) abrir(path string) (io.ReadCloser, error) {
 	return os.Open(path)
 }
 
-// Parse le a configuracao e devolve a arvore canonica. Cada arquivo e
+// Parse reads the configuration and returns the canonical tree. Each file is
 // parseado separadamente, preservando sua fonte: a resolucao de include e
-// uma view construida sobre esta arvore, nao uma concatenacao previa, para
-// que os spans continuem apontando para offsets reais de arquivos reais.
+// a view built on this tree, not a previous concatenation, to
+// that the spans continue to point to real offsets of real files.
 func Parse(opts ParseOptions) (*Tree, error) {
 	payload, err := crossplane.Parse(opts.Path, &crossplane.ParseOptions{
 		ParseComments:             true,
@@ -1867,8 +1867,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A invariante que sustenta todo o resto: o texto entre Start e End precisa
-// ser exatamente o Raw do token. Se isso vale, os spans sao confiaveis.
+// The invariant that supports everything else: the text between Start and End needs
+// be exactly the Raw of the token. If that's true, the spans are trustworthy.
 func TestTokenSpansApontamParaOTextoOriginal(t *testing.T) {
 	src := []byte("server {\n    listen 443 ssl;\n}\n")
 
@@ -1900,8 +1900,8 @@ func TestTokenizeSeparaDelimitadores(t *testing.T) {
 	}, kinds)
 }
 
-// Aspas escondem ; e { do tokenizador. Errar isso quebra o alinhamento
-// inteiro no primeiro add_header com ponto e virgula dentro.
+// Quotes hide; and { from the tokenizer. Getting this wrong breaks the alignment
+// integer in the first add_header with a semicolon inside.
 func TestAspasProtegemDelimitadores(t *testing.T) {
 	src := []byte(`add_header X-A "b; c { d }";`)
 
@@ -1954,7 +1954,7 @@ func TestLinhaEColunaSaoBaseUm(t *testing.T) {
 	require.Equal(t, 1, toks[0].Line)
 	require.Equal(t, 1, toks[0].Column)
 
-	// "listen" comeca na segunda linha, apos quatro espacos.
+	// "listen" starts on the second line, after four spaces.
 	require.Equal(t, "listen", toks[2].Value)
 	require.Equal(t, 2, toks[2].Line)
 	require.Equal(t, 5, toks[2].Column)
@@ -1966,7 +1966,7 @@ func TestAspasNaoFechadasVirarErro(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Cobertura: todo byte que nao e espaco em branco pertence a algum token.
+// Coverage: every byte that is not white space belongs to some token.
 func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("testdata", "simples.conf"))
 	require.NoError(t, err)
@@ -1989,7 +1989,7 @@ func TestTokensCobremTodoByteSignificativo(t *testing.T) {
 			continue
 		}
 		require.True(t, unicode.IsSpace(rune(b)),
-			"byte %d (%q) nao coberto e nao e espaco", i, string(b))
+			"byte %d (%q) is not covered and is not whitespace", i, string(b))
 	}
 }
 ```
@@ -2005,9 +2005,9 @@ import (
 	"github.com/s0beran0/ngx/internal/config"
 )
 
-// O fuzz garante que, para qualquer entrada que o tokenizador aceite, os
-// spans continuam apontando para o texto real e em ordem crescente. E a rede
-// que sustenta a edicao cirurgica da v0.2.
+// The fuzz ensures that for any input the tokenizer accepts, the
+// spans continue to point to the actual text and in ascending order. And the network
+// which underpins the surgical edition of v0.2.
 func FuzzTokenizeSpans(f *testing.F) {
 	f.Add("server { listen 80; }")
 	f.Add(`add_header X "a; b";`)
@@ -2027,7 +2027,7 @@ func FuzzTokenizeSpans(f *testing.F) {
 				t.Fatalf("token comeca em %d, antes do fim anterior %d", tok.Start, prev)
 			}
 			if tok.End > len(s) || tok.Start > tok.End {
-				t.Fatalf("span invalido [%d,%d) para fonte de %d bytes", tok.Start, tok.End, len(s))
+				t.Fatalf("invalid span [%d,%d) for a source of %d bytes", tok.Start, tok.End, len(s))
 			}
 			if got := s[tok.Start:tok.End]; got != tok.Raw {
 				t.Fatalf("raw %q difere da fonte %q em [%d,%d)", tok.Raw, got, tok.Start, tok.End)
@@ -2067,8 +2067,8 @@ const (
 	TokenComment
 )
 
-// Token e um lexema com sua posicao exata em bytes. Value e o conteudo
-// semantico (sem aspas, sem o # do comentario); Raw e o texto original.
+// Token is a lexeme with its exact position in bytes. Value and content
+// semantic (without quotes, without the # of the comment); Raw and the original text.
 type Token struct {
 	Kind   TokenKind
 	Value  string
@@ -2088,7 +2088,7 @@ type tokenizer struct {
 	tokens []Token
 }
 
-// Tokenize quebra a fonte em tokens com offsets de byte. Nao interpreta
+// Tokenize breaks the source into tokens with byte offsets. Does not interpret
 // diretiva nenhuma: so precisa saber onde cada lexema comeca e termina,
 // respeitando aspas, escapes e comentarios.
 func Tokenize(src []byte) ([]Token, error) {
@@ -2169,7 +2169,7 @@ func (t *tokenizer) lerAspas(aspa byte, start, line, col int) error {
 			t.avancar()
 		}
 	}
-	return fmt.Errorf("aspa %q aberta na linha %d nao foi fechada", string(aspa), line)
+	return fmt.Errorf("quote %q opened on line %d was never closed", string(aspa), line)
 }
 
 func (t *tokenizer) lerPalavra(start, line, col int) error {
@@ -2311,7 +2311,7 @@ func TestSpanDeBlocoTerminaNaChaveDeFechamento(t *testing.T) {
 	require.Contains(t, texto, "server 10.0.0.1:8080;")
 
 	require.Equal(t, "upstream backend_v1", string(src[upstream.HeadSpan.Start:upstream.HeadSpan.End]),
-		"o head nao inclui o bloco")
+		"the head does not include the block")
 }
 
 func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
@@ -2334,7 +2334,7 @@ func TestLinhaEColunaVemDoTokenizador(t *testing.T) {
 	require.Contains(t, linhas[serverName.Line-1], "server_name")
 }
 
-// Aspas contendo ponto e virgula sao o caso que quebra um alinhamento ingenuo.
+// Quotes containing semicolons are the case that breaks a naive alignment.
 func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
 	tree := parseSimples(t)
 	src := tree.Files[0].Source
@@ -2352,7 +2352,7 @@ func TestAlinhamentoSobreviveAAspasComPontoEVirgula(t *testing.T) {
 	require.Equal(t, `add_header X-A "b; c";`, string(src[addHeader.Span.Start:addHeader.Span.End]))
 }
 
-// Invariante de contencao: o span de um filho vive dentro do span do pai.
+// Containment invariant: a child's span lives inside the parent's span.
 func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
 	tree := parseSimples(t)
 
@@ -2378,8 +2378,8 @@ func TestSpansDeFilhosEstaoContidosNoPai(t *testing.T) {
 	}
 }
 
-// Cobertura: todo byte significativo do arquivo pertence ao span de algum no
-// de nivel raiz. E a formulacao concreta da propriedade que sustenta a
+// Coverage: every significant byte of the file belongs to the span of some node.
+// root level. And the concrete formulation of the property that supports the
 // arquitetura: se ela vale, o casamento token-arvore esta correto.
 func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 	tree := parseSimples(t)
@@ -2397,7 +2397,7 @@ func TestSpansRaizCobremTodoByteSignificativo(t *testing.T) {
 			continue
 		}
 		require.True(t, b == ' ' || b == '\t' || b == '\n' || b == '\r',
-			"byte %d (%q) na linha nao coberta nao e espaco", i, string(b))
+			"byte %d (%q) on the uncovered line is not whitespace", i, string(b))
 	}
 }
 
@@ -2430,12 +2430,12 @@ package config
 
 import "fmt"
 
-// alinhar casa a arvore semantica vinda do crossplane com os tokens do
+// align matches the semantic tree coming from the crossplane with the tokens from the
 // arquivo, anexando offsets de byte a cada no.
 //
-// O casamento e por sequencia: o crossplane preserva a ordem do documento, e
-// com ParseComments ligado ate os comentarios sao nos da arvore. Entao um
-// unico percurso simultaneo resolve tudo — nao ha busca nem heuristica.
+// The match is sequential: the crossplane preserves the order of the document, and
+// with ParseComments turned on until the comments are in the tree. So one
+// A single simultaneous path solves everything — there is no search or heuristics.
 func alinhar(f *File) error {
 	toks, err := Tokenize(f.Source)
 	if err != nil {
@@ -2496,8 +2496,8 @@ func (a *aligner) no(n *Node) error {
 	}
 	n.HeadSpan = Span{nome.Start, fimDaCabeca}
 
-	// Olhar o proximo token e mais confiavel que inspecionar n.Block: um
-	// bloco vazio e indistinguivel de uma diretiva simples pelo campo Block.
+	// Looking at the next token is more reliable than inspecting no.Block: a
+	// empty block and indistinguishable from a simple directive by the Block field.
 	proximo, err := a.espiar()
 	if err != nil {
 		return err
@@ -2578,8 +2578,8 @@ Expected: PASS — all, including the 8 new lineup.
 Add to `internal/config/fuzz_test.go`:
 
 ```go
-// Alinhar nunca pode entrar em panico nem produzir span fora dos limites,
-// qualquer que seja a entrada que o crossplane tenha aceitado.
+// Align can never panic nor produce span out of bounds,
+// whatever input the crossplane accepted.
 func FuzzAlinhamento(f *testing.F) {
 	f.Add("server { listen 80; }")
 	f.Add("http { server { location / { proxy_pass http://a; } } }")
@@ -2597,11 +2597,11 @@ func FuzzAlinhamento(f *testing.F) {
 			return
 		}
 
-		for _, arquivo := range tree.Files {
+		for _, file := range tree.Files {
 			n := len(arquivo.Source)
 			tree.Walk(func(node *config.Node) bool {
 				if node.Span.Start < 0 || node.Span.End > n || node.Span.Start > node.Span.End {
-					t.Fatalf("span invalido [%d,%d) para fonte de %d bytes",
+					t.Fatalf("invalid span [%d,%d) for a source of %d bytes",
 						node.Span.Start, node.Span.End, n)
 				}
 				if node.HeadSpan.Start < node.Span.Start || node.HeadSpan.End > node.Span.End {
@@ -2666,7 +2666,7 @@ func parseTexto(t *testing.T, conteudo string) *config.Tree {
 	return tree
 }
 
-// Blocos de contexto do nivel raiz nao levam indice: ocorrem no maximo uma vez.
+// Root-level context blocks do not have an index: they occur at most once.
 func TestBlocosRaizNaoLevamIndice(t *testing.T) {
 	tree := parseTexto(t, "events {}\nhttp {}\n")
 
@@ -2685,8 +2685,8 @@ func TestServersSaoNumeradosEntreSi(t *testing.T) {
 	require.Equal(t, "h.s1", http.Block[1].ID)
 }
 
-// A regra que reduz a fragilidade: o indice conta entre irmaos do mesmo tipo,
-// nao por posicao absoluta. Inserir uma location nao renumera os servers.
+// The rule that reduces fragility: the index counts between siblings of the same type,
+// not by absolute position. Entering a location does not renumber the servers.
 func TestIndiceContaEntreIrmaosDoMesmoTipo(t *testing.T) {
 	tree := parseTexto(t, `http {
   upstream a { server 10.0.0.1; }
@@ -2717,7 +2717,7 @@ func TestDiretivasSimplesUsamPrefixoD(t *testing.T) {
 	require.Equal(t, "h.s0.l0", server.Block[2].ID, "location tem abreviacao propria")
 }
 
-// Comentarios nao recebem ID e nao contam no indice: se contassem, adicionar
+// Comments do not receive an ID and do not count in the index: if they did, add
 // um comentario renumeraria as diretivas ao redor.
 func TestComentariosNaoRecebemIDNemDeslocamIndices(t *testing.T) {
 	tree := parseTexto(t, `http {
@@ -2731,10 +2731,10 @@ func TestComentariosNaoRecebemIDNemDeslocamIndices(t *testing.T) {
 
 	server := tree.Files[0].Nodes[0].Block[0]
 
-	require.Empty(t, server.Block[0].ID, "comentario nao tem ID")
+	require.Empty(t, server.Block[0].ID, "a comment has no ID")
 	require.Equal(t, "h.s0.d0", server.Block[1].ID)
 	require.Empty(t, server.Block[2].ID)
-	require.Equal(t, "h.s0.d1", server.Block[3].ID, "o comentario no meio nao deslocou o indice")
+	require.Equal(t, "h.s0.d1", server.Block[3].ID, "the comment in between did not shift the index")
 }
 
 func TestLocationsAninhadasEncadeiamOID(t *testing.T) {
@@ -2751,7 +2751,7 @@ func TestLocationsAninhadasEncadeiamOID(t *testing.T) {
 	require.Equal(t, "h.s0.l0.l0", server.Block[0].Block[0].ID)
 }
 
-// Diretivas sem abreviacao na tabela usam o nome completo, o que mantem o ID
+// Directives without abbreviations in the table use the full name, which maintains the ID
 // legivel e evita colisao entre server e stream.
 func TestDiretivaSemAbreviacaoUsaNomeCompleto(t *testing.T) {
 	tree := parseTexto(t, `http {
@@ -2803,7 +2803,7 @@ import (
 )
 
 // abreviacoes encurta as diretivas de bloco mais comuns. Primeira letra
-// sozinha nao serve: server e stream colidiriam.
+// alone is not useful: server and stream would collide.
 var abreviacoes = map[string]string{
 	"http":     "h",
 	"stream":   "st",
@@ -2815,8 +2815,8 @@ var abreviacoes = map[string]string{
 	"map":      "mp",
 }
 
-// blocosRaiz sao os contextos de topo, que ocorrem no maximo uma vez e por
-// isso dispensam indice: o ID e "h", nao "h0".
+// Root blocks are the top contexts, which occur at most once per
+// This does not require an index: the ID is "h", not "h0".
 var blocosRaiz = map[string]bool{
 	"http":   true,
 	"stream": true,
@@ -2826,10 +2826,10 @@ var blocosRaiz = map[string]bool{
 
 // AtribuirIDs preenche o campo ID de cada no, recursivamente.
 //
-// O indice conta entre irmaos da mesma diretiva, nao por posicao absoluta:
-// inserir uma location nao renumera os servers ao lado. Comentarios nao
-// recebem ID nem participam da contagem, senao adicionar um comentario
-// deslocaria os IDs das diretivas vizinhas.
+// The index counts between siblings of the same directive, not by absolute position:
+// Entering a location does not renumber the servers next to it. No comments
+// receive an ID and do not participate in the count, unless they add a comment
+// would shift the IDs of neighboring directives.
 func AtribuirIDs(nodes []*Node, prefixo string) {
 	contadores := map[string]int{}
 	naRaiz := prefixo == ""
@@ -2854,7 +2854,7 @@ func AtribuirIDs(nodes []*Node, prefixo string) {
 
 func segmento(n *Node, contadores map[string]int, naRaiz bool) string {
 	// So o nivel raiz dispensa indice: um stream aninhado dentro de http e
-	// apenas mais um bloco irmao e precisa ser numerado normalmente.
+	// just another sister block and needs to be numbered normally.
 	if naRaiz && n.HasBlock() && blocosRaiz[n.Directive] {
 		return abreviar(n.Directive)
 	}
@@ -2862,7 +2862,7 @@ func segmento(n *Node, contadores map[string]int, naRaiz bool) string {
 	chave := n.Directive
 	base := abreviar(n.Directive)
 	if !n.HasBlock() && abreviacoes[n.Directive] == "" {
-		// Diretivas simples sem abreviacao propria compartilham o contador d.
+		// Simple directives without their own abbreviation share the d counter.
 		chave, base = "", "d"
 	}
 
@@ -2878,7 +2878,7 @@ func abreviar(directive string) string {
 	return directive
 }
 
-// FindByID localiza um no pelo seu ID. Devolve nil se nao existir.
+// FindByID locates a node by its ID. Returns nil if it does not exist.
 func FindByID(t *Tree, id string) *Node {
 	id = strings.TrimPrefix(id, "#")
 
@@ -2958,9 +2958,9 @@ func TestHashEhDeterministico(t *testing.T) {
 	require.Equal(t, a.Hash, b.Hash)
 }
 
-// O hash protege o significado, nao o texto: duas configuracoes que so diferem
+// The hash protects the meaning, not the text: two configurations that only differ
 // em formatacao precisam produzir o mesmo hash, senao rodar fmt invalidaria
-// todos os IDs que o agente esta segurando.
+// all IDs that the agent is holding.
 func TestFormatacaoDiferenteProduzMesmoHash(t *testing.T) {
 	compacto := parseTexto(t, "http{server{listen 80;}}")
 	espacado := parseTexto(t, `
@@ -2992,7 +2992,7 @@ func TestMudancaDeArgumentoMudaOHash(t *testing.T) {
 	require.NotEqual(t, a.Hash, b.Hash)
 }
 
-// Ordem importa: mover um server muda o significado dos IDs, entao precisa
+// Order matters: moving a server changes the meaning of IDs, so you need to
 // mudar o hash.
 func TestOrdemDeBlocosMudaOHash(t *testing.T) {
 	a := parseTexto(t, "http { server { listen 80; } server { listen 443; } }")
@@ -3001,7 +3001,7 @@ func TestOrdemDeBlocosMudaOHash(t *testing.T) {
 	require.NotEqual(t, a.Hash, b.Hash)
 }
 
-// Sem separador entre diretiva e argumentos, "a b" e "ab" colidiriam.
+// Without a separator between directive and arguments, "a b" and "ab" would collide.
 func TestDiretivasDiferentesNaoColidem(t *testing.T) {
 	a := parseTexto(t, "ab c;")
 	b := parseTexto(t, "a bc;")
@@ -3029,12 +3029,12 @@ import (
 	"strconv"
 )
 
-// Hash devolve o hash canonico da arvore.
+// Hash returns the canonical hash of the tree.
 //
-// O que o hash protege e o significado, nao o texto: comentarios e espacamento
-// ficam de fora, entao rodar fmt nao invalida os IDs que o agente esta
-// segurando. Ja a ordem dos blocos entra, porque mover um server muda a que
-// no cada ID se refere.
+// What the hash protects is the meaning, not the text: comments and spacing
+// are left out, so running fmt does not invalidate the IDs that the agent is
+// holding. Now the order of the blocks comes into play, because moving a server changes what
+// in each ID refers.
 func Hash(t *Tree) string {
 	h := sha256.New()
 	for _, f := range t.Files {
@@ -3064,8 +3064,8 @@ func escreverNodes(h hash.Hash, nodes []*Node) {
 	}
 }
 
-// escreverCampo usa um separador que nao pode aparecer numa diretiva, para
-// que "ab c" e "a bc" nunca colidam.
+// writeField uses a separator that cannot appear in a directive, to
+// that "ab c" and "a bc" never collide.
 func escreverCampo(h hash.Hash, s string) {
 	_, _ = h.Write([]byte(s))
 	_, _ = h.Write([]byte{0})
@@ -3186,10 +3186,10 @@ func TestCombineSubstituiIncludePelosNosIncluidos(t *testing.T) {
 		nomes = append(nomes, filho.Directive)
 	}
 	require.Equal(t, []string{"server", "server"}, nomes,
-		"o include sumiu e virou o server do arquivo incluido")
+		"the include is gone and became the server of the included file")
 }
 
-// Origin e o que permite ao agente saber em qual arquivo real editar depois
+// Origin and what allows the agent to know which actual file to edit next
 // de ver a configuracao resolvida.
 func TestCombinePreencheOriginComOArquivoReal(t *testing.T) {
 	combinado, err := config.Combine(parseCombine(t))
@@ -3228,8 +3228,8 @@ func TestCombineMantemOriginDoArquivoPrincipal(t *testing.T) {
 	require.Contains(t, legado.Origin.File, "nginx.conf")
 }
 
-// Os IDs da arvore combinada sao renumerados sobre a estrutura resolvida:
-// e essa a estrutura que o agente enxerga e sobre a qual ele opera.
+// The combined tree IDs are renumbered over the resolved structure:
+// and this is the structure that the agent sees and upon which he operates.
 func TestCombineRenumeraIDsSobreAEstruturaResolvida(t *testing.T) {
 	combinado, err := config.Combine(parseCombine(t))
 	require.NoError(t, err)
@@ -3245,8 +3245,8 @@ func TestCombineRenumeraIDsSobreAEstruturaResolvida(t *testing.T) {
 	require.Contains(t, legado.Origin.File, "nginx.conf")
 }
 
-// O hash da arvore combinada difere do da nao-combinada: sao visoes
-// diferentes, e confundi-las invalidaria IDs sem motivo.
+// The hash of the combined tree differs from that of the non-combined one: they are views
+// different, and confusing them would invalidate IDs for no reason.
 func TestCombineRecalculaOHash(t *testing.T) {
 	original := parseCombine(t)
 	combinado, err := config.Combine(original)
@@ -3271,11 +3271,11 @@ package config
 
 import "fmt"
 
-// Combine resolve os includes, devolvendo uma arvore de arquivo unico onde
-// cada no carrega a origem real.
+// Combine resolves the includes, returning a single-file tree where
+// each no carries the real origin.
 //
-// A resolucao e feita sobre a nossa arvore, e nao pelo CombineConfigs do
-// crossplane, porque combinar antes destruiria os spans: eles apontam para
+// The resolution is done over our tree, and not by CombineConfigs.
+// crossplane, because matching before would destroy the spans: they point to
 // offsets de arquivos especificos. Aqui os nos originais permanecem intactos
 // e apenas a estrutura e reorganizada.
 func Combine(t *Tree) (*Tree, error) {
@@ -3303,9 +3303,9 @@ func Combine(t *Tree) (*Tree, error) {
 	return combinado, nil
 }
 
-// arquivos e uma slice, e nao um map, de proposito: um include com glob pode
+// files are a slice, not a map, on purpose: an include with glob can
 // casar varios arquivos, e iterar um map daria ordem diferente a cada
-// execucao — o que faria os IDs e o hash mudarem sem a configuracao mudar.
+// execution — which would cause the IDs and hash to change without the configuration changing.
 type combinador struct {
 	arquivos  []*File
 	visitados map[string]bool
@@ -3350,9 +3350,9 @@ func (c *combinador) expandir(nodes []*Node) ([]*Node, error) {
 	return saida, nil
 }
 
-// expandirInclude localiza os arquivos que casam com o padrao do include.
-// O crossplane ja resolveu os globs e devolveu cada arquivo casado como um
-// Config proprio, entao basta encontrar os que ainda nao foram consumidos.
+// expandInclude finds files that match the include pattern.
+// Crossplane already resolved the globs and returned each matched file as a
+// Own configuration, so just find the ones that haven't been consumed yet.
 func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
 	var saida []*Node
 
@@ -3367,8 +3367,8 @@ func (c *combinador) expandirInclude(n *Node) ([]*Node, error) {
 	return saida, nil
 }
 
-// A iteracao e sobre a slice de arquivos, na ordem em que o crossplane os
-// devolveu, para que o resultado seja deterministico.
+// The iteration is over the slice of files, in the order in which the crossplane
+// returned, so that the result is deterministic.
 func (c *combinador) arquivosDoInclude(n *Node) []*File {
 	var achados []*File
 	for _, f := range c.arquivos {
@@ -3386,8 +3386,8 @@ func (c *combinador) arquivosDoInclude(n *Node) []*File {
 Also create, in the same file, the path matching:
 
 ```go
-// casaInclude decide se um arquivo parseado corresponde ao padrao de um
-// include. O padrao pode ser relativo ao arquivo que o declarou.
+// matchInclude decides whether a parsed file corresponds to the pattern of an
+// include. The pattern may be relative to the file that declared it.
 func casaInclude(caminho, padrao, declaradoEm string) bool {
 	if caminho == padrao {
 		return true
@@ -3504,7 +3504,7 @@ func TestInspectRetornaSucesso(t *testing.T) {
 	require.Equal(t, "inspect", env.Command)
 }
 
-// O hash no meta e a ancora dos IDs que saem no data.
+// The hash in the meta is the anchor of the IDs that come out in the data.
 func TestInspectPublicaOConfigHashNoMeta(t *testing.T) {
 	_, env, _ := rodarInspect(t, "inspect", "-c", fixture(t))
 
@@ -3528,7 +3528,7 @@ func TestInspectResumeAConfiguracao(t *testing.T) {
 	require.Equal(t, 1, resposta.Data.Summary.Files)
 }
 
-// Os IDs precisam sair no JSON: e por eles que o agente referencia um no na
+// The IDs must be in JSON: it is through them that the agent references a node in the
 // chamada seguinte.
 func TestInspectEmiteIDsNaArvore(t *testing.T) {
 	_, _, bruto := rodarInspect(t, "inspect", "-c", fixture(t))
@@ -3545,7 +3545,7 @@ func TestInspectEmiteSpans(t *testing.T) {
 	require.Contains(t, bruto, `"head_span"`)
 }
 
-// O teste que fecha o ciclo da redacao: o valor sensivel nao pode aparecer na
+// The test that closes the writing cycle: the sensitive value cannot appear in the
 // saida, mas a diretiva sim.
 func TestInspectRedigeChavePrivada(t *testing.T) {
 	_, _, bruto := rodarInspect(t, "inspect", "-c", fixture(t))
@@ -3555,8 +3555,8 @@ func TestInspectRedigeChavePrivada(t *testing.T) {
 	require.Contains(t, bruto, output.RedactedValue)
 }
 
-// Arquivo inexistente e falha de IO, nao erro de uso: a flag estava correta,
-// o disco e que nao tinha o arquivo.
+// Nonexistent file and IO failure, not usage error: the flag was correct,
+// the disk and it didn't have the file.
 func TestInspectComArquivoInexistenteEhFalhaInterna(t *testing.T) {
 	code, env, _ := rodarInspect(t, "inspect", "-c", "testdata/nao-existe.conf")
 
@@ -3578,7 +3578,7 @@ func TestInspectCombineResolveIncludes(t *testing.T) {
 	require.Equal(t, output.ExitOK, code)
 	require.Contains(t, bruto, `"origin"`)
 	require.NotContains(t, bruto, `"directive":"include"`,
-		"o include foi resolvido e nao aparece mais na arvore")
+		"the include was resolved and no longer shows up in the tree")
 }
 ```
 
@@ -3600,8 +3600,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Summary e a visao de uma linha da configuracao. Existe para o agente saber
-// o tamanho do que esta olhando sem ter que contar nos.
+// Summary is a one-line view of the configuration. It exists for the agent to know
+// the size of what you are looking at without having to tell us.
 type Summary struct {
 	Files     int `json:"files"`
 	Servers   int `json:"servers"`
@@ -3609,15 +3609,15 @@ type Summary struct {
 	Upstreams int `json:"upstreams"`
 }
 
-// InspectData e o dump completo: arvore mais resumo.
+// InspectData and the full dump: tree plus summary.
 type InspectData struct {
 	Config  []*config.File `json:"config"`
 	Summary Summary        `json:"summary"`
 }
 
-// Redacted devolve uma copia com os valores sensiveis substituidos. A copia e
+// Redacted returns a copy with the sensitive values replaced. The copy and
 // profunda nos nos afetados: a arvore original nunca e alterada, senao um fmt
-// posterior gravaria *** no arquivo do usuario.
+// later would write *** to the user's file.
 func (d InspectData) Redacted(rs output.RedactSet) any {
 	if rs.Empty() {
 		return d
@@ -3783,10 +3783,10 @@ Create `README.md`:
 ````markdown
 # ngx
 
-Um CLI em Go que torna o nginx operável por agentes de IA com segurança.
+A Go CLI that makes nginx safely operable by AI agents.
 
-Hoje um agente que precisa mexer em nginx lê `.conf` como texto solto, edita com
-substituição de string e descobre que errou quando o `nginx -t` falha — ou pior,
+Today an agent that has to touch nginx reads `.conf` as loose text, edits it with
+string replacement, and finds out it got it wrong when `nginx -t` fails — or worse,
 quando o reload derruba produção. O `ngx` unifica parse, análise e mutação num
 binário único, com saída JSON estruturada por padrão, leitura por seletor em vez
 de dump de milhares de linhas, e mudanças transacionais com rollback automático.
@@ -3824,11 +3824,11 @@ $ make fuzz # tokenizer and alignment fuzzers$ make build # compiles to bin/ngx
 $ make test # complete suite with race detector
 ```
 
-Requer Go 1.25. O `.tool-versions` fixa a versão para quem usa asdf.
+Requires Go 1.25. `.tool-versions` pins the version for asdf users.
 
 ## Design
 
-As decisões de arquitetura e o porquê de cada uma estão em
+The architecture decisions and the reasoning behind each are in
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
 
 ## Licença
@@ -3871,7 +3871,7 @@ git commit -m "chore: makefile e readme"
 | §8 `inspect` | 13 |
 | §8 `get`, `tree` | **Plano 2** |
 | §8 `status`, `fmt`, `test`, `diff` | **Plano 3** |
-| §8.1 arquivo de configuração | 5 |
+| §8.1 configuration file | 5 |
 | §9 property test de spans | 8, 9 |
 | §9 fuzzing | 8, 9 |
 | §9 golden files, fake nginx, integração | **Plano 3** |

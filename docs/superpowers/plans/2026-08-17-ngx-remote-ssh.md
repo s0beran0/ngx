@@ -236,7 +236,7 @@ Run: `go test ./internal/config/ -race`
 
 ```bash
 git add internal/config/
-git commit -m "fix(config): injeta Glob no crossplane para nao listar disco local"
+git commit -m "fix(config): inject Glob into crossplane so it does not list the local disk"
 ```
 
 ---
@@ -251,7 +251,7 @@ git commit -m "fix(config): injeta Glob no crossplane para nao listar disco loca
 
 - [ ] **Step 1: Write the tests**
 
-Use um `Transport` falso que devolve saídas gravadas, e verifique que a detecção do nginx, o `nginx -t` estruturado e o `nginx -T` funcionam idênticos com transporte local e remoto. The point is that the output parser doesn't know where the bytes came from.
+Use a fake `Transport` that returns recorded output, and check that nginx detection, the structured `nginx -t` and `nginx -T` behave identically over the local and the remote transport. The point is that the output parser does not know where the bytes came from.
 
 Also cover: `nginx` not found on remote host, and command coming out non-zero.
 
@@ -350,14 +350,14 @@ git commit -m "test(transport): integracao ssh real; docs de operacao remota"
 
 ## Coverage check
 
-| Pedido | Task |
+| Order | Task |
 |---|---|
-| Executar em servidor remoto via SSH | R1, R2, R4, R5 |
-| Passar host, user, porta | R2 (`~/.ssh/config`), R5 (flags) |
-| Senha, quando o servidor exigir | R2 (env ou prompt, nunca flag) |
-| Chave SSH e caminho da chave | R2 (`--key`, `IdentityFile`, `ssh-agent` antes) |
-| Não instalar o CLI na VM | DR3, R1 (SFTP mais exec remoto) |
-| Funcionar em Linux, macOS e Windows | Global Constraints; R2 Step 1 item 1 |
+| Run on remote server via SSH | R1, R2, R4, R5 |
+| Pass host, user, port | R2 (`~/.ssh/config`), R5 (flags) |
+| Password, when the server requires it | R2 (env or prompt, never flag) |
+| SSH key and key path | R2 (`--key`, `IdentityFile`, `ssh-agent` before) |
+| Do not install the CLI on the VM | DR3, R1 (SFTP plus remote exec) |
+| Work on Linux, macOS and Windows | Global Constraints; R2 Step 1 item 1 |
 
 ## Known limitation, to be resolved later
 

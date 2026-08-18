@@ -132,7 +132,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: compila para ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: build for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
@@ -392,7 +392,7 @@ Expected: all cases pass, and nothing was written outside the temporary director
 
 ```bash
 git add install.sh install.ps1 install_test.sh
-git commit -m "feat: scripts de instalacao para unix e windows"
+git commit -m "feat: install scripts for unix and windows"
 ```
 
 ---
@@ -548,16 +548,16 @@ git commit -m "docs: instalacao, atualizacao e verificacao de releases"
 
 ## Coverage check
 
-| Pedido | Task |
+| Order | Task |
 |---|---|
 | CI via GitHub Actions | D1 |
-| Release na main | D2 (por tag, disparada a partir de `main`) |
-| Instalação via curl | D3 (`install.sh`) |
-| Instalação e atualização no Windows | D2, D3 (`install.ps1`), D4, D5 |
+| Release on main | D2 (by tag, triggered from `main`) |
+| Installation via curl | D3 (`install.sh`) |
+| Installation and update on Windows | D2, D3 (`install.ps1`), D4, D5 |
 | Auto-update `ngx update` | D4 |
-| Releases diferenciadas beta/stable | D2 (`prerelease: auto`) e D4 (`--channel`) |
-| Documentação no README | D5 |
-| Aviso de `sudo` na instalação | D3 (antes do download) e D5 |
+| Differentiated beta/stable releases | D2 (`prerelease: auto`) and D4 (`--channel`) |
+| Documentation in README | D5 |
+| `sudo` warning on installation | D3 (before download) and D5 |
 
 ## Execution order
 
