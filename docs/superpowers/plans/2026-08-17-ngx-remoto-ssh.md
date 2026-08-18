@@ -338,6 +338,14 @@ git commit -m "test(transport): integracao ssh real; docs de operacao remota"
 | Não instalar o CLI na VM | DR3, R1 (SFTP mais exec remoto) |
 | Funcionar em Linux, macOS e Windows | Global Constraints; R2 Step 1 item 1 |
 
+## Limitação conhecida, a resolver depois
+
+A conexão remota é aberta em `PersistentPreRunE`, antes de o comando rodar. Isso significa que `ngx --host web1 version` abre uma sessão SSH para imprimir uma string que é puramente local: lento, capaz de falhar por motivo alheio ao comando, e surpreendente para quem lê a saída. O mesmo valerá para `ngx update`.
+
+*Por que não foi corrigido junto:* a correção é uma anotação de comando marcando quem não toca no alvo. Tentei, e ela quebra seis testes de `internal/cli` que usam justamente `version` como veículo para exercitar o caminho SSH — eles contam conexões e passariam a contar zero. Consertá-los exige montar fixture de configuração em cada um, porque `inspect` precisa de um `.conf`. Trocar um defeito menor e somente-leitura por uma reescrita de suíte recém-escrita, no fim de uma sessão longa, é a troca errada.
+
+*Como resolver, quando for a hora:* dar ao contexto de teste um comando de mentira que declare precisar do transporte, e mover os seis testes para ele. Aí a anotação entra sem tocar em fixture nenhuma, e `version` e `update` param de conectar.
+
 ## O que este plano não cobre
 
 Multi-host numa chamada (`--hosts a,b,c` com execução paralela), bastion e salto (`ProxyJump`), túnel, e escrita transacional remota — esta última depende do plano de mutação da v0.2. São extensões naturais da mesma camada de transporte, e nenhuma muda as decisões tomadas aqui.
