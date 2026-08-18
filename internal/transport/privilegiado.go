@@ -27,6 +27,12 @@ const CodigoPrivilegioNegado = "NGX-0231"
 // a leitura direta nem o `sudo cat` alcancaram o arquivo.
 const CodigoLeituraPeloDump = "NGX-0232"
 
+// CodigoElevacaoForaDaArvore marca leitura privilegiada de um caminho fora de
+// qualquer diretorio que a configuracao ja tinha alcancado sem privilegio.
+// Severidade warning, nao error: e legitimo e nao bloqueia -- mas e novidade,
+// e novidade que envolve sudo merece ser vista.
+const CodigoElevacaoForaDaArvore = "NGX-0233"
+
 // privilegiado envolve um Transport e, quando a leitura comum topa em
 // permissao, repete a leitura daquele arquivo com privilegio.
 //
@@ -57,10 +63,18 @@ type privilegiado struct {
 	dumpCache map[string][]byte
 	dumpErro  error
 
-	mu        sync.Mutex
-	elevados  []string
-	viaDump   []string
-	recusados map[string]string
+	mu sync.Mutex
+
+	// arvore sao os diretorios que a configuracao alcancou SEM privilegio,
+	// mais o do arquivo de topo. Nao e lista fixa de caminhos: uma lista fixa
+	// quebraria instalacao fora do padrao, e o proprio servidor medido inclui
+	// de /etc/letsencrypt, fora de /etc/nginx. A arvore e derivada do que a
+	// configuracao de fato referencia.
+	arvore       map[string]bool
+	elevados     []string
+	foraDaArvore []string
+	viaDump      []string
+	recusados    map[string]string
 }
 
 // ComLeituraPrivilegiada devolve um Transport que repete com privilegio a
@@ -83,7 +97,10 @@ func ComLeituraPrivilegiadaEDump(
 	if !ativo {
 		return tr
 	}
-	return &privilegiado{Transport: tr, ctx: ctx, dump: dump, recusados: map[string]string{}}
+	return &privilegiado{
+		Transport: tr, ctx: ctx, dump: dump,
+		arvore: map[string]bool{}, recusados: map[string]string{},
+	}
 }
 
 // conteudoDoDump devolve o conteudo de um caminho segundo o dump, executando-o
@@ -109,8 +126,19 @@ func (p *privilegiado) conteudoDoDump(caminho string) ([]byte, bool) {
 }
 
 func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
+	// O diretorio do PRIMEIRO caminho pedido entra na arvore antes de
+	// qualquer coisa: e a configuracao que o operador nomeou, entao nao ha
+	// novidade nenhuma nela, mesmo que ela precise de privilegio.
+	p.semearArvore(caminho)
+
 	rc, err := p.Transport.Open(caminho)
-	if err == nil || !ehPermissao(err) {
+	if err == nil {
+		// Alcancado sem privilegio: o diretorio dele passa a ser conhecido,
+		// e um irmao elevado ali dentro deixa de ser novidade.
+		p.registrarNaArvore(caminho)
+		return rc, nil
+	}
+	if !ehPermissao(err) {
 		return rc, err
 	}
 
@@ -224,9 +252,43 @@ func (p *privilegiado) globPeloDump(padrao string) ([]string, bool) {
 }
 
 func (p *privilegiado) registrarElevado(caminho string) {
+	dentro := p.dentroDaArvore(caminho)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.elevados = append(p.elevados, caminho)
+	if dentro {
+		p.elevados = append(p.elevados, caminho)
+		return
+	}
+	p.foraDaArvore = append(p.foraDaArvore, caminho)
+}
+
+// semearArvore registra o diretorio do arquivo de topo, uma unica vez.
+func (p *privilegiado) semearArvore(caminho string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.arvore) == 0 {
+		p.arvore[path.Dir(caminho)] = true
+	}
+}
+
+func (p *privilegiado) registrarNaArvore(caminho string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.arvore[path.Dir(caminho)] = true
+}
+
+// dentroDaArvore diz se o caminho esta em algum diretorio que a configuracao
+// ja alcancou sem privilegio, ou abaixo dele.
+func (p *privilegiado) dentroDaArvore(caminho string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	dir := path.Dir(caminho)
+	for conhecido := range p.arvore {
+		if dir == conhecido || strings.HasPrefix(dir, conhecido+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *privilegiado) registrarViaDump(caminho string) {
@@ -260,6 +322,20 @@ func (p *privilegiado) Diagnosticos() []output.Diagnostic {
 					"pedido: %s", len(lista), resumirCaminhos(lista)),
 		})
 	}
+	if len(p.foraDaArvore) > 0 {
+		lista := append([]string(nil), p.foraDaArvore...)
+		sort.Strings(lista)
+		diags = append(diags, output.Diagnostic{
+			Severity: output.SeverityWarning,
+			Code:     CodigoElevacaoForaDaArvore,
+			Message: fmt.Sprintf(
+				"%d caminho(s) foram lidos com privilegio FORA de qualquer diretorio que "+
+					"a configuracao ja alcancava sem ele: %s. Confira se o include que "+
+					"levou ate ali e esperado",
+				len(lista), resumirCaminhos(lista)),
+		})
+	}
+
 	if len(p.viaDump) > 0 {
 		lista := append([]string(nil), p.viaDump...)
 		sort.Strings(lista)

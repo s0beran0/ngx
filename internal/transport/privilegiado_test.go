@@ -192,3 +192,77 @@ func indiceDe(lista []string, alvo string) int {
 	}
 	return -1
 }
+
+// A arvore de confianca e DERIVADA da configuracao, nunca uma lista fixa de
+// caminhos: lista fixa quebraria instalacao fora do padrao, e um servidor
+// real medido inclui de /etc/letsencrypt, fora de /etc/nginx.
+//
+// O par de casos e o ponto: elevar um irmao de arquivo ja alcancado e
+// rotina e sai como info; elevar num diretorio que a configuracao nunca
+// tinha tocado e novidade, e novidade envolvendo sudo sai como aviso.
+func TestElevacaoForaDaArvoreViraAviso(t *testing.T) {
+	severidadeDe := func(diags []output.Diagnostic, codigo string) output.Severity {
+		for _, d := range diags {
+			if d.Code == codigo {
+				return d.Severity
+			}
+		}
+		return ""
+	}
+
+	t.Run("irmao de arquivo ja lido sai como info", func(t *testing.T) {
+		f := novoFake()
+		f.arquivos["/etc/nginx/nginx.conf"] = "include conf.d/*.conf;\n"
+		f.negados["/etc/nginx/conf.d/restrito.conf"] = true
+		f.saidas["sudo -n cat -- /etc/nginx/conf.d/restrito.conf"] = "server {}\n"
+
+		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		rc, err := tr.Open("/etc/nginx/nginx.conf")
+		require.NoError(t, err)
+		_ = rc.Close()
+		rc, err = tr.Open("/etc/nginx/conf.d/restrito.conf")
+		require.NoError(t, err)
+		_ = rc.Close()
+
+		diags := transport.Diagnosticos(tr)
+		assert.Equal(t, output.SeverityInfo,
+			severidadeDe(diags, transport.CodigoLeituraPrivilegiada))
+		assert.Empty(t, severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
+			"conf.d fica abaixo de /etc/nginx, que a configuracao ja alcancava")
+	})
+
+	t.Run("diretorio nunca tocado sai como aviso", func(t *testing.T) {
+		f := novoFake()
+		f.arquivos["/etc/nginx/nginx.conf"] = "include /opt/segredos/x.conf;\n"
+		f.negados["/opt/segredos/x.conf"] = true
+		f.saidas["sudo -n cat -- /opt/segredos/x.conf"] = "server {}\n"
+
+		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		rc, err := tr.Open("/etc/nginx/nginx.conf")
+		require.NoError(t, err)
+		_ = rc.Close()
+		rc, err = tr.Open("/opt/segredos/x.conf")
+		require.NoError(t, err)
+		_ = rc.Close()
+
+		diags := transport.Diagnosticos(tr)
+		assert.Equal(t, output.SeverityWarning,
+			severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
+			"elevar em diretorio novo e a anomalia que o aviso existe para mostrar")
+	})
+
+	t.Run("o proprio arquivo de topo nunca e anomalia", func(t *testing.T) {
+		f := novoFake()
+		f.negados["/opt/nginx-custom/nginx.conf"] = true
+		f.saidas["sudo -n cat -- /opt/nginx-custom/nginx.conf"] = "events {}\n"
+
+		tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+		rc, err := tr.Open("/opt/nginx-custom/nginx.conf")
+		require.NoError(t, err)
+		_ = rc.Close()
+
+		diags := transport.Diagnosticos(tr)
+		assert.Empty(t, severidadeDe(diags, transport.CodigoElevacaoForaDaArvore),
+			"a configuracao que o operador nomeou nao e novidade, esteja onde estiver")
+	})
+}

@@ -100,6 +100,12 @@ Sem `--sudo` nada disso acontece — a DR5 continua valendo —, mas o diagnóst
 
 *Transparência:* todo caminho que exigiu privilégio aparece no envelope, com a origem. Ler a configuração de um servidor com `sudo` não pode acontecer calado.
 
+*O que o `--sudo` NÃO faz:* restringir por lista de caminhos. Foi considerado e descartado. Instalação fora do padrão quebraria — o próprio servidor medido inclui de `/etc/letsencrypt`, fora de `/etc/nginx` — e protegeria pouco, porque o vetor real está dentro da árvore de configuração legítima: verificado que um arquivo que não é sintaxe nginx (um `/etc/shadow`, por exemplo) falha no parse e **não** tem conteúdo emitido; o que aparece na saída é arquivo que já é configuração válida.
+
+Em vez de restringir, o `ngx` marca o que é anômalo: leitura privilegiada de um caminho **fora de qualquer diretório que a configuração já alcançava sem privilégio** sai como `warning`, não `info`. A árvore de confiança é derivada da própria configuração — os diretórios que ela de fato referencia — e não de uma lista fixa, então instalação em `/opt` funciona igual. O arquivo de topo nunca é anomalia: foi o operador que o nomeou.
+
+*Proporção, dita com honestidade:* quem consegue escrever no `nginx.conf` do alvo já pode exfiltrar com `proxy_pass` e já roda o master como root. O `ngx` muda o **destino** do dado, não o acesso a ele. Isto é observabilidade, não contenção.
+
 ### DR6 — O `ngx` não usa `sftp.Client.Glob`
 
 O `Glob` do `github.com/pkg/sftp` **descarta erros de I/O por contrato**. O comentário da própria função diz: *"Glob ignores file system errors such as I/O errors reading directories. The only possible returned error is ErrBadPattern"* (`match.go:40-42`). E no caminho sem metacaractere ele é literal: `file, err := c.Lstat(pattern); if err != nil { return nil, nil }` — conexão caindo devolve nenhum resultado e nenhum erro.
