@@ -31,10 +31,17 @@ type Diagnostic struct {
 
 // Meta carrega dados sobre a execucao. ConfigHash ancora os IDs devolvidos
 // nesta resposta: um ID so e valido contra o hash que veio junto com ele.
+//
+// Target e o Describe() do transporte — "local" ou "ssh://user@host:porta".
+// Quem consome a saida precisa saber contra o que a ferramenta operou: a
+// mesma resposta, vinda de outra maquina, e outro fato. E omitido, nunca
+// estimado, quando o transporte nem chegou a existir (falha antes de
+// conectar): ausencia e informacao, alvo errado e mentira.
 type Meta struct {
 	DurationMS   int64  `json:"duration_ms"`
 	NginxVersion string `json:"nginx_version,omitempty"`
 	ConfigHash   string `json:"config_hash,omitempty"`
+	Target       string `json:"target,omitempty"`
 }
 
 // Envelope e o formato unico de toda saida JSON do ngx.

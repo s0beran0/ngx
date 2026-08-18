@@ -10,6 +10,7 @@ import (
 
 	"github.com/s0beran0/ngx/internal/output"
 	"github.com/s0beran0/ngx/internal/settings"
+	"github.com/s0beran0/ngx/internal/transport"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +36,16 @@ type GlobalFlags struct {
 	Timeout      time.Duration
 	Profile      string
 	NoRedact     bool
+
+	// Flags de acesso remoto. Sem Host, nada delas e usado e o alvo e a
+	// maquina local — o comportamento de sempre.
+	Host            string
+	User            string
+	Port            int
+	Key             string
+	KnownHosts      string
+	InsecureHostKey bool
+	Sudo            bool
 }
 
 // Context carrega o que todo comando precisa.
@@ -52,6 +63,25 @@ type Context struct {
 	// processo inteiro.
 	GlobalSettingsPath string
 	LocalSettingsPath  string
+
+	// Transport e o alvo das operacoes: a maquina local ou um host remoto.
+	// preparar o preenche; executar o fecha, inclusive no caminho de erro.
+	Transport transport.Transport
+
+	// TransportDiags guarda o que a montagem do transporte observou (aviso
+	// de --insecure-host-key, ssh-agent ausente, ~/.ssh/config ilegivel).
+	// Vive no Context porque precisa alcancar o envelope tanto no sucesso
+	// quanto no erro.
+	TransportDiags []output.Diagnostic
+
+	// SSHConfigPath e o ~/.ssh/config a consultar. Vazio significa o
+	// caminho padrao do usuario; um teste o aponta para um arquivo de
+	// fixture para nao depender do HOME de quem roda a suite.
+	SSHConfigPath string
+
+	// ConectarSSH abre a conexao remota. Vazio significa
+	// transport.SSHComDiagnosticos.
+	ConectarSSH ConectarSSH
 }
 
 // Execute roda o CLI e devolve o exit code. Nunca chama os.Exit: isso e
@@ -77,6 +107,13 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 	root.SetArgs(args)
 	root.SetOut(stderr)
 	root.SetErr(stderr)
+
+	// O transporte fecha sempre, inclusive quando o comando falha: uma
+	// conexao SSH deixada aberta sobrevive ao processo so o tempo do
+	// timeout do servidor, e no teste vira goroutine vazando.
+	defer func() {
+		avisarFalhaAoFechar(stderr, ctx.fecharTransporte())
+	}()
 
 	err := root.Execute()
 	if err == nil {
@@ -104,7 +141,7 @@ func executar(root *cobra.Command, ctx *Context, args []string, stderr io.Writer
 // Execute (ou pelo teste de caixa-branca que monta o Context), entao nunca e
 // nil aqui.
 func renderErro(ctx *Context, stderr io.Writer, err error) {
-	env := output.New(comandoDe(ctx))
+	env := ctx.NovoEnvelope(comandoDe(ctx))
 	var e *output.Error
 	if errors.As(err, &e) {
 		env.AddDiagnostic(e.Diag)
@@ -153,6 +190,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout das operacoes")
 	p.StringVar(&f.Profile, "profile", "", "perfil do arquivo de configuracao do ngx")
 	p.BoolVar(&f.NoRedact, "no-redact", false, "mostra valores sensiveis (so em terminal)")
+	registrarFlagsDeConexao(p, f)
 
 	root.AddCommand(newVersionCmd(ctx))
 	root.AddCommand(newInspectCmd(ctx))
@@ -197,7 +235,9 @@ func preparar(ctx *Context, cmd *cobra.Command) error {
 	ctx.Renderer.NoRedact = f.NoRedact
 	ctx.Renderer.Quiet = f.Quiet
 
-	return nil
+	// O transporte e o ultimo passo de preparar: conectar antes de validar
+	// as flags cobraria um handshake SSH de quem digitou --json --human.
+	return abrirTransporte(ctx, cmd)
 }
 
 func resolverFormato(f *GlobalFlags, s *settings.Settings) output.Format {
@@ -233,7 +273,7 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 		Short: "Mostra a versao do ngx",
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			env := output.New("version")
+			env := ctx.NovoEnvelope("version")
 			env.Data = map[string]string{"version": output.Version}
 			return ctx.Renderer.Render(env)
 		},

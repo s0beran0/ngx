@@ -79,7 +79,17 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 				return output.Usage("informe a configuracao com -c ou em nginx.config")
 			}
 
-			tree, err := config.Parse(config.ParseOptions{Path: caminho})
+			// Open e Glob vem do transporte, nunca do os/filepath direto:
+			// apontado para um host remoto, um Glob local listaria os
+			// arquivos da maquina do operador e os apresentaria como
+			// configuracao do servidor (DR4). No alvo local o transporte e
+			// justamente os.Open e filepath.Glob, entao nada muda.
+			tr := ctx.transporte()
+			tree, err := config.Parse(config.ParseOptions{
+				Path: caminho,
+				Open: tr.Open,
+				Glob: tr.Glob,
+			})
 			if err != nil {
 				return erroDeParse(err)
 			}
@@ -91,7 +101,7 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 				}
 			}
 
-			env := output.New("inspect")
+			env := ctx.NovoEnvelope("inspect")
 			env.Data = InspectData{Config: tree.Files, Summary: resumir(tree)}
 			env.Meta.ConfigHash = tree.Hash
 			return ctx.Renderer.Render(env)
