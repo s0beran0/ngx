@@ -91,7 +91,7 @@ func TestComSudoSoORecusadoEElevado(t *testing.T) {
 	f := novoFake()
 	f.arquivos["/etc/nginx/aberto.conf"] = "worker_processes 1;\n"
 	f.negados["/etc/nginx/restrito.conf"] = true
-	f.saidas["sudo -n cat /etc/nginx/restrito.conf"] = "server { listen 80; }\n"
+	f.saidas["sudo -n cat -- /etc/nginx/restrito.conf"] = "server { listen 80; }\n"
 
 	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
 
@@ -107,7 +107,7 @@ func TestComSudoSoORecusadoEElevado(t *testing.T) {
 	assert.Equal(t, "server { listen 80; }\n", string(b))
 	require.Len(t, f.executados, 1)
 	assert.Equal(t,
-		[]string{"sudo", "-n", "cat", "/etc/nginx/restrito.conf"}, f.executados[0],
+		[]string{"sudo", "-n", "cat", "--", "/etc/nginx/restrito.conf"}, f.executados[0],
 		"argv explicito, sem shell: nome de arquivo nao pode virar injecao")
 
 	diags := transport.Diagnosticos(tr)
@@ -123,7 +123,7 @@ func TestComSudoSoORecusadoEElevado(t *testing.T) {
 func TestQuandoOSudoNaoPermiteCatODumpResolve(t *testing.T) {
 	f := novoFake()
 	f.negados["/etc/nginx/nginx.conf"] = true
-	f.falhas["sudo -n cat /etc/nginx/nginx.conf"] = true
+	f.falhas["sudo -n cat -- /etc/nginx/nginx.conf"] = true
 
 	dump := func(context.Context) (map[string][]byte, error) {
 		return map[string][]byte{"/etc/nginx/nginx.conf": []byte("worker_processes 4;\n")}, nil
@@ -147,7 +147,7 @@ func TestQuandoOSudoNaoPermiteCatODumpResolve(t *testing.T) {
 func TestSemCaminhoNenhumRecusaEmVezDeApresentarParcial(t *testing.T) {
 	f := novoFake()
 	f.negados["/etc/nginx/nginx.conf"] = true
-	f.falhas["sudo -n cat /etc/nginx/nginx.conf"] = true
+	f.falhas["sudo -n cat -- /etc/nginx/nginx.conf"] = true
 
 	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
 	_, err := tr.Open("/etc/nginx/nginx.conf")
@@ -157,4 +157,38 @@ func TestSemCaminhoNenhumRecusaEmVezDeApresentarParcial(t *testing.T) {
 	require.Len(t, diags, 1)
 	assert.Equal(t, output.SeverityError, diags[0].Severity)
 	assert.Contains(t, diags[0].Message, "sudo")
+}
+
+// Caminho que comeca com `-` e o caso de injecao de ARGUMENTO: sem o `--`
+// separando as opcoes, o cat leria "-rf" como flag em vez de como arquivo.
+// Argv explicito resolve injecao de shell e nao resolve esta -- sao defeitos
+// diferentes, e o comando aqui roda com privilegio.
+//
+// O caminho vem de diretiva `include` da configuracao do alvo, que nao e
+// entrada confiavel.
+func TestCaminhoComTracoNaoViraFlag(t *testing.T) {
+	f := novoFake()
+	suspeito := "/etc/nginx/-rf"
+	f.negados[suspeito] = true
+	f.saidas["sudo -n cat -- "+suspeito] = "worker_processes 1;\n"
+
+	tr := transport.ComLeituraPrivilegiada(context.Background(), f, true)
+	rc, err := tr.Open(suspeito)
+	require.NoError(t, err)
+	_ = rc.Close()
+
+	require.Len(t, f.executados, 1)
+	argv := f.executados[0]
+	require.Contains(t, argv, "--", "o separador de fim de opcoes tem de estar presente")
+	assert.Less(t, indiceDe(argv, "--"), indiceDe(argv, suspeito),
+		"o separador precisa vir ANTES do caminho para valer de alguma coisa")
+}
+
+func indiceDe(lista []string, alvo string) int {
+	for i, v := range lista {
+		if v == alvo {
+			return i
+		}
+	}
+	return -1
 }

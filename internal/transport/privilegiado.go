@@ -114,10 +114,20 @@ func (p *privilegiado) Open(caminho string) (io.ReadCloser, error) {
 		return rc, err
 	}
 
-	// `cat` com argv explicito: sem shell, entao nome de arquivo com espaco,
-	// aspa ou cifrao nao vira injecao. O -n do sudo evita ficar pendurado
-	// esperando senha num processo sem terminal.
-	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "cat", caminho})
+	// Argv explicito, sem shell: nome de arquivo com espaco, aspa ou cifrao
+	// nao vira injecao. O `--` fecha a lista de opcoes, e e ele que impede a
+	// outra injecao, a de ARGUMENTO: sem ele, um caminho comecando com `-`
+	// seria lido como flag pelo cat em vez de como arquivo. O caminho vem de
+	// diretiva `include` da configuracao do alvo, que nao e entrada confiavel
+	// -- e aqui o comando roda com privilegio, entao o custo de errar e alto
+	// e o de prevenir e um token.
+	//
+	// Nao recusamos caminho iniciado por `-`: com o `--` ele funciona, e
+	// recusar quebraria um arquivo de nome legitimo por precaucao redundante.
+	//
+	// O -n do sudo evita ficar pendurado esperando senha num processo sem
+	// terminal.
+	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "cat", "--", caminho})
 	if errRun != nil {
 		return nil, errRun
 	}
@@ -147,7 +157,9 @@ func (p *privilegiado) Glob(padrao string) ([]string, error) {
 	// sem recursao, e o minimo que responde a pergunta.
 	dir, arquivo := path.Split(padrao)
 	dir = path.Clean(dir)
-	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "ls", "-1", dir})
+	// `--` pelo mesmo motivo do cat: sem ele um diretorio cujo nome comece
+	// com `-` viraria opcao do ls.
+	stdout, stderr, saida, errRun := p.Transport.Run(p.ctx, []string{"sudo", "-n", "ls", "-1", "--", dir})
 	if errRun != nil {
 		return nil, errRun
 	}
