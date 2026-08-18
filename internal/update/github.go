@@ -265,6 +265,16 @@ func statusDaAPI(resp *http.Response, url string) error {
 		return erro(CodigoRede, "a API do GitHub recusou a consulta a %s com HTTP %d",
 			url, resp.StatusCode)
 	case http.StatusNotFound:
+		// O 404 em /releases/latest tem uma causa comum e nada obvia: o
+		// endpoint EXCLUI pre-lancamentos, entao um projeto que so publicou
+		// release candidate responde 404 mesmo tendo releases. Sem dizer
+		// isso, quem le conclui que o projeto nao publica nada.
+		if strings.HasSuffix(url, "/releases/latest") {
+			return erro(CodigoReleaseAusente,
+				"nenhuma release estavel encontrada em %s. Este endpoint ignora "+
+					"pre-lancamentos: se o projeto so publicou versoes -rc ou -beta, "+
+					"use --channel beta (ou NGX_CHANNEL=beta) para alcanca-las", url)
+		}
 		return erro(CodigoReleaseAusente,
 			"a API do GitHub nao encontrou %s: a versao pedida pode nao existir ou "+
 				"nao ter release publicada", url)

@@ -31,21 +31,26 @@ estruturalmente, nem consegue pedir.
 Esta e a **v0.1, em desenvolvimento**, e ela e **somente leitura**. Nada aqui
 altera a configuracao do nginx.
 
-- **Nao ha release publicada.** O repositorio nao tem nenhuma tag ainda. Os
-  instaladores `install.sh` e `install.ps1` estao no repositorio e ja
-  funcionam do ponto de vista do codigo, mas nao ha o que eles baixem — e a
-  chave publica minisign do projeto ainda nao foi gerada, entao o `install.sh`
-  recusa instalar de proposito, porque ausencia de verificacao e falha, nunca
-  um "segui em frente". **A unica forma de obter o `ngx` hoje e compilar da
-  fonte.**
-- **Existem quatro comandos:** `version`, `inspect`, `test` e `status`.
-  Comandos previstos no desenho (`get`, `tree`, `fmt`, `diff`, `apply`,
-  `update`) ainda nao existem — `ngx update` sai com "unknown command", mesmo
-  havendo codigo de atualizacao no repositorio, porque o comando nao esta
-  registrado. O `status` ainda nao detecta drift, entao ele nunca sai com o
-  codigo 7 previsto no desenho.
-- **O acesso remoto por SSH existe e funciona**, mas nao foi exercitado contra
-  um servidor de producao por este projeto. Ver [`docs/remoto.md`](docs/remoto.md).
+- **So ha pre-lancamentos.** O canal estavel ainda esta vazio, entao o
+  `install.sh` sem `NGX_CHANNEL=beta` responde que so existem pre-lancamentos
+  e indica o beta. As releases sao assinadas com minisign, e o instalador
+  RECUSA instalar quando nao consegue verificar a assinatura — ausencia de
+  verificacao e falha, nunca um "segui em frente". Quando o minisign nao esta
+  instalado, ele verifica com `openssl`, que existe em praticamente todo
+  servidor.
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \
+    | NGX_CHANNEL=beta sh
+  ```
+- **Existem cinco comandos:** `version`, `inspect`, `test`, `status` e
+  `update`. Comandos previstos no desenho (`get`, `tree`, `fmt`, `diff`,
+  `apply`) ainda nao existem. O `status` ainda nao detecta drift, entao ele
+  nunca sai com o codigo 7 previsto no desenho.
+- **O acesso remoto por SSH existe e foi exercitado contra um nginx de
+  producao real** (Oracle Linux 9, nginx 1.20.1, 132 arquivos de
+  configuracao), alem da bancada em container. Ver
+  [`docs/remoto.md`](docs/remoto.md).
 - **A saida "humana" ainda e crua:** hoje ela e o JSON dos dados formatado com
   indentacao, e o erro como uma linha de texto. Melhorar isso e trabalho
   pendente, nao um estilo deliberado.
@@ -154,6 +159,25 @@ e um diagnostico explica a ausencia, em vez de o `ngx` chutar um caminho ou
 reportar `running: false` — que diria, sem evidencia, que o nginx caiu. O
 mesmo vale para um pid de outro usuario, que existe mas nao pode ser
 consultado.
+
+### `ngx update`
+
+Atualiza o proprio `ngx` a partir das releases assinadas. Baixa, confere a
+assinatura minisign e o checksum SHA-256, e **so entao** troca o binario:
+falha de verificacao deixa o `ngx` atual intacto.
+
+```sh
+ngx update --check                  # so informa se ha versao nova
+ngx update --channel beta           # inclui pre-lancamentos
+ngx update --version v0.1.0-rc.1    # versao exata, inclusive downgrade
+```
+
+O canal vem da flag, ou de `NGX_CHANNEL`, ou e `stable`. A variavel existe
+porque o `install.sh` ja a usa: quem instalou pelo beta continua no beta sem
+repetir a flag.
+
+O comando ignora `--host` de proposito. Atualizar o `ngx` e sobre a maquina
+onde ele roda; nada e instalado no servidor remoto.
 
 ### `ngx version`
 

@@ -67,6 +67,11 @@ const PlaceholderChavePublica = "CHAVE-MINISIGN-PENDENTE-NAO-GERADA"
 
 // Channel e o canal de atualizacao. Os canais sao derivados do semver da tag
 // (DD1), nao de branches: "v0.2.0" e stable, "v0.2.0-rc.1" e pre-lancamento.
+// EnvCanal e a variavel que o install.sh ja usa para escolher o canal. O
+// `ngx update` a honra pelo mesmo motivo: quem instalou pelo beta espera
+// continuar no beta sem repetir a flag a cada atualizacao.
+const EnvCanal = "NGX_CHANNEL"
+
 type Channel string
 
 const (

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/s0beran0/ngx/internal/output"
@@ -84,6 +85,10 @@ type Context struct {
 	// ConectarSSH abre a conexao remota. Vazio significa
 	// transport.SSHComDiagnosticos.
 	ConectarSSH ConectarSSH
+
+	// Getenv le variavel de ambiente. Injetavel para que um teste nao
+	// dependa do ambiente de quem roda a suite -- nem o contamine.
+	Getenv func(string) string
 }
 
 // Execute roda o CLI e devolve o exit code. Nunca chama os.Exit: isso e
@@ -94,6 +99,7 @@ func Execute(args []string, stdout, stderr io.Writer, isTTY bool) output.ExitCod
 		Renderer:           &output.Renderer{Out: stdout, IsTTY: isTTY},
 		GlobalSettingsPath: GlobalSettingsPath,
 		LocalSettingsPath:  LocalSettingsPath,
+		Getenv:             os.Getenv,
 	}
 
 	root := NewRoot(ctx)
@@ -214,6 +220,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	root.AddCommand(newInspectCmd(ctx))
 	root.AddCommand(newTestCmd(ctx))
 	root.AddCommand(newStatusCmd(ctx))
+	root.AddCommand(newUpdateCmd(ctx))
 	return root
 }
 
