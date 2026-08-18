@@ -6,3 +6,8 @@
 
 # chave de teste da bancada: gerada por "make bancada-up", nunca commitada
 test/bancada/.chave/
+
+# binario compilado e artefatos de cobertura
+bin/
+cover.out
+cover.html

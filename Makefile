@@ -61,3 +61,57 @@ bancada-shell:
 		-o IdentitiesOnly=yes \
 		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 		-o LogLevel=ERROR ngxtest@127.0.0.1
+
+.PHONY: ajuda build test test-race fuzz cover fmt lint verificar limpar
+
+# `make` sem argumento lista o que da para fazer, em vez de rodar algo por
+# engano.
+.DEFAULT_GOAL := ajuda
+
+ajuda:
+	@echo "alvos do ngx:"
+	@echo "  build         compila o binario em bin/ngx"
+	@echo "  test          testes, sem -race (rapido)"
+	@echo "  test-race     testes com detector de corrida"
+	@echo "  fuzz          fuzz do alinhamento por FUZZTIME (default 60s)"
+	@echo "  cover         cobertura em cover.html"
+	@echo "  fmt           aplica gofmt"
+	@echo "  lint          gofmt -l e go vet, sem alterar arquivo"
+	@echo "  verificar     lint + test-race + fuzz curto; o que o CI roda"
+	@echo "  bancada-up    sobe o container de teste (sshd + nginx)"
+	@echo "  bancada-smoke prova as propriedades da bancada"
+	@echo "  bancada-down  derruba e limpa a bancada"
+	@echo "  limpar        remove bin/ e artefatos de cobertura"
+
+build:
+	@mkdir -p bin
+	CGO_ENABLED=0 go build -o bin/ngx ./cmd/ngx
+
+test:
+	go test ./...
+
+test-race:
+	go test ./... -race
+
+FUZZTIME ?= 60s
+fuzz:
+	go test ./internal/config/ -run 'XXX_nenhum' -fuzz FuzzAlinhamento -fuzztime $(FUZZTIME)
+
+cover:
+	go test ./... -coverprofile=cover.out
+	go tool cover -html=cover.out -o cover.html
+	@echo "cobertura em cover.html"
+
+fmt:
+	gofmt -w .
+
+# lint nao altera arquivo: serve para o CI e para conferir antes de commitar.
+lint:
+	@test -z "$$(gofmt -l . | tee /dev/stderr)" || (echo "arquivos fora do gofmt acima" >&2; exit 1)
+	go vet ./...
+
+verificar: lint test-race
+	@$(MAKE) fuzz FUZZTIME=30s
+
+limpar:
+	rm -rf bin cover.out cover.html
