@@ -51,6 +51,18 @@ const (
 	// midway -- the .conf may well be intact, what failed was the I/O. Not a
 	// fuzz divergence: the fuzz reads from memory and never produces it.
 	RecusaFalhaDeLeitura ClasseRecusa = "falha_de_leitura"
+
+	// RecusaPermissaoNegada is a read failure whose cause is specifically a
+	// permission denial. It exists as a class of its own because callers act
+	// on it: the CLI suggests --sudo, which does resolve it, and would be
+	// wrong to suggest for a dropped connection.
+	//
+	// It exists as a CLASS, and not as a substring of the message, because
+	// branching on human-readable text breaks the moment the text changes.
+	// That is not hypothetical here: the CLI used to match "permissao" in the
+	// message, and translating the project to English silently removed the
+	// --sudo hint, with no test noticing.
+	RecusaPermissaoNegada ClasseRecusa = "permissao_negada"
 )
 
 // ParseError is a problem found while reading the configuration, with the

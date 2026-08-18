@@ -359,7 +359,7 @@ func (c *cacheFonte) errosDeLeitura() ParseErrors {
 		problemas = append(problemas, ParseError{
 			File:    path,
 			Message: mensagemDeFalhaDeLeitura(c.erros[path]),
-			Classe:  RecusaFalhaDeLeitura,
+			Classe:  classeDeFalhaDeLeitura(c.erros[path]),
 		})
 	}
 	return problemas
@@ -469,6 +469,16 @@ func clonarArgs(args []string) []string {
 // The distinction only started to matter with remote access. Verified against
 // a real server that the SFTP error matches fs.ErrPermission, so the same
 // check serves both the local and the remote target.
+// classeDeFalhaDeLeitura separates permission from every other read failure.
+// The distinction is not cosmetic: --sudo fixes one and does nothing for the
+// other, so a caller needs to tell them apart without reading the message.
+func classeDeFalhaDeLeitura(err error) ClasseRecusa {
+	if errors.Is(err, fs.ErrPermission) {
+		return RecusaPermissaoNegada
+	}
+	return RecusaFalhaDeLeitura
+}
+
 func mensagemDeFalhaDeLeitura(err error) string {
 	switch {
 	case errors.Is(err, fs.ErrPermission):

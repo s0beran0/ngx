@@ -152,8 +152,11 @@ func comDicaDeSudo(err error, ctx *Context) error {
 		return err
 	}
 	for i := range problemas {
-		if problemas[i].Classe != config.RecusaFalhaDeLeitura ||
-			!strings.Contains(problemas[i].Message, "permissao") {
+		// Branch on the CLASS, never on the message text. This used to match
+		// the word "permissao" in the message, and translating the project to
+		// English removed the hint silently -- no test noticed, because no
+		// test covered the branch. Class survives rewording and translation.
+		if problemas[i].Classe != config.RecusaPermissaoNegada {
 			continue
 		}
 		problemas[i].Message += ". Run with --sudo so that ngx reads with privilege " +

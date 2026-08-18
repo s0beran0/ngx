@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -164,9 +165,17 @@ func knownHostsAprendido(t *testing.T, chave string, porta int) string {
 	require.ErrorAs(t, err, &e)
 	require.Equal(t, transport.CodigoHostDesconhecido, e.Diag.Code)
 
-	const prefixo = "acrescente a linha ao arquivo: "
-	_, linha, achou := strings.Cut(e.Diag.Message, prefixo)
-	require.Truef(t, achou, "the message did not carry the known_hosts line: %s", e.Diag.Message)
+	// The line is found by its SHAPE, not by cutting on a sentence. Matching
+	// prose made this test break the moment the project was translated, and
+	// the prose is not the contract anyway -- what matters is that the
+	// message hands the operator a line they can paste into known_hosts.
+	//
+	// Shape of a known_hosts entry: host (bracketed when the port is not 22),
+	// key type, base64 key.
+	padrao := regexp.MustCompile(`(?m)^.*?(\[?[\w.:-]+\]?(?::\d+)? +ssh-[\w-]+ +[A-Za-z0-9+/=]+)\s*$`)
+	casado := padrao.FindStringSubmatch(e.Diag.Message)
+	require.NotNilf(t, casado, "the message did not carry a usable known_hosts line: %s", e.Diag.Message)
+	linha := casado[1]
 
 	require.NoError(t, os.WriteFile(caminho, []byte(strings.TrimSpace(linha)+"\n"), 0o600))
 	return caminho
@@ -338,17 +347,21 @@ func TestInspectRemotoDaConfigRealReportaFaltaDePermissao(t *testing.T) {
 	require.False(t, env.OK)
 	require.NotEmpty(t, env.Diagnostics)
 
-	var recusa string
+	var recusa, codigo string
 	for _, d := range env.Diagnostics {
 		if d.Severity == output.SeverityError {
 			recusa = strings.ToLower(d.Message)
+			codigo = d.Code
 		}
 	}
-	// The assertion is about OUR message, and not about the raw runtime
-	// string: the runtime string changes between systems and library
-	// versions, and a consumer that branches on it breaks on its own. The
-	// contract is the classified cause.
-	require.Contains(t, recusa, "permissao",
+	// The assertion is on the CODE, not on words in the message. The message
+	// is prose meant for a human and gets reworded -- and it did: an earlier
+	// version of this test matched the Portuguese word "permissao" and would
+	// have failed the moment the project was translated, in a job nobody runs
+	// on every push. The code is the contract a consumer branches on.
+	require.Equal(t, "NGX-0003", codigo,
+		"a refused read is invalid configuration, not an internal error")
+	require.NotEmpty(t, recusa,
 		"the read refusal has to show up; a silently empty tree would be a lie")
 	require.NotContains(t, recusa, "permission denied",
 		"the raw runtime string cannot leak into the diagnostic")

@@ -46,7 +46,7 @@ connection will use that user:
 
 ```console
 $ ngx --user deploy version; echo "exit=$?"
-{"ok":false,"command":"version","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--user so faz sentido junto de --host"}],"meta":{"duration_ms":0}}
+{"ok":false,"command":"version","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--user only makes sense together with --host"}],"meta":{"duration_ms":0}}
 exit=2
 ```
 
