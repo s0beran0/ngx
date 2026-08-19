@@ -39,6 +39,10 @@ type GlobalFlags struct {
 	Profile      string
 	NoRedact     bool
 
+	// Field is the dot path of --field: it prints a single value from the
+	// envelope, raw, instead of the envelope itself.
+	Field string
+
 	// Remote access flags. Without Host none of them is used and the target
 	// is the local machine — the usual behavior.
 	Host            string
@@ -217,6 +221,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.DurationVar(&f.Timeout, "timeout", 30*time.Second, "timeout for the operations")
 	p.StringVar(&f.Profile, "profile", "", "profile from ngx's configuration file")
 	p.BoolVar(&f.NoRedact, "no-redact", false, "show sensitive values (terminal only)")
+	p.StringVar(&f.Field, "field", "", "print a single value from the envelope, by dot path (e.g. data.nginx.version)")
 	registerConnectionFlags(p, f)
 
 	root.AddCommand(newVersionCmd(ctx))
@@ -249,6 +254,32 @@ func prepare(ctx *Context, cmd *cobra.Command) error {
 	if f.JSON && f.Human {
 		return output.Usage("--json and --human are mutually exclusive")
 	}
+
+	// The flags that choose how the envelope is presented conflict with
+	// asking for a single value out of it: --json and --human have no
+	// coherent answer to "one field and the whole envelope", and --quiet
+	// would suppress exactly the value that was asked for. The check is
+	// here, on the flags, and not in the renderer: output.format also comes
+	// from the configuration file, where it is an ambient default that
+	// --field legitimately overrides.
+	if f.Field != "" {
+		switch {
+		case f.JSON:
+			return output.Usage("--field and --json are mutually exclusive")
+		case f.Human:
+			return output.Usage("--field and --human are mutually exclusive")
+		case f.Quiet:
+			return output.Usage("--field and --quiet are mutually exclusive")
+		}
+	}
+
+	// The renderer learns about --field before anything else can fail:
+	// whatever prepare rejects from here on is rendered through the
+	// selection too, so the flag also works when the failure happens before
+	// the command runs. The refusals above are the exception, on purpose --
+	// they are about --field itself, and filtering them through the rejected
+	// combination would hide the reason for the refusal.
+	ctx.Renderer.Field = f.Field
 
 	s, err := settings.Load(ctx.GlobalSettingsPath, ctx.LocalSettingsPath)
 	if err != nil {

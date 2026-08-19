@@ -1,9 +1,12 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 )
 
 // Format selects the renderer. FormatAuto decides by TTY.
@@ -45,6 +48,23 @@ type Renderer struct {
 	Redact   RedactSet
 	NoRedact bool
 	Quiet    bool
+
+	// Field is the dot path of --field. When it is not empty, Render writes
+	// a single value taken from the envelope -- raw, with no quotes and no
+	// envelope around it -- instead of the envelope itself.
+	//
+	// Inside the renderer, Field takes precedence over Format and over
+	// Quiet. The conflict between --field and the flags that choose the
+	// presentation is decided at the flag layer, because Format also comes
+	// from output.format in the configuration file, where it is an ambient
+	// default and not an explicit request; whatever gets here with Field
+	// filled in wants one value.
+	//
+	// A path that does not exist is a usage error with NOTHING written:
+	// an empty line on stdout would be assigned by a shell doing
+	// V=$(ngx --field x.y status) and the script would carry on believing
+	// it worked.
+	Field string
 }
 
 // Render writes the envelope in the resolved format. It does not mutate the
@@ -62,13 +82,8 @@ func (r *Renderer) Render(env *Envelope) error {
 	// and swallowing it would turn the escape silent, which is exactly what
 	// DR1 forbids. Whoever asks for --quiet wants less noise, not fewer
 	// alerts.
-	if r.Quiet && env.OK && !hasWarningOrWorse(env.Diagnostics) {
+	if r.Quiet && r.Field == "" && env.OK && !hasWarningOrWorse(env.Diagnostics) {
 		return nil
-	}
-
-	format, err := r.resolveFormat()
-	if err != nil {
-		return err
 	}
 
 	data := env.Data
@@ -82,6 +97,17 @@ func (r *Renderer) Render(env *Envelope) error {
 	// swapped in; the caller's env.Data stays untouched.
 	out := *env
 	out.Data = data
+
+	// Selection comes after redaction: --field reads the envelope that
+	// would have been printed, so it is not a way around the protection.
+	if r.Field != "" {
+		return r.renderField(&out)
+	}
+
+	format, err := r.resolveFormat()
+	if err != nil {
+		return err
+	}
 
 	switch format {
 	case FormatHuman:
@@ -178,4 +204,94 @@ func hasWarningOrWorse(diags []Diagnostic) bool {
 		}
 	}
 	return false
+}
+
+// renderField writes the single value addressed by Field. Nothing is written
+// before the value is resolved: on the failure path stdout stays byte-empty,
+// which is what tells a shell that there is no value instead of handing it an
+// empty string.
+func (r *Renderer) renderField(env *Envelope) error {
+	value, err := selectField(env, r.Field)
+	if err != nil {
+		return err
+	}
+	text, err := fieldText(value)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(r.Out, text); err != nil {
+		return Internal(err, "failed to write the output")
+	}
+	return nil
+}
+
+// selectField navigates the envelope by a dot path. The navigation happens
+// over the JSON shape of the envelope, not over the Go structs by reflection,
+// because the JSON is the contract: the path typed in --field is the same one
+// read in the output of --json, json tags and omitempty included. A field
+// omitted from the JSON does not exist for --field either, which is coherent
+// with "an unavailable field is omitted, never estimated".
+func selectField(env *Envelope, path string) (any, error) {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return nil, Internal(err, "failed to serialize the output")
+	}
+
+	// UseNumber keeps the literal from the JSON: without it every number
+	// would go through float64 and a duration of 30000 ms would reach the
+	// shell as 3e+04.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return nil, Internal(err, "failed to serialize the output")
+	}
+
+	current := doc
+	for _, segment := range strings.Split(path, ".") {
+		switch node := current.(type) {
+		case map[string]any:
+			value, ok := node[segment]
+			if !ok {
+				return nil, errNoSuchField(path)
+			}
+			current = value
+		case []any:
+			index, err := strconv.Atoi(segment)
+			if err != nil || index < 0 || index >= len(node) {
+				return nil, errNoSuchField(path)
+			}
+			current = node[index]
+		default:
+			// A scalar (or a null) has nothing underneath it.
+			return nil, errNoSuchField(path)
+		}
+	}
+	return current, nil
+}
+
+func errNoSuchField(path string) *Error {
+	return Usage("--field: the envelope has no value at %q", path)
+}
+
+// fieldText turns the selected value into the text that goes on stdout. A
+// string comes out raw -- no quotes, which is the whole point of the flag.
+// Everything else comes out as compact JSON: there is no raw form for an
+// object or for a list, and a null is a value that exists, so it comes out as
+// "null" and never as an empty line.
+func fieldText(value any) (string, error) {
+	switch v := value.(type) {
+	case string:
+		return v, nil
+	case json.Number:
+		return v.String(), nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", Internal(err, "failed to serialize the output")
+		}
+		return string(b), nil
+	}
 }

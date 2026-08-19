@@ -304,3 +304,164 @@ func TestQuietSuppressesSuccessButNeverWarning(t *testing.T) {
 		})
 	}
 }
+
+// --field prints the scalar raw: no quotes, no envelope, exactly one newline.
+// That is the whole point -- the value goes straight into a shell variable
+// without a JSON parser in between.
+func TestFieldPrintsScalarRaw(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: "data.version"}
+
+	env := output.New("version")
+	env.Data = map[string]string{"version": "1.20.1"}
+	require.NoError(t, r.Render(env))
+
+	require.Equal(t, "1.20.1\n", buf.String())
+}
+
+// A number comes out as it is written in the JSON, not through float64: a
+// duration of 30000 ms must not reach the shell as 3e+04.
+func TestFieldPrintsNumberWithoutScientificNotation(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: "meta.duration_ms"}
+
+	env := output.New("status")
+	env.Meta.DurationMS = 30000
+	require.NoError(t, r.Render(env))
+
+	require.Equal(t, "30000\n", buf.String())
+}
+
+// A boolean is a scalar as well: `ok` is the field an agent reads the most.
+func TestFieldPrintsBooleanRaw(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: "ok"}
+
+	require.NoError(t, r.Render(output.New("status")))
+
+	require.Equal(t, "true\n", buf.String())
+}
+
+// There is no raw form for an object or for a list, so they come out as
+// compact JSON -- one line, which is still pipeable.
+func TestFieldPrintsObjectAndListAsCompactJSON(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		want  string
+	}{
+		{"object", "data", "{\"version\":\"1.20.1\"}\n"},
+		{"empty list", "diagnostics", "[]\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: c.field}
+
+			env := output.New("version")
+			env.Data = map[string]string{"version": "1.20.1"}
+			require.NoError(t, r.Render(env))
+
+			require.Equal(t, c.want, buf.String())
+		})
+	}
+}
+
+// A JSON null exists in the envelope and is not nothing: it comes out as
+// "null", never as an empty line.
+func TestFieldPrintsNullAsNull(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: "data"}
+
+	require.NoError(t, r.Render(output.New("status")))
+
+	require.Equal(t, "null\n", buf.String())
+}
+
+// A digit segment indexes a list: this is what makes the error path readable
+// with `--field diagnostics.0.code`.
+func TestFieldIndexesLists(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: "diagnostics.0.code"}
+
+	env := output.New("test")
+	env.AddDiagnostic(output.Diagnostic{Severity: output.SeverityError, Code: "NGX-0003", Message: "invalid"})
+	require.NoError(t, r.Render(env))
+
+	require.Equal(t, "NGX-0003\n", buf.String())
+}
+
+// THE test of this feature. A path that does not exist is a usage error with
+// NOTHING on stdout. An empty line here would be assigned by
+// `V=$(ngx --field x.y status)` and the script would carry on believing it
+// worked. Asserting only the exit code would pass with the defect present,
+// which is why stdout is asserted too.
+func TestFieldWithMissingPathIsUsageErrorAndWritesNothing(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+	}{
+		{"key that does not exist", "meta.nginx_version"},
+		{"key that does not exist at the top level", "nope"},
+		{"index out of range", "diagnostics.7.code"},
+		{"index that is not a number", "diagnostics.first"},
+		{"path going through a scalar", "command.length"},
+		{"path going through a null", "data.anything"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Field: c.field}
+
+			err := r.Render(output.New("status"))
+
+			require.Error(t, err)
+			require.Equal(t, output.ExitUsage, output.CodeOf(err))
+			require.Empty(t, buf.String(), "an empty line would become an empty shell variable")
+		})
+	}
+}
+
+// Redaction happens before the selection: asking for the field of a secret
+// returns the redacted value, it does not bypass the protection.
+func TestFieldAppliesRedaction(t *testing.T) {
+	var buf bytes.Buffer
+	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
+	require.NoError(t, err)
+
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, Redact: set, Field: "data.value"}
+
+	env := output.New("get")
+	env.Data = redactableData{Value: "/etc/ssl/priv.key"}
+	require.NoError(t, r.Render(env))
+
+	require.Equal(t, output.RedactedValue+"\n", buf.String())
+}
+
+// The --no-redact gate comes first: --field is not a way around it.
+func TestFieldDoesNotBypassTheNoRedactGate(t *testing.T) {
+	var buf bytes.Buffer
+	r := &output.Renderer{Out: &buf, Format: output.FormatJSON, IsTTY: false, NoRedact: true, Field: "ok"}
+
+	err := r.Render(output.New("get"))
+
+	require.Error(t, err)
+	require.Equal(t, output.ExitUsage, output.CodeOf(err))
+	require.Empty(t, buf.String())
+}
+
+// In the renderer, Field takes precedence over the format and over Quiet: the
+// conflict between --field and the flags that choose the presentation is
+// decided at the flag layer (prepare), because output.format also comes from
+// the configuration file, where it is an ambient default and not an explicit
+// request. Whatever reaches the renderer with Field filled in wants one value.
+func TestFieldTakesPrecedenceOverFormatAndQuiet(t *testing.T) {
+	for _, format := range []output.Format{output.FormatJSON, output.FormatHuman, output.FormatAuto} {
+		var buf bytes.Buffer
+		r := &output.Renderer{Out: &buf, Format: format, IsTTY: true, Quiet: true, Field: "command"}
+
+		require.NoError(t, r.Render(output.New("status")))
+
+		require.Equal(t, "status\n", buf.String())
+	}
+}

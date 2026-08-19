@@ -239,7 +239,50 @@ of v0.2.
     --timeout         operation timeout (default 30s)
     --profile         profile from ngx's configuration file
     --no-redact       show sensitive values (terminal only)
+    --field           print a single value from the envelope, by dot path
 ```
+
+#### `--field`: one value comes out as one value
+
+`--field` takes a dot path over the envelope — the same shape `--json`
+prints — and writes that single value, raw: no quotes, no envelope, no JSON
+parser needed on the other side. It lives in the renderer, so it works for
+every command.
+
+```console
+$ ngx --field data.version version
+0.1.0-dev
+```
+
+A path that does not exist is **exit 2 with nothing on stdout**. The
+diagnostic goes to stderr, like any usage error:
+
+```console
+$ ngx --field data.nginx.version version 2>/dev/null
+$ ngx --field data.nginx.version version
+--field: the envelope has no value at "data.nginx.version"
+$ echo $?
+2
+```
+
+That empty stdout is the point: an empty line would be assigned by
+`V=$(ngx --field ... status)` and the script would carry on believing it
+worked.
+
+It reads the failure envelope just the same, which is how a script gets the
+code of what went wrong without parsing anything:
+
+```console
+$ ngx --field diagnostics.0.code inspect -c /does/not/exist.conf
+NGX-0001
+```
+
+A string comes out raw; an object or a list, which have no raw form, come out
+as compact JSON on one line. Redaction is applied before the selection, so
+`--field` is not a way around it. `--field` is refused together with `--json`,
+`--human` or `--quiet`: the first two ask for the whole envelope at the same
+time as one field, and the third would suppress exactly the value that was
+asked for.
 
 The remote access flags (`--host`, `--user`, `--port`, `--key`,
 `--known-hosts`, `--insecure-host-key`, `--sudo`) are documented in

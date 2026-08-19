@@ -72,7 +72,7 @@ reaches for `jq` when the output is unreadable.
 **Files:** Modify `internal/cli/root.go`, `internal/output/render.go`
 **Test:** `internal/output/render_test.go`, `internal/cli/root_test.go`
 
-- [ ] **Step 1: Tests first**
+- [x] **Step 1: Tests first**
 
 An existing scalar prints raw with no trailing newline beyond one; a path into
 an object prints compact JSON; a path that does not exist is **exit 2 with
@@ -83,12 +83,12 @@ The case that matters: a missing path must not print an empty line. A test that
 only checks the exit code would pass while a shell variable silently receives
 an empty string.
 
-- [ ] **Step 2: Implement in the renderer**
+- [x] **Step 2: Implement in the renderer**
 
 `--field` is a rendering concern: the envelope is built normally and the
 renderer selects. It applies to every command for free, which is the point.
 
-- [ ] **Step 3: Run and commit**
+- [x] **Step 3: Run and commit**
 
 ### Task O2: `inspect --summary`
 
