@@ -99,6 +99,7 @@ var upgradeCommands = map[string]string{
 	"aur":      "pacman -Syu ngx",
 	"scoop":    "scoop update ngx",
 	"winget":   "winget upgrade ngx",
+	"apk":      "apk upgrade ngx",
 }
 
 // checkCommands is the counterpart for `--check`: how to ASK whether a newer
@@ -117,6 +118,7 @@ var checkCommands = map[string]string{
 	"aur":      "pacman -Qu ngx",
 	"scoop":    "scoop status ngx",
 	"winget":   "winget upgrade --id ngx",
+	"apk":      "apk version ngx",
 }
 
 // CheckCommand returns the command that asks about updates in this channel.

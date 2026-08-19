@@ -379,24 +379,33 @@ func TestInstallChannelIsDirectByDefault(t *testing.T) {
 }
 
 func TestUpgradeCommandCoversEveryPackagedChannel(t *testing.T) {
-	esperado := map[string]string{
+	expected := map[string]string{
 		"homebrew": "brew upgrade ngx",
 		"deb":      "apt upgrade ngx",
 		"rpm":      "dnf upgrade ngx",
 		"aur":      "pacman -Syu ngx",
 		"scoop":    "scoop update ngx",
 		"winget":   "winget upgrade ngx",
+		"apk":      "apk upgrade ngx",
 	}
-	for canal, comando := range esperado {
-		got, ok := UpgradeCommand(canal)
-		require.True(t, ok, "canal %q tem de ser conhecido", canal)
-		assert.Equal(t, comando, got)
+	for channel, command := range expected {
+		got, ok := UpgradeCommand(channel)
+		require.True(t, ok, "channel %q has to be known", channel)
+		assert.Equal(t, command, got)
 	}
-	assert.Equal(t, len(esperado), len(upgradeCommands),
-		"todo canal na tabela precisa de um caso aqui")
+
+	// Counting is what makes this test catch an ADDITION. A packaged channel
+	// missing from the table does not fail loudly: it falls through to the
+	// unknown-channel refusal, which tells the user nothing about how to
+	// upgrade. That is exactly what happened when the .apk started being built
+	// and "apk" was not here.
+	assert.Equal(t, len(expected), len(upgradeCommands),
+		"every channel in the table needs a case here")
+	assert.Equal(t, len(upgradeCommands), len(checkCommands),
+		"a channel that can be upgraded also has to be checkable")
 
 	_, ok := UpgradeCommand("direct")
-	assert.False(t, ok, "direct nao tem comando externo de atualizacao")
+	assert.False(t, ok, "direct has no external upgrade command")
 }
 
 // A prova que importa: num canal empacotado, ngx nao troca o binario. Verificar

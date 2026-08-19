@@ -366,7 +366,16 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			env := ctx.NewEnvelope("version")
-			data := map[string]string{"version": output.Version}
+			data := map[string]string{
+				"version": output.Version,
+				// Always present, never omitted: "I do not know how I was
+				// installed" is not a state that can exist, because the
+				// variable has a default. Reporting it is what lets a caller
+				// find out that `ngx update` will refuse BEFORE running it,
+				// and what lets a packager check their build did what they
+				// meant.
+				"install_channel": update.InstallChannel,
+			}
 
 			// The embedded public key goes out here for two reasons. Users
 			// can check it against the project's published key before
