@@ -9,15 +9,19 @@ restate their decisions; it orders them and records what depends on what.
 
 ## Why 0.1.1 and not 0.2.0
 
-Strict semver would make new commands a minor bump. The roadmap reserves
-**v0.2 for mutation** — plan/apply with rollback — and that reservation is
-worth more than the letter of the rule: someone reading "v0.2" in this project
-should understand "it writes now". Everything here is still read-only, so it
-stays in 0.1.x.
+`get` and `--field` are not new features. They come from the v1.0 spec that
+started this project, and they were listed in the v0.1 design from the first
+day — §5 defines the selector language in full, down to the four
+disambiguation rules. Shipping them **completes v0.1** rather than extending
+it, and a patch number says exactly that.
 
-*Cost accepted:* a changelog where 0.1.1 introduces `ngx get`, which is unusual
-for a patch version. The release notes have to say so plainly instead of
-letting the number speak.
+The roadmap agrees from the other side: **v0.2 is reserved for mutation** —
+plan/apply with rollback. Someone reading "v0.2" in this project should
+understand "it writes now", and spending that number on read-only work would
+cost more in meaning than it gains in semver purity.
+
+*What the release notes still have to say plainly:* a patch version that adds a
+command is unusual, and the reason is that the command was owed, not new.
 
 ## Two independent tracks
 
