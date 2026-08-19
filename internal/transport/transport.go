@@ -18,6 +18,12 @@ import (
 //
 // Confusing the two makes an `nginx -t` that rejects the configuration look
 // like an infrastructure failure.
+// The interface has no write operation, and that is a v0.1 property rather
+// than a permanent guarantee: today no command changes anything on the
+// target, so offering a way to write would be surface without a caller. v0.2
+// brings mutation, and it will need one -- adding it is expected, not a
+// violation. What must not happen is a write path appearing before the parts
+// that make writing safe (byte spans, stable IDs) are proven.
 type Transport interface {
 	// Open opens a file for reading. The caller closes it.
 	Open(path string) (io.ReadCloser, error)

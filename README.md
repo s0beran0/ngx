@@ -28,8 +28,25 @@ pipe, structurally, cannot even ask.
 
 ## Current state — read this before trying to install
 
-This is **v0.1, under development**, and it is **read-only**. Nothing here
-changes the nginx configuration.
+This is **v0.1, under development**. It is read-only **as a milestone, not as
+a design**: `ngx` is meant to edit and create `.conf` files, and v0.2 brings
+mutation with plan/apply and rollback.
+
+v0.1 ships without any write path on purpose. The two riskiest bets of the
+project — the selector language and the stability of node IDs — get validated
+first, so that when a code path capable of writing to a production `.conf`
+finally exists, it is built on parts that were already proven. Shipping the
+writer first would mean discovering a parser bug by corrupting somebody's
+server.
+
+The architecture already carries what writing needs: every node holds byte
+spans (`Span` for the whole directive, `HeadSpan` for name and arguments),
+which is what makes a v0.2 edit a byte substitution instead of a re-render of
+the file — comments, blank lines and the author's formatting survive
+untouched. IDs are anchored to a `config_hash` so an agent cannot apply a
+change against a tree that moved underneath it.
+
+So: today nothing here changes the nginx configuration.
 
 - **There are only pre-releases.** The stable channel is still empty, so
   `install.sh` without `NGX_CHANNEL=beta` answers that only pre-releases exist
