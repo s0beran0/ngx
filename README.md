@@ -48,18 +48,20 @@ change against a tree that moved underneath it.
 
 So: today nothing here changes the nginx configuration.
 
-- **There are only pre-releases.** The stable channel is still empty, so
-  `install.sh` without `NGX_CHANNEL=beta` answers that only pre-releases exist
-  and points at beta. Releases are signed with minisign, and the installer
-  REFUSES to install when it cannot verify the signature — absence of
-  verification is a failure, never a "carried on anyway". When minisign is not
-  installed, it verifies with `openssl`, which exists on practically every
-  server.
+- **v0.1.0 is the first stable release.** Releases are signed with minisign,
+  and the installer REFUSES to install when it cannot verify the signature —
+  absence of verification is a failure, never a "carried on anyway". When
+  minisign is not installed, it verifies with `openssl`, which exists on
+  practically every server.
 
   ```sh
-  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \
-    | NGX_CHANNEL=beta sh
+  curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh | sh
   ```
+
+  `NGX_CHANNEL=beta` picks up pre-releases instead. The script installs into
+  `/usr/local/bin` and tells you the exact command to re-run with privilege if
+  the directory needs it — it never calls `sudo` on its own. Point it somewhere
+  else with `NGX_INSTALL_DIR`.
 - **There are five commands:** `version`, `inspect`, `test`, `status` and
   `update`. Commands foreseen in the design (`get`, `tree`, `fmt`, `diff`,
   `apply`) do not exist yet. `status` does not detect drift yet, so it never
