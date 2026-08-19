@@ -138,3 +138,43 @@ func TestFindByIDReturnsNilWhenNotFound(t *testing.T) {
 
 	require.Nil(t, config.FindByID(tree, "h.s9"))
 }
+
+// IDs are unique within a file and not within a configuration. On the layout
+// every distribution ships -- one file per site under conf.d/*.conf -- the
+// first server of every file is "s0". This test states that collision as a
+// fact rather than leaving it to be discovered by a v0.2 edit landing on the
+// wrong node, and pins the refusal that keeps it from being silent.
+func TestFindByIDRefusesAnIDThatSeveralFilesShare(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "nginx.conf"),
+		[]byte("events { worker_connections 16; }\nhttp { include conf.d/*.conf; }\n"), 0o644))
+	for _, name := range []string{"a", "b", "c"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "conf.d", name+".conf"),
+			[]byte("server { listen 8080; server_name "+name+".test; }\n"), 0o644))
+	}
+
+	tree, err := config.Parse(config.ParseOptions{Path: filepath.Join(dir, "nginx.conf")})
+	require.NoError(t, err)
+
+	shared := 0
+	tree.Walk(func(n *config.Node) bool {
+		if n.ID == "s0" {
+			shared++
+		}
+		return true
+	})
+	require.Equal(t, 3, shared, "one server per file, and each one is the s0 of its own file")
+
+	require.Nil(t, config.FindByID(tree, "s0"),
+		"three nodes answer to this ID, so there is no node this ID names")
+
+	// Combine resolves the includes into one tree, and there the IDs do
+	// separate. It is not the default of any command, which is why the
+	// collision above is what a caller actually meets.
+	combined, err := config.Combine(tree)
+	require.NoError(t, err)
+	require.NotNil(t, config.FindByID(combined, "h.s0"))
+	require.NotNil(t, config.FindByID(combined, "h.s1"))
+	require.NotNil(t, config.FindByID(combined, "h.s2"))
+}

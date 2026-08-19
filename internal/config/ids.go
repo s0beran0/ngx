@@ -82,20 +82,42 @@ func abbreviate(directive string) string {
 	return directive
 }
 
-// FindByID locates a node by its ID. Returns nil when there is none.
+// FindByID locates a node by its ID. Returns nil when there is none, and also
+// when there is more than one.
+//
+// Refusing the ambiguous case is not caution, it is the only safe answer
+// available here. IDs are assigned per file (parse.go:121), so they are unique
+// within a file and NOT within a configuration: on the standard layout, where
+// every site is its own file under conf.d/*.conf, the first server of each
+// file is "s0" and its first directive is "s0.d0". Measured against the test
+// bench, 112 listen directives shared a single ID.
+//
+// Returning the first match would make a caller edit a node it never read,
+// which is the silent error D3 exists to prevent. Whoever needs a node by ID
+// today has the file that scopes it, because every output that carries an ID
+// carries its file alongside.
+//
+// What the reference for a node across the whole configuration should be is a
+// v0.2 decision and is recorded as a blocker in the implementation plan; it is
+// not settled here.
 func FindByID(t *Tree, id string) *Node {
 	id = strings.TrimPrefix(id, "#")
 
 	var found *Node
+	ambiguous := false
 	t.Walk(func(n *Node) bool {
+		if n.ID != id {
+			return true
+		}
 		if found != nil {
+			ambiguous = true
 			return false
 		}
-		if n.ID == id {
-			found = n
-			return false
-		}
+		found = n
 		return true
 	})
+	if ambiguous {
+		return nil
+	}
 	return found
 }

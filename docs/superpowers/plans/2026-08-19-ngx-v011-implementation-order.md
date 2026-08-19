@@ -396,6 +396,47 @@ that ngx still accepts. If either side changes — an upstream fix, a lexer
 update — the test fails and the note gets revisited instead of quietly
 outliving its truth.
 
+### The second v0.2 blocker: an ID does not name one node
+
+Found by the release gate's own agent test, not by a unit test — asking the
+bench "which ports are listened on" returned 112 matches carrying **one**
+distinct ID. Every one of them was `s0.d0`.
+
+The cause is not the privileged read path, it is `include`. IDs are assigned
+per file (`parse.go:121`), so they count siblings from the root of the file
+they live in. On the layout every distribution ships — one site per file under
+`conf.d/*.conf` — the first `server` of every file is `s0` and its first
+directive is `s0.d0`. The `h.` prefix disappears too, because the included
+fragment has no enclosing `http` of its own. `Combine` assigns IDs over the
+assembled tree and does separate them, but it is not the default of any
+command: `get` never combines and `inspect` only does with `--combine`.
+
+*For v0.1.1 nothing reads back an ID*, so no command resolves one to the wrong
+node. IDs are output-only, and every output that carries one carries its `file`
+next to it, which is what actually scopes it.
+
+*For v0.2 it is a blocking prerequisite*, and of the same family as the Lua one
+above: both let a caller act on a node it never read. `FindByID` used to return
+the first match, which would have made `ngx set --id s0.d0` edit one of 112
+nodes at random. It now refuses the ambiguous case (`ids.go`), so the failure is
+a refusal rather than a wrong edit — but a refusal is not a reference, and v0.2
+needs one.
+
+**The decision is deliberately not taken here**, because it is the kind that
+looks obvious and is not:
+
+- *Assign IDs over the whole configuration.* Makes them unique, and destroys
+  the stability D3 promises: dropping a new file into `conf.d/*.conf` would
+  renumber servers in files nobody touched.
+- *Make the reference `(file, id)`.* Keeps stability and matches what the output
+  already shows, at the cost of a compound reference.
+- *Make `--combine` the addressing tree.* Unique and stable against sibling
+  files, but the IDs then belong to a view the caller has to ask for.
+
+Whichever wins has to answer the same question D3 asks: what happens to a
+reference when the configuration changes underneath it. That belongs in the
+structured v0.2 plan.
+
 ### Where the oracle itself could lie
 
 `openresty -t` does **not compile** the Lua body: `{ if end }` passes. It only

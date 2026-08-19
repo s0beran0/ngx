@@ -72,15 +72,23 @@ upstream in the crossplane.
 
 ### D3 — Hash-anchored positional IDs
 
-ID presented with a different hash is rejected with exit 9.IDs are derived from structural position, counted between siblings of the same type
-directive**. Every envelope that returns IDs carries `config_hash` in `meta`. One
+**IDs are derived from structural position, counted between siblings of the
+same directive.** Every envelope that returns IDs carries `config_hash` in
+`meta`. An ID presented with a different hash is rejected with exit 9.
 
-The hash anchor converts a
-silent error — the agent edits the wrong node — in an explicit error. *Why:* the v1.0 spec promises that the agent can reference a node between
-It's the principle
-calls without rereading everything, but purely positional IDs change meaning
-"ambiguity is error, don't guess" applied to time rather than space, and reuses the
-when a previous sibling is inserted or removed. optimistic locking mechanism that the spec already defines for patches.
+*Why:* the v1.0 spec promises that the agent can reference a node between calls
+without rereading everything, but purely positional IDs change meaning when a
+previous sibling is inserted or removed. The hash anchor turns a silent error
+— the agent edits the wrong node — into an explicit one. It is the principle
+"ambiguity is error, don't guess" applied to time rather than to space, and it
+reuses the optimistic locking the spec already defines for patches.
+
+*What this does NOT say, and was measured in the v0.1.1 gate:* the ID is unique
+within its file, not within the configuration. IDs are assigned per file, so on
+the `conf.d/*.conf` layout the first server of every file is `s0`. The hash
+anchors an ID in TIME; nothing here anchors it in SPACE. Choosing that
+reference is a v0.2 prerequisite, recorded in
+`plans/2026-08-19-ngx-v011-implementation-order.md`.
 
 ### D4 — Drift by evidence, not by master hash
 
