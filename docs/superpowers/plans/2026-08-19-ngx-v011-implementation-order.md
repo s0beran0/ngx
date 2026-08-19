@@ -356,6 +356,53 @@ words. A consumer that never reads `schema_version` — which is most of them,
 today — has no other way to find out, and "it was in the schema version" is not
 a defence for silence.
 
+## What the Lua work left open
+
+### The oracle does not cover Lua
+
+The bench runs stock nginx 1.20.1, which has no `lua-nginx-module`: it refuses
+`content_by_lua_block` outright as an unknown directive. So the fixture that
+makes "compatible with nginx" mean something **cannot validate the Lua path** —
+verified, not assumed.
+
+Everything claimed about Lua acceptance therefore rests on crossplane's lexer
+and on reasoning about Lua syntax, which is exactly the kind of ground this
+project has been burned on before. Two ways out, and the choice is a cost
+decision rather than a technical one:
+
+- a second bench image with OpenResty, giving a real oracle for the Lua path;
+- or documenting plainly that Lua support is validated against crossplane only.
+
+Doing neither is the bad option: it leaves a claim with nothing behind it.
+
+### An inherited limitation: `\'` inside a Lua string
+
+crossplane's Lua lexer does not understand an escaped single quote, so
+`local s = 'a\'b'` is refused. Real nginx with the module almost certainly
+accepts it — but "almost certainly" is precisely what could not be checked,
+for the reason above.
+
+There is no fix available on our side: the dependency's lexer fails on its own.
+The honest path is upstream — a report, and ideally a patch, to
+nginx-go-crossplane. Working around it locally would mean forking the lexer,
+which this project rejected once already when it chose to build spans on top of
+crossplane rather than vendor a fork.
+
+*Net effect is still positive:* before this work, **every** Lua block with an
+`if` was refused. Now one escaping form is.
+
+### A defect fixed outside the scope, worth keeping visible
+
+`readVar` had copied the CRLF rule from `readWord`, so `"${\r\nx"` produced two
+tokens against crossplane's one — a real aligner desync that predates the Lua
+work and would silently shift every span after it. Found while building the
+differential test, fixed, and seeded into the fuzz corpus.
+
+It is worth noticing *how* it surfaced: the differential test had been
+comparing against an oracle that lexed a different language, because it never
+registered the Lua extension. Making the oracle honest is what exposed a bug
+that had nothing to do with Lua.
+
 ## Release gate
 
 The 0.1.0 gate, plus:
