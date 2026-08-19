@@ -26,13 +26,21 @@ Linux, macOS and Windows on their own.
 The other four — Homebrew, Scoop, WinGet and the AUR — are **built and idle**.
 Every release compiles their artifacts, proves each one carries its own channel
 identity, and writes the manifests; the upload is skipped and the release log
-says which were skipped and why. What they wait on is not work in this
-repository: it is the project becoming something those registries accept. They
-each ask for evidence a new project does not have yet, and asking early gets a
-submission rejected rather than queued.
+says which were skipped and why.
 
-So the table below is the map of the design, not a menu that is all open. Take
-`install.sh` or a package until this section says otherwise.
+What they wait on is a credential, and nothing else. It is worth being precise
+about this, because the opposite is widely assumed: **a tap, a Scoop bucket and
+an AUR package have no gatekeeper.** They are repositories you own, and a new
+project with no stars can publish to all three today. The popularity rules
+people remember — 75 stars, 30 forks, 30 watchers — belong to `homebrew-core`
+and to the official Scoop buckets, which is precisely why this project uses its
+own tap and its own bucket instead.
+
+WinGet is the one exception, and even there the gate is review, not notability:
+a pull request against `microsoft/winget-pkgs`, a CLA, automated validation and
+a human moderator.
+
+Until the credentials exist, take `install.sh` or a package.
 
 ## The channels
 

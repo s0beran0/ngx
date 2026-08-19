@@ -129,10 +129,10 @@ The SHA256 checksum is always checked and there is no way to turn it off.
 `curl | sh` comes first in this list because it is the one that works
 everywhere today. So do the `.deb`, `.rpm` and `.apk` on every release.
 
-The four marked *(not live yet)* are built by every release and not published:
-the registries behind them ask for evidence a new project does not have, and
-the release log names each one it skipped. They are listed so the design is
-visible, not so you try them.
+The four marked *(not live yet)* are built by every release and not published,
+because the credentials that push them do not exist yet. Not because of
+popularity rules: a tap, a Scoop bucket and an AUR package are repositories the
+author owns and have no gatekeeper. See `docs/install-channels.md`.
 
 | Channel | Command | Self-updates? |
 |---|---|---|
