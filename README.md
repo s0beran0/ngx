@@ -117,6 +117,35 @@ should agree to run.
 
 The SHA256 checksum is always checked and there is no way to turn it off.
 
+### Installing from a package manager
+
+`curl | sh` comes first in this list because it is the one that works
+everywhere today. The rest are there for whoever already lives in a package
+manager:
+
+| Channel | Command | Self-updates? |
+|---|---|---|
+| installer | `curl -fsSL .../install.sh \| sh` | yes, `ngx update` |
+| Homebrew (macOS) | `brew install s0beran0/tap/ngx` | no — `brew upgrade ngx` |
+| Debian/Ubuntu | `dpkg -i ngx_*_linux_amd64.deb` | no — `apt upgrade ngx` |
+| Fedora/RHEL | `rpm -i ngx_*_linux_amd64.rpm` | no — `dnf upgrade ngx` |
+| Alpine | `apk add --allow-untrusted ngx_*.apk` | no — `apk upgrade ngx` |
+| Scoop | `scoop install ngx` | no — `scoop update ngx` |
+| WinGet | `winget install EduardoBenck.ngx` | no — `winget upgrade ngx` |
+| Arch (AUR) | `yay -S ngx-bin` | no — `pacman -Syu ngx` |
+
+**A packaged `ngx` does not update itself, on purpose.** The binary knows which
+channel installed it — `ngx version` reports `install_channel` — and when that
+channel is a package manager, `ngx update` refuses and names the command that
+does the job instead. Replacing a file that `apt`, `brew` or `scoop` believes
+it owns leaves their database describing something that is no longer there, and
+the next upgrade either reverts you in silence or fails. So a refusal from
+`ngx update` is the tool working, not the tool broken.
+
+[`docs/install-channels.md`](docs/install-channels.md) has the full table, what
+is automatic on each release and what still needs a human — WinGet, notably,
+goes out as a pull request to `microsoft/winget-pkgs` that Microsoft reviews.
+
 ## Using it today
 
 ### The envelope

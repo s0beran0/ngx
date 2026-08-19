@@ -131,21 +131,33 @@ jobs:
           # matching a real symbol the packages come out claiming "direct" and
           # `ngx update` overwrites a file dpkg or rpm still believes it owns.
           #
-          # This loop has to list every channel that .goreleaser.yaml injects.
-          # Adding a packaged build there without adding it here leaves the new
-          # format as the only unproven artifact in the release.
+          # THIS LOOP HAS TO LIST EVERY CHANNEL .goreleaser.yaml INJECTS.
+          # Adding a build there without adding it here leaves the new channel
+          # as the only unproven artifact in the release, and the step stays
+          # green while validating only the others.
           #
-          # The assertion is behavioural, not cosmetic: a channel that reached
-          # the binary makes `ngx update` FAIL and name the channel in the
-          # diagnostic. A -X that was ignored leaves "direct", and a "direct"
-          # binary goes to the network instead -- whatever it answers, it will
-          # not be the channel's name. Once `ngx version` reports
-          # `install_channel` (Task C1 step 3) this can read that field
-          # directly, which is cheaper and says the same thing.
-          for channel in deb rpm apk; do
+          # Kept in sync with, in .goreleaser.yaml: the builds ngx-deb,
+          # ngx-rpm, ngx-apk (consumed by nfpms) and ngx-homebrew, ngx-scoop,
+          # ngx-winget, ngx-aur (consumed by the archives that homebrew_casks,
+          # scoops, winget and aurs publish).
+          #
+          # Each channel is checked twice, because the two checks fail in
+          # different ways. `ngx version` reports install_channel, so it says
+          # directly whether the -X landed. And the assertion is also
+          # behavioural: a channel that reached the binary makes `ngx update`
+          # FAIL and name the channel in the diagnostic. A -X that was ignored
+          # leaves "direct", and a "direct" binary goes to the network instead
+          # -- whatever it answers, it will not be the channel's name.
+          for channel in deb rpm apk homebrew scoop winget aur; do
             go build \
               -ldflags "-X $pubkey_sym=$NGX_PUBLIC_KEY -X $channel_sym=$channel" \
               -o "/tmp/ngx-proof-$channel" ./cmd/ngx
+            reported=$("/tmp/ngx-proof-$channel" version --json | jq -r '.data.install_channel // ""')
+            if [ "$reported" != "$channel" ]; then
+              echo "ABORTED: a $channel build reports install_channel=$reported." >&2
+              echo "The -X against $channel_sym was silently ignored." >&2
+              exit 1
+            fi
             if "/tmp/ngx-proof-$channel" update --json > "/tmp/ngx-proof-$channel.json" 2>&1; then
               echo "ABORTED: a $channel build did NOT refuse to update itself." >&2
               echo "The -X against $channel_sym was silently ignored, so the" >&2
@@ -166,6 +178,54 @@ jobs:
             esac
           done
 
+          # THE COUNTER-PROOF. Everything above shows a channel reaching the
+          # binary; this shows it NOT reaching the one artifact that must not
+          # carry it. A build with no -X is what the generic tarball, and a
+          # plain `go build`, are -- and if it ever came out as anything but
+          # "direct", `curl | sh` would install a binary that refuses to update
+          # itself on a machine with no package manager to update it.
+          plain=$(/tmp/ngx-proof version --json | jq -r '.data.install_channel // ""')
+          if [ "$plain" != "direct" ]; then
+            echo "ABORTED: a build with no channel flag reports $plain." >&2
+            echo "The tarball install.sh delivers would refuse to self-update." >&2
+            exit 1
+          fi
+          echo "a build with no channel flag stays direct"
+
+      # Which self-service channels this release will actually push to.
+      #
+      # The credentials for the tap, the scoop bucket, the winget fork and the
+      # AUR live outside this repository -- secrets.GITHUB_TOKEN reaches none
+      # of them -- and a missing one makes goreleaser generate the manifest
+      # without publishing it (see skip_upload in .goreleaser.yaml). That is
+      # deliberate: an absent AUR account must not block a release. But a
+      # channel skipped in silence is a channel nobody notices is stale, so it
+      # gets said out loud here.
+      - name: report which channels will publish
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          report() {
+            if [ -n "$2" ]; then
+              echo "- $1: WILL PUBLISH"
+            else
+              echo "- $1: skipped, secret $3 is not set (docs/install-channels.md)"
+            fi
+          }
+          {
+            echo "### Self-service channels"
+            echo ""
+            report "homebrew tap (s0beran0/homebrew-tap)" "$HOMEBREW_TAP_TOKEN" HOMEBREW_TAP_TOKEN
+            report "scoop bucket (s0beran0/scoop-bucket)" "$SCOOP_BUCKET_TOKEN" SCOOP_BUCKET_TOKEN
+            report "winget pull request (microsoft/winget-pkgs)" "$WINGET_PKGS_TOKEN" WINGET_PKGS_TOKEN
+            report "aur (ngx-bin)" "$AUR_SSH_KEY" AUR_SSH_KEY
+            echo ""
+            echo "The .deb/.rpm/.apk and the tarballs do not depend on any of these."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
@@ -177,6 +237,16 @@ jobs:
           # A variable, not a secret: the public key is public by definition.
           # The build embeds this value in the binary (DD3).
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
+          # One credential per destination repository, because a fine-grained
+          # PAT is scoped to repositories and none of these is this one. All
+          # four are OPTIONAL: goreleaser reads them through envOrDefault and
+          # skips the upload when they are empty, so a release still goes out
+          # complete for every other channel. See docs/install-channels.md for
+          # how each one is created.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
 
       # The release is already published when this step runs; it does not
       # prevent the error, only makes sure it does not go unnoticed. The

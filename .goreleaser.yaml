@@ -118,13 +118,10 @@ builds:
       - *ldflag_pubkey
       - -X github.com/s0beran0/ngx/internal/update.InstallChannel=rpm
 
-  # KNOWN GAP, deliberate and proven in a container: "apk" is not in
-  # internal/update.upgradeCommands yet, so this package refuses through the
-  # UNKNOWN-channel branch (NGX-0317) instead of the packaged-channel one
-  # (NGX-0316). It still refuses -- failing closed on an unrecognised channel
-  # is what that branch is for -- but the message says "ngx does not recognize"
-  # rather than naming `apk upgrade ngx`. Adding "apk" to upgradeCommands and
-  # checkCommands turns it into the right message with no change here.
+  # "apk" is a known channel in internal/update.upgradeCommands, so this
+  # package refuses through the packaged-channel branch (NGX-0316) and names
+  # `apk upgrade ngx`. It used to fall through the unknown-channel branch
+  # (NGX-0317), which refused for the right reason with the wrong message.
   - id: ngx-apk
     main: *ngx_main
     binary: *ngx_binary
@@ -138,6 +135,81 @@ builds:
       - *ldflag_version
       - *ldflag_pubkey
       - -X github.com/s0beran0/ngx/internal/update.InstallChannel=apk
+
+  # The four self-service channel builds (DC3). Same reason as the packaged
+  # builds above: brew, scoop, winget and the AUR all consume an ARCHIVE, and
+  # an archive carries whatever channel was linked into the binary it wraps.
+  # Pointing all four at the generic `ngx` archive would publish four package
+  # managers' worth of binaries that answer "direct" and happily overwrite
+  # themselves behind the manager that installed them.
+  #
+  # So each channel gets its own build and its own archive. The extra cost is
+  # 8 more compilations and 8 more files on the release page; the alternative
+  # is the bug DC1 exists to prevent.
+  - id: ngx-homebrew
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    # darwin only. A Homebrew CASK is macOS-only by definition -- Homebrew on
+    # Linux does not install casks -- and a cask is what goreleaser publishes
+    # now that `brews` (formula) is deprecated. Building linux here would
+    # produce a tarball no formula references.
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=homebrew
+
+  - id: ngx-scoop
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    goos: [windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=scoop
+
+  # scoop and winget are BOTH windows/amd64+arm64 and differ only in the
+  # channel string, which is exactly the case `builds[].overrides` cannot
+  # express: it discriminates by goos/goarch and these two share both.
+  - id: ngx-winget
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    goos: [windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=winget
+
+  - id: ngx-aur
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    # The AUR package is a -bin package: it repacks the released tarball, so
+    # it needs the same platforms the AUR itself supports for this project.
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=aur
 
 archives:
   - id: ngx
@@ -156,6 +228,42 @@ archives:
       # goreleaser abort. Hence only the LICENSE for now: add README.md to this
       # list once the file exists at the root.
       - LICENSE
+
+  # THE CHANNEL SUFFIX GOES AFTER THE ARCHITECTURE, AND THAT IS NOT COSMETIC.
+  #
+  # `ngx update` finds its download with internal/update.AssetForPlatform,
+  # which matches by SUFFIX -- "_<goos>_<goarch>.tar.gz" / ".zip" -- so that
+  # the name template can change without rewriting the updater. A channel
+  # archive named "ngx-homebrew_1.2.3_darwin_arm64.tar.gz" would end in
+  # "_darwin_arm64.tar.gz" and could be handed to a `curl | sh` user, whose
+  # binary would then be a homebrew binary that REFUSES to update itself --
+  # on a machine with no brew. Keeping the channel last makes the suffix
+  # "_darwin_arm64_homebrew.tar.gz", which matches nothing the updater looks
+  # for, and leaves the generic tarball the only answer for a direct install.
+  - id: homebrew
+    ids: [ngx-homebrew]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_homebrew"
+    files: &channel_files
+      - LICENSE
+
+  - id: scoop
+    ids: [ngx-scoop]
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_scoop"
+    files: *channel_files
+
+  - id: winget
+    ids: [ngx-winget]
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_winget"
+    files: *channel_files
+
+  - id: aur
+    ids: [ngx-aur]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_aur"
+    files: *channel_files
 
 # One entry per format, because each one consumes a different build. Merging
 # them into a single entry with `formats: [deb, rpm, apk]` is what the examples
@@ -212,6 +320,162 @@ nfpms:
     priority: *pkg_priority
     contents: *pkg_contents
 
+# THE SELF-SERVICE CHANNELS (DC3)
+#
+# All four publish into a repository that is NOT this one, and that is the
+# single fact that shapes every `token:` below: `secrets.GITHUB_TOKEN` is
+# minted for this repository and reaches nothing else. Each destination needs
+# its own credential, supplied as a repository secret, and the exact steps to
+# create them are in docs/install-channels.md.
+#
+# A MISSING CREDENTIAL DOES NOT FAIL THE RELEASE. `skip_upload` reads the
+# environment: with no token the artifact is still built and the manifest is
+# still generated under dist/, it just is not pushed. Failing the release
+# instead would mean no release at all until an AUR account exists -- and the
+# tarballs, the packages and the signature have nothing to do with the AUR.
+# The workflow prints which channels are live and which were skipped, so a
+# skipped channel is loud rather than silent.
+
+homebrew_casks:
+  # A CASK, NOT A FORMULA. goreleaser 2.17 marks `brews` deprecated and
+  # `goreleaser check` fails on it; Homebrew itself now routes pre-compiled
+  # binaries to casks and homebrew-core rejects a formula that only drops a
+  # binary in place. The cost is that casks are macOS-only -- Homebrew on
+  # Linux does not install them -- so a Linux user takes install.sh, the
+  # .deb/.rpm/.apk or the AUR.
+  #
+  # The repository is `homebrew-tap` and NOT `tap`: brew strips the
+  # "homebrew-" prefix, which is what turns it into
+  # `brew install s0beran0/tap/ngx`.
+  - name: ngx
+    ids: [homebrew]
+    binaries: [ngx]
+    repository:
+      owner: s0beran0
+      name: homebrew-tap
+      branch: main
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    homepage: *pkg_homepage
+    # One line, no leading article, does not start with the cask name: those
+    # are `brew audit` rules, and a tap that fails audit is a tap nobody can
+    # promote later.
+    description: &channel_description "nginx CLI with structured output for agents and humans"
+    license: *pkg_license
+    commit_author: &channel_commit_author
+      name: Eduardo Benck
+      email: 89141425+s0beran0@users.noreply.github.com
+    commit_msg_template: "ngx {{ .Tag }}"
+    # WITHOUT THIS THE CASK INSTALLS A BINARY macOS REFUSES TO RUN.
+    #
+    # ngx is not signed with an Apple Developer ID and not notarized, so
+    # Gatekeeper quarantines anything a cask downloads and the first `ngx`
+    # dies with "cannot be opened because the developer cannot be verified".
+    # Stripping the quarantine attribute at install time is the documented
+    # workaround for an unsigned cask; the `xattr -h` guard keeps it from
+    # breaking on a system where xattr is missing.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ngx"]
+          end
+
+scoops:
+  # The bucket is a repository of its own -- s0beran0/scoop-bucket -- which
+  # does not exist yet. Until it does, and until SCOOP_BUCKET_TOKEN is set,
+  # this generates the manifest under dist/ and pushes nothing.
+  - name: ngx
+    ids: [scoop]
+    repository:
+      owner: s0beran0
+      name: scoop-bucket
+      branch: main
+      token: '{{ envOrDefault "SCOOP_BUCKET_TOKEN" "" }}'
+    skip_upload: '{{ if eq (envOrDefault "SCOOP_BUCKET_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    homepage: *pkg_homepage
+    description: *channel_description
+    license: *pkg_license
+    commit_author: *channel_commit_author
+    commit_msg_template: "ngx {{ .Tag }}"
+
+winget:
+  # WINGET IS THE ONE CHANNEL THAT IS NOT SELF-SERVICE.
+  #
+  # goreleaser writes the manifest and opens a pull request against
+  # microsoft/winget-pkgs; Microsoft's automated validation then runs and a
+  # human moderator merges. So the release does not "publish to winget", it
+  # REQUESTS publication. Anything downstream that treats a green release as
+  # "ngx is on winget" is wrong.
+  #
+  # The PR has to come from a fork owned by us, because a pull request cannot
+  # be opened from a branch of a repository we cannot push to.
+  - name: ngx
+    ids: [winget]
+    package_identifier: EduardoBenck.ngx
+    publisher: Eduardo Benck
+    publisher_url: https://github.com/s0beran0
+    publisher_support_url: https://github.com/s0beran0/ngx/issues
+    author: Eduardo Benck
+    short_description: *channel_description
+    description: |
+      ngx reads and reports nginx configuration as JSON when stdout is not a
+      terminal and as readable text when it is, so the same tool serves
+      scripts, AI agents and people.
+    homepage: *pkg_homepage
+    license: *pkg_license
+    license_url: https://github.com/s0beran0/ngx/blob/main/LICENSE
+    copyright: Eduardo Benck
+    tags:
+      - nginx
+      - cli
+      - json
+      - devops
+    skip_upload: '{{ if eq (envOrDefault "WINGET_PKGS_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    commit_author: *channel_commit_author
+    commit_msg_template: "New version: EduardoBenck.ngx version {{ .Version }}"
+    repository:
+      owner: s0beran0
+      name: winget-pkgs
+      branch: "ngx-{{ .Version }}"
+      token: '{{ envOrDefault "WINGET_PKGS_TOKEN" "" }}'
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
+aurs:
+  # The AUR is not GitHub: it is a git server that authenticates with SSH
+  # only, so this one needs an SSH private key and not a token. The account
+  # and the package name have to be registered on aur.archlinux.org first --
+  # pushing to a package nobody owns creates it, pushing to one someone else
+  # owns is rejected.
+  #
+  # The name ends in -bin because the package ships a compiled binary instead
+  # of building from source; that is an AUR naming rule, not a preference.
+  - name: ngx-bin
+    ids: [aur]
+    homepage: *pkg_homepage
+    description: *channel_description
+    license: *pkg_license
+    maintainers:
+      - "Eduardo Benck <89141425+s0beran0@users.noreply.github.com>"
+    provides:
+      - ngx
+    conflicts:
+      - ngx
+    private_key: '{{ envOrDefault "AUR_SSH_KEY" "" }}'
+    git_url: "ssh://aur@aur.archlinux.org/ngx-bin.git"
+    skip_upload: '{{ if eq (envOrDefault "AUR_SSH_KEY" "") "" }}true{{ else }}false{{ end }}'
+    commit_author: *channel_commit_author
+    commit_msg_template: "ngx {{ .Tag }}"
+    package: |-
+      install -Dm755 "./ngx" "${pkgdir}/usr/bin/ngx"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/ngx-bin/LICENSE"
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256
@@ -259,12 +523,29 @@ release:
     sha256sum --ignore-missing -c checksums.txt
     ```
 
-    ### Installing from a package
+    ### Installing from a package manager
 
-    The `.deb`, `.rpm` and `.apk` know they were installed by a package
-    manager, so `ngx update` refuses to replace itself and points at the
-    command that belongs to that manager — `apt upgrade ngx`, `dnf upgrade
-    ngx`. Only the tarballs and `install.sh` self-update.
+    ```sh
+    brew install s0beran0/tap/ngx        # macOS
+    scoop install ngx                    # Windows
+    winget install EduardoBenck.ngx      # Windows
+    yay -S ngx-bin                       # Arch
+    dpkg -i ngx_*_linux_amd64.deb        # Debian, Ubuntu
+    rpm -i ngx_*_linux_amd64.rpm         # Fedora, RHEL
+    ```
+
+    Every one of those knows it was installed by a package manager, so `ngx
+    update` refuses to replace itself and points at the command that belongs to
+    that manager — `brew upgrade ngx`, `apt upgrade ngx`, `scoop update ngx`.
+    Only the tarballs and `install.sh` self-update. `ngx version` reports which
+    channel it came from, in `install_channel`.
+
+    The archives ending in `_homebrew`, `_scoop`, `_winget` and `_aur` exist
+    for those package managers and carry that refusal. Downloading one by hand
+    gets you a binary that will not update itself; the plain
+    `ngx_<version>_<os>_<arch>` archive is the one to take.
+
+    See `docs/install-channels.md`.
 
 changelog:
   sort: asc
