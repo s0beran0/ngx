@@ -105,6 +105,23 @@ invisible in the output and real in wall-clock time.
 *Demands:* filtering has to reach the reading layer, not only the rendering
 one. This is already recorded as DO1 in the output plan.
 
+## What testing against real nginx corrected
+
+The syntax surface was checked against nginx 1.20.1 in a container rather than
+against a reading of the documentation, and three constructions that looked
+valid were refused by the real binary. One is worth recording because anyone
+reasoning from the escaping rules would get it wrong:
+
+**`\$` does not escape a variable.** In `add_header X "literal \$name"`, nginx
+still interpolates `$name` and fails with `unknown "name" variable`. The
+backslash escape is handled by the configuration lexer; variable interpolation
+happens later, in the script engine, which never sees the backslash.
+
+The lesson generalises past this one case: the documentation describes
+directives well and the lexer barely at all, so the answer to "does nginx accept
+this" comes from running nginx. That is why the fixture is re-validated against
+a real binary on every integration run instead of being trusted once.
+
 ## The rule that follows
 
 **The common case must be answerable by a command whose name is the question,

@@ -300,6 +300,18 @@ where getting it wrong corrupts nobody's file.
 
 R7: `--format table` for flat results, with the escaping rule decided in H4.
 
+R8: **register crossplane's Lua lexer** (C1). It ships `lua.RegisterLexer()`
+and we never registered it, so a `content_by_lua_block` whose body contains an
+`if` is refused today — a valid configuration rejected, which is the worst
+class of defect this tool has.
+
+It sits here rather than earlier for one reason: crossplane will start emitting
+a single opaque token for a Lua body while our tokeniser still emits its
+contents. That desyncs the aligner and silently corrupts every span after the
+block, so it needs the differential test of R5 already in place. Registering
+the lexer without that test would trade a loud refusal for a quiet wrong
+answer.
+
 **Read pruning comes last within this phase**, after the property test is
 green, and only for `--file` (H3). An optimisation on top of an unproven
 evaluator produces a wrong answer faster.
@@ -317,6 +329,10 @@ The 0.1.0 gate, plus:
   that `ngx update` refuses
 - against the production nginx, read-only: a filtered `inspect` returning a
   subtree byte-identical to the corresponding slice of the full one
+- `internal/config/testdata/syntax_surface.conf` still accepted by real nginx in
+  the container, and its values still parsed exactly. It is the fixture that
+  says what "compatible with nginx" means here, and it only means anything
+  while nginx keeps agreeing with it.
 - **the agent test**: answer three real questions starting from `ngx --help`
   alone — which ports are listened on, what a given site's configuration looks
   like, whether the configuration is valid. If any needs the spec, Phase 4 is
