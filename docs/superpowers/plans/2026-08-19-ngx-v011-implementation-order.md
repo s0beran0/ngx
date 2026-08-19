@@ -207,6 +207,58 @@ partly already elapsed would be arguing from a fact that is no longer true.
 *Correction:* the contract work goes first because it is cheap and unblocks
 honest deprecation later, not because a deadline is passing.
 
+## Coverage: what nginx surface this does NOT cover yet
+
+The plan above assumes reading works for whatever the caller points it at. That
+assumption was tested rather than trusted, by feeding the binary the
+constructions most likely to break it.
+
+**Covered, verified:** `stream` and `mail` blocks, with their own ID prefixes
+(`st`, `m`) so a `server` in `stream` cannot collide with one in `http`; `map`,
+`geo`, `split_clients` and `types`, whose bodies are free key/value pairs
+rather than directives; regex and named locations; a value containing `;`
+inside quotes; a directive from an unknown third-party module; `njs`
+(`js_import`, `js_content`).
+
+**Not covered, and it is a false rejection:**
+
+### C1 — Embedded Lua breaks the parse
+
+```
+content_by_lua_block {
+    if t.x > 0 then ngx.say("hi; bye") end
+}
+```
+
+Refused with `NGX-0003`, complaining about an `if` "expression" that is Lua
+code. nginx with `lua-nginx-module` accepts this file, so `ngx` refuses a valid
+configuration — the worst class of bug this tool can have, and the one the
+differential fuzz was built to catch.
+
+Two things make it worth recording carefully rather than just fixing:
+
+**It was introduced by a fix.** The `if` guard exists because `if ()` used to
+crash the process. That guard now reads the `if` inside a Lua body as an nginx
+directive. A correction created a new defect in a case nobody thought to test,
+which is exactly what the "fix rounds are implementation" rule in
+`writing-plans.md` warns about.
+
+**The library already solves it.** crossplane v0.4.89 ships `lua.RegisterLexer()`
+— a lexer extension that tokenises `*_by_lua_block` bodies as opaque content.
+We never registered it. Rule one of this project, again: the answer was in the
+dependency's source, not in our imagination.
+
+*Consequence for this plan:* registering the extension is not the whole fix.
+Our own tokeniser produces the byte spans that the aligner matches against
+crossplane's token stream. If crossplane starts emitting one opaque token for a
+Lua body while our tokeniser still emits its contents, the two desync and every
+span after that point is wrong — silently. The Lua work therefore belongs with
+the per-argument span work of H1, in the same phase, behind the same
+differential test.
+
+*Scope note:* OpenResty is common enough in production that this is not an edge
+case dressed as one. It goes in 0.1.1.
+
 ## Phases
 
 Two tracks on disjoint files: **R** (reading) and **P** (packaging). They meet
