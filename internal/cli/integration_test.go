@@ -276,8 +276,11 @@ func TestRemoteInspectReadsTheContainerAndLeaksNoSecret(t *testing.T) {
 	ctx, out := testContext(t, nil)
 	ctx.SSHConfigPath = testSSHConfig(t, "")
 
+	// --full-tree is required since v0.1.1: inspect answers with the summary
+	// unless the tree is asked for by name. This test is about what the tree
+	// contains, so it asks.
 	args := append(connectionArgs(key, port, knownHosts),
-		"-c", remoteTopFile, "inspect")
+		"-c", remoteTopFile, "inspect", "--full-tree")
 
 	var errBuf bytes.Buffer
 	code := execute(NewRoot(ctx), ctx, args, &errBuf)
