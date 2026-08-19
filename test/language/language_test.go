@@ -84,6 +84,11 @@ var allowed = map[string][]string{
 	// "permissao" and broke when the repository was translated. Quoting the
 	// word is the point of the story.
 	"CLAUDE.md": {"permissao"},
+
+	// And this file, which cannot describe that allowance without writing the
+	// word down. Found by the check flagging its own comment, which is the
+	// behaviour one wants: the rule does not exempt whoever enforces it.
+	"test/language/language_test.go": {"permissao"},
 }
 
 func TestTheRepositoryIsWrittenInEnglish(t *testing.T) {
@@ -191,8 +196,8 @@ func scanGoComments(t *testing.T, path, rel string, pattern *regexp.Regexp, used
 	return found
 }
 
-// splitCamel turns "SpanDeArgumentoEntreAspas" into "Span De Argumento Entre
-// Aspas", so whole-word matching can see the words inside a name.
+// splitCamel turns "TestSpanDeArgumento" into "Test Span De Argumento", so
+// whole-word matching can see the words inside a name. Underscores split too.
 func splitCamel(name string) string {
 	var b strings.Builder
 	for i, r := range name {
