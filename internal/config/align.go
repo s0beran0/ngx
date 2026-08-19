@@ -113,6 +113,7 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 			n.Line, n.Column = tok.Line, tok.Column
 			n.Span = Span{tok.Start, tok.End}
 			n.HeadSpan = n.Span
+			n.ArgSpans = []Span{}
 			return nil
 		}
 		tok, err := a.consume(TokenComment)
@@ -122,6 +123,7 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 		n.Line, n.Column = tok.Line, tok.Column
 		n.Span = Span{tok.Start, tok.End}
 		n.HeadSpan = n.Span
+		n.ArgSpans = []Span{}
 		return nil
 	}
 
@@ -141,6 +143,14 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 		// them), so len(n.Args) does not count the real word tokens between
 		// the name and the terminator -- see defect 2 of Task 9. Consume by
 		// the position of the terminator, not by the count of Args.
+		//
+		// n.ArgSpans is left nil here, and that is the whole answer for "if":
+		// the same rewrite that breaks the count also breaks the
+		// correspondence when the count happens to match. In "if ($a = b)"
+		// the first lexeme is "($a" and Args[0] is "$a"; recording the lexeme
+		// would give v0.2 a range that includes the parenthesis, and
+		// recording a trimmed range would be us guessing where crossplane cut.
+		// Nil says "unavailable" -- see the field's documentation in node.go.
 		for {
 			next, err := a.peek()
 			if err != nil {
@@ -164,14 +174,23 @@ func (a *aligner) alignNode(n *Node, pending *[]Token) error {
 			a.drainComments(pending, &headComments)
 		}
 	} else {
+		// Built unconditionally out of the tokens actually consumed, with no
+		// check that each one reproduces its argument. That check belongs to
+		// the differential test, not to the code: a loop that only recorded
+		// the span when it matched the argument would make its own test
+		// tautological -- it could never observe a mismatch, because it would
+		// have refused to record it.
+		spans := make([]Span, 0, len(n.Args))
 		for range n.Args {
 			arg, err := a.consume(TokenWord)
 			if err != nil {
 				return err
 			}
 			headEnd = arg.End
+			spans = append(spans, Span{arg.Start, arg.End})
 			a.drainComments(pending, &headComments)
 		}
+		n.ArgSpans = spans
 	}
 	n.HeadSpan = Span{name.Start, headEnd}
 	n.HeadComments = commentsInside(headComments, n.HeadSpan)

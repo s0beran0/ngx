@@ -40,6 +40,41 @@ type Node struct {
 	// majority of nodes, hence omitempty.
 	HeadComments []Span `json:"head_comments,omitempty"`
 
+	// ArgSpans holds one span per element of Args, in the same order and
+	// with the same length: ArgSpans[i] is the byte range of the lexeme that
+	// produced Args[i]. Span and HeadSpan do not answer this: both start at
+	// the directive NAME, and the two things that need the answer -- redacting
+	// a value inside the source text, and the v0.2 edit that replaces one
+	// argument without re-rendering the directive -- need to know where the
+	// VALUE begins and ends.
+	//
+	// The range covers the WHOLE lexeme, quotes included: in
+	// add_header X "a; b" the span of the second argument covers "a; b" with
+	// its two quotation marks, not just a; b. Two reasons, and both are about
+	// substitution. Overwriting the bytes of the whole lexeme is
+	// self-contained -- writing *** over it leaves a valid unquoted argument
+	// -- whereas overwriting only the inside of the quotes leaves the
+	// delimiters standing and forces the replacement to be escaped for that
+	// quote style, one more thing to get wrong on the very path that exists to
+	// protect secrets. And it is the only range that round-trips: Tokenize of
+	// source[span] yields exactly one token whose Value is Args[i], which is
+	// the differential property the tests check against crossplane's Args.
+	//
+	// Nil means the spans are UNAVAILABLE, and that happens for exactly one
+	// directive: "if". prepareIfArgs (crossplane/util.go:71-86) REWRITES Args,
+	// stripping the parentheses, so an entry of Args can be a substring of the
+	// lexeme it came from ("($a" becomes "$a") and a whole lexeme can vanish
+	// ("(" alone is dropped). The 1-to-1 correspondence does not exist there,
+	// and inventing one would hand v0.2 a byte range that does not hold the
+	// value. Absence is information; a wrong span is a corrupted file.
+	//
+	// Empty -- and not nil -- for a directive with no arguments: there the
+	// correspondence exists and is empty. That is why the tag is omitzero and
+	// not omitempty: omitempty erases the difference between "no arguments"
+	// and "unavailable", and the difference is the whole point. [] means the
+	// consumer can iterate; the field missing means it must not assume.
+	ArgSpans []Span `json:"arg_spans,omitzero"`
+
 	// RedactedArgs holds the indices of Args whose value was replaced by
 	// "***" at RENDER time. It is what tells a censored value apart from a
 	// configuration that literally contains three asterisks; without it the

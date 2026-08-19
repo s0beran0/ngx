@@ -327,7 +327,11 @@ func checkDifferentialAgainstCrossplane(t *testing.T, s string, toks []config.To
 //     the parent, and siblings do not overlap;
 //  3. HeadSpan is exactly "name + arguments": retokenizing the text of the
 //     HeadSpan produces 1+len(Args) TokenWord and nothing else;
-//  4. terminator: the Span of a non-comment directive ends in ';' or '}'.
+//  4. terminator: the Span of a non-comment directive ends in ';' or '}';
+//  5. per-argument spans (R5): slicing the source by ArgSpans[i] and running
+//     it back through the tokenizer gives exactly one word whose Value is
+//     Args[i] -- with "if" excluded, where the spans are reported as
+//     unavailable because crossplane rewrites Args.
 func FuzzAlignment(f *testing.F) {
 	f.Add("server { listen 80; }")
 	f.Add("http { server { location / { proxy_pass http://a; } } }")
@@ -376,8 +380,68 @@ func FuzzAlignment(f *testing.F) {
 			checkContainmentAndNoOverlap(t, file.Source, file.Nodes, nil)
 			checkHeadSpanIsNamePlusArgs(t, file)
 			checkSpanTerminator(t, file)
+			checkArgSpans(t, file)
 		}
 	})
+}
+
+// checkArgSpans is property 5. It is the per-argument twin of
+// checkHeadSpanIsNamePlusArgs, and it is deliberately checked against
+// crossplane's Args and not against our own token stream: the aligner records
+// the span of whatever token it consumed, without ever comparing it to the
+// argument, so a desync between the two parsers -- which is exactly what
+// registering the Lua lexer (R8) will risk -- shows up here as a Value that
+// does not match instead of as a silently wrong offset.
+//
+// "if" is skipped for its arguments and checked for its absence: prepareIfArgs
+// (crossplane/util.go:71-86) rewrites Args, so there is no 1-to-1 span to
+// record, and publishing one anyway is the failure this asserts against.
+func checkArgSpans(t *testing.T, file *config.File) {
+	var walk func(nodes []*config.Node)
+	walk = func(nodes []*config.Node) {
+		for _, n := range nodes {
+			if n.Directive == "if" {
+				if n.ArgSpans != nil {
+					t.Fatalf("if published %d arg spans; the correspondence with Args does not exist there",
+						len(n.ArgSpans))
+				}
+				walk(n.Block)
+				continue
+			}
+			if n.ArgSpans == nil {
+				t.Fatalf("%q has no arg spans and is not an if", n.Directive)
+			}
+			if len(n.ArgSpans) != len(n.Args) {
+				t.Fatalf("%q has %d args and %d arg spans", n.Directive, len(n.Args), len(n.ArgSpans))
+			}
+
+			previous := n.HeadSpan.Start
+			for i, s := range n.ArgSpans {
+				if s.Start < previous || s.End <= s.Start || s.End > n.HeadSpan.End {
+					t.Fatalf("arg span %d of %q is [%d,%d), out of order or outside the head [%d,%d)",
+						i, n.Directive, s.Start, s.End, n.HeadSpan.Start, n.HeadSpan.End)
+				}
+				previous = s.End
+
+				text := file.Source[s.Start:s.End]
+				toks, err := config.Tokenize(text)
+				if err != nil {
+					t.Fatalf("arg span %d of %q does not retokenize (%v); text=%q",
+						i, n.Directive, err, string(text))
+				}
+				if len(toks) != 1 || toks[0].Kind != config.TokenWord {
+					t.Fatalf("arg span %d of %q yields %d tokens, expected one word; text=%q",
+						i, n.Directive, len(toks), string(text))
+				}
+				if toks[0].Value != n.Args[i] {
+					t.Fatalf("arg span %d of %q holds %q, crossplane read %q; text=%q",
+						i, n.Directive, toks[0].Value, n.Args[i], string(text))
+				}
+			}
+			walk(n.Block)
+		}
+	}
+	walk(file.Nodes)
 }
 
 // onlyCR reports whether the rest of the source is only \r (or nothing).

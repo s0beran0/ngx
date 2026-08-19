@@ -99,6 +99,11 @@ func (c *combiner) expand(nodes []*Node) ([]*Node, error) {
 		// exactly what cloneArgs in parse.go exists to prevent when "Task
 		// 12 builds new nodes out of these ones".
 		copied.Args = slices.Clone(n.Args)
+		// Same reasoning for ArgSpans, which is a slice too. Clone of nil is
+		// nil, so the "unavailable" marker of an "if" survives the copy
+		// instead of turning into an empty list that promises a
+		// correspondence there is none of.
+		copied.ArgSpans = slices.Clone(n.ArgSpans)
 		copied.Origin = &Origin{File: n.File, Line: n.Line}
 
 		if len(n.Block) > 0 {
