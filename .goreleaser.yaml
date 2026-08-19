@@ -412,11 +412,14 @@ winget:
   # be opened from a branch of a repository we cannot push to.
   - name: ngx
     ids: [winget]
-    package_identifier: EduardoBenck.ngx
-    publisher: Eduardo Benck
+    # Publisher.Package, and the publisher is the account that publishes:
+    # s0beran0. Deriving it from a legal name put the maintainer's name in
+    # the install command every Windows user would type.
+    package_identifier: s0beran0.ngx
+    publisher: s0beran0
     publisher_url: https://github.com/s0beran0
     publisher_support_url: https://github.com/s0beran0/ngx/issues
-    author: Eduardo Benck
+    author: s0beran0
     short_description: *channel_description
     description: |
       ngx reads and reports nginx configuration as JSON when stdout is not a
@@ -425,7 +428,7 @@ winget:
     homepage: *pkg_homepage
     license: *pkg_license
     license_url: https://github.com/s0beran0/ngx/blob/main/LICENSE
-    copyright: Eduardo Benck
+    copyright: s0beran0
     tags:
       - nginx
       - cli
@@ -433,7 +436,7 @@ winget:
       - devops
     skip_upload: '{{ if eq (envOrDefault "WINGET_PKGS_TOKEN" "") "" }}true{{ else }}false{{ end }}'
     commit_author: *channel_commit_author
-    commit_msg_template: "New version: EduardoBenck.ngx version {{ .Version }}"
+    commit_msg_template: "New version: s0beran0.ngx version {{ .Version }}"
     repository:
       owner: s0beran0
       name: winget-pkgs

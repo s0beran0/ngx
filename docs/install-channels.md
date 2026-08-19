@@ -45,7 +45,7 @@ So the table below is the map of the design, not a menu that is all open. Take
 | `.rpm` | `rpm -i ngx_*_linux_amd64.rpm` | Fedora, RHEL, Oracle Linux | no | `dnf upgrade ngx` |
 | `.apk` | `apk add --allow-untrusted ngx_*_linux_amd64.apk` | Alpine | no | `apk upgrade ngx` |
 | Scoop *(not live yet)* | `scoop bucket add s0beran0 https://github.com/s0beran0/scoop-bucket && scoop install ngx` | Windows | no | `scoop update ngx` |
-| WinGet *(not live yet)* | `winget install EduardoBenck.ngx` | Windows | no | `winget upgrade ngx` |
+| WinGet *(not live yet)* | `winget install s0beran0.ngx` | Windows | no | `winget upgrade ngx` |
 | AUR *(not live yet)* | `yay -S ngx-bin` | Arch Linux | no | `pacman -Syu ngx` |
 
 `ngx version --json` always reports `install_channel`, so a script never has to

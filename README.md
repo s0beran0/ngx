@@ -142,7 +142,7 @@ visible, not so you try them.
 | Fedora/RHEL | `rpm -i ngx_*_linux_amd64.rpm` | no — `dnf upgrade ngx` |
 | Alpine | `apk add --allow-untrusted ngx_*.apk` | no — `apk upgrade ngx` |
 | Scoop *(not live yet)* | `scoop install ngx` | no — `scoop update ngx` |
-| WinGet *(not live yet)* | `winget install EduardoBenck.ngx` | no — `winget upgrade ngx` |
+| WinGet *(not live yet)* | `winget install s0beran0.ngx` | no — `winget upgrade ngx` |
 | Arch (AUR) *(not live yet)* | `yay -S ngx-bin` | no — `pacman -Syu ngx` |
 
 **A packaged `ngx` does not update itself, on purpose.** The binary knows which
