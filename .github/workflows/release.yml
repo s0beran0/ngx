@@ -106,13 +106,15 @@ jobs:
       # so the value shows up in the binary even when -X was ignored. The only
       # way to tell them apart is to ask the RUNNING binary, which only reports
       # `update_public_key` when the variable was actually filled in.
-      - name: prove the public key was embedded
+      - name: prove the ldflags reach the binary
         env:
           NGX_PUBLIC_KEY: ${{ vars.NGX_PUBLIC_KEY }}
         run: |
-          go build -ldflags \
-            "-X github.com/s0beran0/ngx/internal/update.PublicKey=$NGX_PUBLIC_KEY" \
-            -o /tmp/ngx-proof ./cmd/ngx
+          set -eu
+          pubkey_sym=github.com/s0beran0/ngx/internal/update.PublicKey
+          channel_sym=github.com/s0beran0/ngx/internal/update.InstallChannel
+
+          go build -ldflags "-X $pubkey_sym=$NGX_PUBLIC_KEY" -o /tmp/ngx-proof ./cmd/ngx
           embedded=$(/tmp/ngx-proof version --json | jq -r '.data.update_public_key // ""')
           if [ "$embedded" != "$NGX_PUBLIC_KEY" ]; then
             echo "ABORTED: the public key did not reach the binary." >&2
@@ -122,6 +124,47 @@ jobs:
             exit 1
           fi
           echo "public key embedded and checked in the artifact"
+
+          # The same silent failure, one level worse, for the install channel
+          # (DC1). .goreleaser.yaml compiles one build per packaged format so
+          # each .deb/.rpm/.apk carries its own channel; if that -X stops
+          # matching a real symbol the packages come out claiming "direct" and
+          # `ngx update` overwrites a file dpkg or rpm still believes it owns.
+          #
+          # This loop has to list every channel that .goreleaser.yaml injects.
+          # Adding a packaged build there without adding it here leaves the new
+          # format as the only unproven artifact in the release.
+          #
+          # The assertion is behavioural, not cosmetic: a channel that reached
+          # the binary makes `ngx update` FAIL and name the channel in the
+          # diagnostic. A -X that was ignored leaves "direct", and a "direct"
+          # binary goes to the network instead -- whatever it answers, it will
+          # not be the channel's name. Once `ngx version` reports
+          # `install_channel` (Task C1 step 3) this can read that field
+          # directly, which is cheaper and says the same thing.
+          for channel in deb rpm apk; do
+            go build \
+              -ldflags "-X $pubkey_sym=$NGX_PUBLIC_KEY -X $channel_sym=$channel" \
+              -o "/tmp/ngx-proof-$channel" ./cmd/ngx
+            if "/tmp/ngx-proof-$channel" update --json > "/tmp/ngx-proof-$channel.json" 2>&1; then
+              echo "ABORTED: a $channel build did NOT refuse to update itself." >&2
+              echo "The -X against $channel_sym was silently ignored, so the" >&2
+              echo ".$channel package would self-update behind its package manager." >&2
+              exit 1
+            fi
+            message=$(jq -r '.diagnostics[0].message // ""' "/tmp/ngx-proof-$channel.json")
+            case "$message" in
+              *"$channel"*)
+                echo "install channel $channel embedded, and it refuses to self-update"
+                ;;
+              *)
+                echo "ABORTED: a $channel build refused, but not because of its channel." >&2
+                echo "diagnostic: $message" >&2
+                echo "Check whether $channel_sym still exists under that name." >&2
+                exit 1
+                ;;
+            esac
+          done
 
       - uses: goreleaser/goreleaser-action@v6
         with:

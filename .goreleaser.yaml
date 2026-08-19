@@ -10,24 +10,53 @@ before:
   hooks:
     - go mod tidy
 
+# WHY THERE IS MORE THAN ONE BUILD HERE (DC1)
+#
+# `ldflags` belong to a build, and every artifact made out of that build sees
+# the same values. The install channel is per ARTIFACT, not per build: the
+# tarball is "direct", the .deb is "deb", the .rpm is "rpm", the .apk is "apk".
+# Putting `-X ...InstallChannel=` in a single shared build would stamp the same
+# channel on all four, which is the exact bug this variable exists to prevent.
+#
+# goreleaser offers no per-package ldflags: `nfpms` picks up already-linked
+# binaries through `ids`, and `builds[].overrides` only discriminates by
+# goos/goarch/goamd64/goarm -- and deb, rpm and apk all share linux/amd64 and
+# linux/arm64. So the channel has to be decided at link time, which means one
+# build per channel.
+#
+# The cost is real and is paid on every release: the packaged builds add
+# 3 channels x 2 linux arches = 6 compilations to the 6 the archives already
+# need. Twelve instead of six. goreleaser runs them in parallel, and a
+# CGO-free Go binary of this size links in seconds, so the wall-clock cost on
+# the release runner is under a minute.
+#
+# The shared ldflags are YAML anchors on purpose. Repeating them by hand is how
+# a packaged build silently loses the embedded public key while the tarball
+# keeps it -- and per DD6 a wrong `-X` reports nothing.
 builds:
+  # The archives build. Six platforms, and NO InstallChannel flag: the default
+  # in the code is already "direct", which is exactly what a tarball unpacked
+  # by install.sh, or a plain `go build ./cmd/ngx`, is. Anything else would
+  # only restate the default.
   - id: ngx
-    main: ./cmd/ngx
-    binary: ngx
-    env:
+    main: &ngx_main ./cmd/ngx
+    binary: &ngx_binary ngx
+    env: &ngx_env
       # Static binary, no cgo. Same rule as CI: a dependency that required
-      # cgo would break the cross-compile of the six platforms.
+      # cgo would break the cross-compile of the six platforms. It is also
+      # what lets the same linux binary go into the .apk: Alpine has musl and
+      # no glibc, and a cgo build would not run there.
       - CGO_ENABLED=0
-    flags:
+    flags: &ngx_flags
       # Strips the build machine's path out of the binary: without it the same
       # commit produces different binaries depending on the runner's directory.
       - -trimpath
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
-    mod_timestamp: "{{ .CommitTimestamp }}"
+    mod_timestamp: &ngx_mod_timestamp "{{ .CommitTimestamp }}"
     ldflags:
-      - -s -w
-      - -X github.com/s0beran0/ngx/internal/output.Version={{ .Version }}
+      - &ldflag_strip -s -w
+      - &ldflag_version -X github.com/s0beran0/ngx/internal/output.Version={{ .Version }}
       # ATTENTION: THIS IS WHERE THE PUBLIC KEY GETS EMBEDDED (DD3).
       #
       # The minisign public key enters here, at build time, and is never
@@ -49,10 +78,72 @@ builds:
       # the binary ships with no key. That is what almost happened -- the
       # original target was internal/output.PublicKey, which does not exist and
       # would have read nothing.
-      - -X github.com/s0beran0/ngx/internal/update.PublicKey={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
+      - &ldflag_pubkey -X github.com/s0beran0/ngx/internal/update.PublicKey={{ envOrDefault "NGX_PUBLIC_KEY" "" }}
+
+  # The three packaged builds. Only linux, only the two arches nfpm ships:
+  # compiling darwin or windows here would produce binaries nothing consumes.
+  #
+  # The `-X ...InstallChannel=` line is the ONLY difference between them and
+  # the build above. It is also the line that fails in silence if the symbol
+  # ever moves: `-X` against a name the linker does not find is ignored, the
+  # build succeeds, and the package ships claiming "direct" -- a .deb that
+  # happily overwrites itself under dpkg's feet. The release workflow proves
+  # each of these channels reaches a running binary before publishing anything
+  # (DD6); do not delete that step.
+  - id: ngx-deb
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=deb
+
+  - id: ngx-rpm
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=rpm
+
+  # KNOWN GAP, deliberate and proven in a container: "apk" is not in
+  # internal/update.upgradeCommands yet, so this package refuses through the
+  # UNKNOWN-channel branch (NGX-0317) instead of the packaged-channel one
+  # (NGX-0316). It still refuses -- failing closed on an unrecognised channel
+  # is what that branch is for -- but the message says "ngx does not recognize"
+  # rather than naming `apk upgrade ngx`. Adding "apk" to upgradeCommands and
+  # checkCommands turns it into the right message with no change here.
+  - id: ngx-apk
+    main: *ngx_main
+    binary: *ngx_binary
+    env: *ngx_env
+    flags: *ngx_flags
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: *ngx_mod_timestamp
+    ldflags:
+      - *ldflag_strip
+      - *ldflag_version
+      - *ldflag_pubkey
+      - -X github.com/s0beran0/ngx/internal/update.InstallChannel=apk
 
 archives:
   - id: ngx
+    # Without this, the archives would also wrap the three packaged builds and
+    # publish tarballs whose binary refuses to self-update.
+    ids: [ngx]
     formats: [tar.gz]
     # Windows gets .zip: it is what the platform opens with no extra tool, and
     # what install.ps1 expects.
@@ -66,12 +157,68 @@ archives:
       # list once the file exists at the root.
       - LICENSE
 
+# One entry per format, because each one consumes a different build. Merging
+# them into a single entry with `formats: [deb, rpm, apk]` is what the examples
+# show and is wrong here: that entry has one `ids`, so all three packages would
+# come from the same binary and carry the same channel.
+nfpms:
+  - id: deb
+    ids: [ngx-deb]
+    formats: [deb]
+    package_name: &pkg_name ngx
+    vendor: &pkg_vendor Eduardo Benck
+    homepage: &pkg_homepage https://github.com/s0beran0/ngx
+    maintainer: &pkg_maintainer "Eduardo Benck <89141425+s0beran0@users.noreply.github.com>"
+    description: &pkg_description |-
+      nginx CLI with structured output.
+      ngx reads and reports nginx configuration as JSON when stdout is not a
+      terminal and as readable text when it is, so the same tool serves scripts,
+      AI agents and people.
+    license: &pkg_license MIT
+    # /usr/bin, not /usr/local/bin: a package manager owns /usr, and
+    # /usr/local is reserved for what the administrator installs by hand.
+    bindir: &pkg_bindir /usr/bin
+    section: &pkg_section utils
+    priority: &pkg_priority optional
+    contents: &pkg_contents
+      - src: LICENSE
+        dst: /usr/share/doc/ngx/LICENSE
+
+  - id: rpm
+    ids: [ngx-rpm]
+    formats: [rpm]
+    package_name: *pkg_name
+    vendor: *pkg_vendor
+    homepage: *pkg_homepage
+    maintainer: *pkg_maintainer
+    description: *pkg_description
+    license: *pkg_license
+    bindir: *pkg_bindir
+    section: *pkg_section
+    priority: *pkg_priority
+    contents: *pkg_contents
+
+  - id: apk
+    ids: [ngx-apk]
+    formats: [apk]
+    package_name: *pkg_name
+    vendor: *pkg_vendor
+    homepage: *pkg_homepage
+    maintainer: *pkg_maintainer
+    description: *pkg_description
+    license: *pkg_license
+    bindir: *pkg_bindir
+    section: *pkg_section
+    priority: *pkg_priority
+    contents: *pkg_contents
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256
 
 # Signing checksums.txt alone is enough: it covers every artifact by hash, so
-# one signature protects the whole set (DD2).
+# one signature protects the whole set (DD2). That now includes the .deb, .rpm
+# and .apk, which is why they need no per-format signing key of their own.
 #
 # The private key lives outside GitHub and reaches the runner as a secret; the
 # path of the temporary file comes in MINISIGN_KEY_FILE and the password in
@@ -111,6 +258,13 @@ release:
     minisign -Vm checksums.txt -p ngx-minisign.pub
     sha256sum --ignore-missing -c checksums.txt
     ```
+
+    ### Installing from a package
+
+    The `.deb`, `.rpm` and `.apk` know they were installed by a package
+    manager, so `ngx update` refuses to replace itself and points at the
+    command that belongs to that manager — `apt upgrade ngx`, `dnf upgrade
+    ngx`. Only the tarballs and `install.sh` self-update.
 
 changelog:
   sort: asc

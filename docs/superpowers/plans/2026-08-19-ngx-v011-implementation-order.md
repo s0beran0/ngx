@@ -332,6 +332,30 @@ evaluator produces a wrong answer faster.
 Documentation last: written earlier it documents a command as imagined, which
 this project has already paid for twice.
 
+## The breaks 0.1.1 carries, and why `schema_version` stays at 1
+
+Two changes in this release break a consumer written against v0.1.0:
+
+1. **`inspect` no longer returns the tree by default.** `data.config` is absent
+   unless `--full-tree` is given. On the measured production host this is the
+   difference between 1.6 MB and a few hundred bytes, which is the point of the
+   release — but code that read `data.config` gets nothing.
+2. **A redacted directive keeps its other arguments.** `["***"]` became
+   `["Authorization", "***"]` with `redacted_args: [1]`. Better, and breaking
+   for anyone reading `args[0]`.
+
+`schema_version` stays at **1** rather than moving to 2, and the reasoning
+matters more than the number: v0.1.0 declares no schema version at all, so
+nothing was ever published as version 1. The field is introduced in 0.1.1 and
+**describes 0.1.1's shape**. Anything without it is pre-contract. Bumping to 2
+would imply a version 1 existed in the wild, which would be a lie told by a
+version number.
+
+*The obligation this creates:* the release notes must enumerate both breaks in
+words. A consumer that never reads `schema_version` — which is most of them,
+today — has no other way to find out, and "it was in the schema version" is not
+a defence for silence.
+
 ## Release gate
 
 The 0.1.0 gate, plus:
