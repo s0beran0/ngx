@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -182,6 +183,24 @@ func (c *Client) ByVersion(ctx context.Context, version string) (*Release, error
 	return normalize(&rel), nil
 }
 
+// EnvToken is an optional GitHub token. It is not needed to update: the API
+// endpoints ngx uses are public. It exists because the unauthenticated rate
+// limit is 60 requests per hour PER IP, and a CI runner shares its address
+// with everyone else on the platform -- without a token the integration tests
+// fail for a reason that has nothing to do with the code, which is the fastest
+// way to teach a team to ignore a red build.
+//
+// It is never required and never prompted for: absent, ngx just goes on
+// unauthenticated.
+const EnvToken = "GITHUB_TOKEN"
+
+// authorize adds the token when the environment carries one.
+func authorize(req *http.Request) {
+	if token := os.Getenv(EnvToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
 // Download reads a whole artifact into memory, respecting the ceiling.
 func (c *Client) Download(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -190,6 +209,7 @@ func (c *Client) Download(ctx context.Context, url string) ([]byte, error) {
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "ngx-update")
+	authorize(req)
 
 	resp, err := c.http().Do(req)
 	if err != nil {
@@ -223,6 +243,7 @@ func (c *Client) getJSON(ctx context.Context, url string, dest any) error {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "ngx-update")
+	authorize(req)
 
 	resp, err := c.http().Do(req)
 	if err != nil {

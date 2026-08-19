@@ -170,6 +170,12 @@ jobs:
       - name: integration tests
         env:
           CGO_ENABLED: "1"
+          # The update tests hit the real GitHub API. Unauthenticated the
+          # limit is 60 requests per hour per IP, and a runner shares its
+          # address with the whole platform -- without the token the job would
+          # fail for a reason unrelated to the code, which is the fastest way
+          # to teach everyone to ignore a red build.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: go test ./... -tags integration -race -count=1
 
       # Tears it down even if the tests fail: the next job on the same runner
