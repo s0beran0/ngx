@@ -3,97 +3,118 @@
 **Goal:** deliver everything that still fits inside read-only, in an order
 where each step is usable on its own and nothing is built on an unproven base.
 
-**Consolidates:** `2026-08-19-ngx-consumable-output.md` (O1–O4) and
-`2026-08-19-ngx-distribution-channels.md` (C1–C5). This document does not
-restate their decisions; it orders them and records what depends on what.
+**Consolidates:** `2026-08-19-ngx-consumable-output.md`,
+`2026-08-19-ngx-distribution-channels.md`, and the conclusions of
+`../specs/2026-08-19-ngx-agent-ergonomics.md`, which rewrote a good part of the
+first one.
 
 ## Why 0.1.1 and not 0.2.0
 
 `get` and `--field` are not new features. They come from the v1.0 spec that
-started this project, and they were listed in the v0.1 design from the first
-day — §5 defines the selector language in full, down to the four
-disambiguation rules. Shipping them **completes v0.1** rather than extending
-it, and a patch number says exactly that.
+started this project and were in the v0.1 design from day one — §5 defines the
+selector language in full, down to the four disambiguation rules. Shipping them
+**completes v0.1** rather than extending it, and a patch number says exactly
+that.
 
-The roadmap agrees from the other side: **v0.2 is reserved for mutation** —
-plan/apply with rollback. Someone reading "v0.2" in this project should
-understand "it writes now", and spending that number on read-only work would
-cost more in meaning than it gains in semver purity.
+The roadmap agrees from the other side: **v0.2 is reserved for mutation**.
+Someone reading "v0.2" in this project should understand "it writes now".
 
-*What the release notes still have to say plainly:* a patch version that adds a
-command is unusual, and the reason is that the command was owed, not new.
+## What the ergonomics research changed
 
-## Two independent tracks
+The first version of this plan had `ngx get <selector>` as its centrepiece,
+carrying the §5 expression language. That was the wrong centre.
 
-Output (O) and distribution (C) touch disjoint files. They can run in parallel
-and only meet at the end, in documentation and in the release.
+Embedding a query engine removes the dependency on `jq` and leaves the
+**onboarding** untouched, and onboarding is the larger cost: an agent needs the
+language, plus the envelope shape, plus the selector grammar — three
+specifications before one question. So the shape of `get` changes: **flat
+flags, no grammar**. `--directive listen` cannot be subtly wrong the way
+`http.server.listen` can, because there is nothing to get wrong.
 
-```
-track O   O1 --field  →  O2 --summary  →  O3 get  →  O4 human
-track C   C1 channel  →  C2 nfpms  →  C3 tap  →  C4 aur/scoop/winget
-                                  ↘  both  ↘
-                                     C5+docs → release 0.1.1
-```
+The expression language is not cancelled; it is demoted. Nothing common may
+require it, and when it does arrive it should be `jq` syntax through an
+embedded engine rather than a grammar of ours — a language the agent already
+knows beats one we designed.
+
+Two other conclusions promoted themselves to the front of the queue, and the
+reason is timing rather than importance: they change the **envelope contract**,
+and every day they wait, one more consumer depends on the current shape.
 
 ## Order, and why this one
 
-### Phase 1 — `--field` (O1)
+### Phase 1 — Envelope contract (E4, E5, E6)
 
-Comes first for three reasons, in this order of weight. It is the smallest
-change. It applies to **every existing command** at once, because it lives in
-the renderer. And it is the tool I will use to verify every step after it —
-building `get` while still parsing JSON by hand would be building the cure and
-taking the disease.
+First, because it is the only work here that gets **more expensive by waiting**
+rather than merely later.
 
-Deliverable: `ngx --field data.nginx.version status` prints `1.20.1`.
+- **Schema version in the envelope.** `ngx_version` is not enough: it changes
+  on every release, including those that change nothing about the shape. An
+  agent that learned a field needs a way to notice the contract moved that is
+  not "I started getting null".
+- **A redacted value is distinguishable from an absent one, in the data.** An
+  agent asking for `ssl_certificate_key` and getting `***` today cannot tell
+  censorship from absence, so it retries or reports an empty key. Absence and
+  censorship are different facts and the data has to say which.
+- **Truncation visible inside `data`.** When a file could not be read, `ok` is
+  already false and the diagnostic says so — but an agent reading only `data`
+  sees a complete-looking tree. It must trip over the gap where it is looking.
 
-### Phase 2 — `inspect --summary` (O2) ‖ install channel (C1)
+### Phase 2 — The default stops being a dump (E1) ‖ install channel (C1)
 
-Both small, both independent, both parallel-safe: O2 is in `internal/cli`, C1
-in `internal/update`.
+`inspect` without a filter returns the summary and says how to ask for more.
+The full tree needs an explicit flag whose name states its cost. 1.6 MB is not
+a default; it is a decision the caller has to make on purpose.
 
-C1 goes early despite the packaging being late, because it is what makes every
-packaging task afterwards a config change rather than a design question. It
-also carries the rule with the most consequence in the whole release: a
-packaged `ngx` refuses to self-update.
+C1 runs alongside — different files, and it is what turns every packaging task
+afterwards into configuration instead of a design question.
 
-### Phase 3 — `ngx get` (O3) ‖ packages (C2, C3, C4)
+### Phase 3 — `ngx get` with flat flags (E3) ‖ packages (C2, C3, C4)
 
-The big one, and the flagship of 0.1.1. Its four steps are already ordered in
-its own plan, and one of them is worth repeating here because it inverts the
-obvious sequence: **read pruning comes last**, after the evaluator is proven by
-a property test against `inspect`. Making it read fewer files before it is
-proven produces a wrong answer faster.
+`--directive`, `--in`, `--value`, `--file`. No expression, no grammar, no
+precedence to learn. The property test against `inspect` stays exactly as
+planned: a node returned by `get` has to be byte-identical to the same node in
+the full tree, which is the oracle that keeps the two from drifting into two
+truths.
 
-The packaging tasks run alongside it. They are configuration and container
-verification, they do not touch Go code beyond C1, and they are the ones most
-likely to stall on something outside the repository — a token for the tap, a
-container image that changed. Starting them in parallel means their latency
-overlaps the work rather than being added to it.
+**Read pruning comes last within this phase**, after that oracle is green.
+Reading fewer files is an optimisation, and an optimisation on top of an
+unproven evaluator produces a wrong answer faster.
 
-### Phase 4 — human rendering (O4), documentation (C5), release
+### Phase 4 — `--help` that teaches (E2), and the escape hatch
 
-Documentation last, on purpose: writing it before `get` exists produces
-documentation for a command as imagined, and this project already paid for that
-kind of drift — a README claiming four commands when there were five, and a doc
-saying the remote path had never touched production the day after it did.
+Help text is the documentation surface an agent actually reads, so it carries
+copy-pasteable examples showing intent rather than syntax. A first successful
+use of `ngx` should require reading nothing else.
+
+Only here, if it is still needed after Phases 2 and 3: `--query` with an
+embedded `gojq`. Verified as viable — pure Go, MIT, one indirect dependency,
+cross-builds on the six platforms without cgo. It is an escape hatch for the
+rare question, not the way the tool is meant to be used.
+
+### Phase 5 — Human rendering, documentation, release
+
+Documentation last, on purpose: written earlier it documents a command as
+imagined. This project already paid for that twice.
+
+## What was dropped, and why it is worth saying
+
+`--field` shipped in Phase 1 of the previous ordering and stays: a dot path
+with no operators has no grammar to get wrong. What did not survive is the plan
+to grow it — the `[]` projection construct — because that is where it would
+have started becoming a language. Projection belongs to `--query`, or to a flag
+on `get`, and not to a syntax of ours growing one operator at a time.
 
 ## Verification before the tag
 
-Not new work, the same gate already used for 0.1.0, plus what this release adds:
+The same gate as 0.1.0, plus what this release adds:
 
 - `make verify` and the integration suite with the bench up
-- the six-platform cross build
-- `.deb` and `.rpm` installed **in containers**, checking `install_channel` and
+- `.deb` and `.rpm` installed in containers, checking `install_channel` and
   that `ngx update` refuses
 - against the production nginx, read-only: `get` returning a subtree identical
-  to the corresponding slice of `inspect`, and `--field` answering without a
-  second tool
-- the published binary re-validated after the release, as done for 0.1.0
-
-## What does not enter 0.1.1
-
-- homebrew-core, Debian and Fedora official: gated on traction and sponsorship,
-  not on engineering
-- anything that writes to a `.conf`: that is v0.2, and the line is what makes
-  this release safe to hand to anyone
+  to the corresponding slice of `inspect`
+- **the agent test:** answer three real questions using only `ngx --help` as a
+  starting point — which ports are listened on, which upstream a location
+  proxies to, whether the configuration is valid. If any of them needs the spec,
+  Phase 4 is not done.
+- the published binary re-validated after the release, as in 0.1.0
