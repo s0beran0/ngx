@@ -64,7 +64,7 @@ func TestInspectSummarizesTheConfiguration(t *testing.T) {
 // The IDs have to go out in the JSON: they are how the agent references a
 // node on the next call.
 func TestInspectEmitsIDsInTheTree(t *testing.T) {
-	_, _, raw := runInspect(t, "inspect", "-c", fixture(t))
+	_, _, raw := runInspect(t, "inspect", "--full-tree", "-c", fixture(t))
 
 	require.Contains(t, raw, `"id":"h.s0"`)
 	require.Contains(t, raw, `"id":"h.s0.l0"`)
@@ -72,7 +72,7 @@ func TestInspectEmitsIDsInTheTree(t *testing.T) {
 }
 
 func TestInspectEmitsSpans(t *testing.T) {
-	_, _, raw := runInspect(t, "inspect", "-c", fixture(t))
+	_, _, raw := runInspect(t, "inspect", "--full-tree", "-c", fixture(t))
 
 	require.Contains(t, raw, `"span"`)
 	require.Contains(t, raw, `"head_span"`)
@@ -81,7 +81,7 @@ func TestInspectEmitsSpans(t *testing.T) {
 // The test that closes the redaction loop: the sensitive value cannot show up
 // in the output, but the directive must.
 func TestInspectRedactsThePrivateKey(t *testing.T) {
-	_, _, raw := runInspect(t, "inspect", "-c", fixture(t))
+	_, _, raw := runInspect(t, "inspect", "--full-tree", "-c", fixture(t))
 
 	require.NotContains(t, raw, "/etc/ssl/private/api.key")
 	require.Contains(t, raw, "ssl_certificate_key", "the directive stays visible")
@@ -133,7 +133,7 @@ func directivesNamed(t *testing.T, raw, name string) []inspectNode {
 // itself. Only redacted_args separates them -- a fixture with a secret alone
 // would pass with the defect still in place.
 func TestInspectDistinguishesARedactedValueFromALiteralAsterisks(t *testing.T) {
-	_, _, raw := runInspect(t, "inspect", "-c", filepath.Join("testdata", "redaction.conf"))
+	_, _, raw := runInspect(t, "inspect", "--full-tree", "-c", filepath.Join("testdata", "redaction.conf"))
 
 	require.NotContains(t, raw, "s3cr3t-token", "the secret cannot reach the output")
 
@@ -154,7 +154,7 @@ func TestInspectDistinguishesARedactedValueFromALiteralAsterisks(t *testing.T) {
 // The mark points at the argument, not at the directive: the header name stays
 // readable, which is what says WHICH header was censored.
 func TestInspectRedactsTheArgumentWithoutCollapsingTheOthers(t *testing.T) {
-	_, _, raw := runInspect(t, "inspect", "-c", filepath.Join("testdata", "redaction.conf"))
+	_, _, raw := runInspect(t, "inspect", "--full-tree", "-c", filepath.Join("testdata", "redaction.conf"))
 
 	keys := directivesNamed(t, raw, "ssl_certificate_key")
 	require.Len(t, keys, 1)
@@ -197,7 +197,7 @@ func TestInspectWithNoConfigAtAllIsUsageError(t *testing.T) {
 }
 
 func TestInspectCombineResolveIncludes(t *testing.T) {
-	code, _, raw := runInspect(t, "inspect", "--combine",
+	code, _, raw := runInspect(t, "inspect", "--full-tree", "--combine",
 		"-c", filepath.Join("..", "config", "testdata", "combine", "nginx.conf"))
 
 	require.Equal(t, output.ExitOK, code)

@@ -141,14 +141,24 @@ agent that only ever sees errors still needs to know which shape it is reading.
 
 ### `ngx inspect`
 
-Reads the configuration and returns the whole tree plus a summary. The path
-comes from `-c`/`--config`, or from `nginx.config` in `ngx`'s own
-configuration file.
+Reads the configuration and returns a summary of it. The path comes from
+`-c`/`--config`, or from `nginx.config` in `ngx`'s own configuration file.
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/example.conf | jq -c '.data.summary'
-{"files":1,"servers":1,"locations":2,"upstreams":1}
+$ ./bin/ngx inspect -c internal/cli/testdata/filters/nginx.conf
+{"ok":true,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":{"summary":{"files":3,"servers":4,"locations":1,"upstreams":0}},"diagnostics":[],"meta":{"duration_ms":0,"config_hash":"sha256:1d0e29385ff4b3649329528a413898feefd0f1b02849684fe239c15e1c756eea","target":"local"}}
 ```
+
+**The tree is not the default.** On a production nginx it is 1.6 MB of JSON,
+which is a context budget spent to answer a question about one file. Three
+flags ask for it, and `data.config` is absent — not `[]` — until one of them
+does:
+
+| Flag | What comes out |
+|---|---|
+| `--file <fragment>` | only that file |
+| `--server <name>` | only the `server` blocks with that `server_name` |
+| `--full-tree` | everything, and the name says what it costs |
 
 Every node in the tree carries `directive`, `args`, `file`, `line`, `column`,
 the byte offsets (`span` and `head_span`) and a stable `id` — `h.s0.l0` is the
@@ -158,7 +168,7 @@ first `location` of the first `server` inside `http`. The envelope also brings
 Sensitive values come out redacted by default:
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/example.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/example.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
 {"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/example.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"redacted_args":[0],"id":"h.s0.d2"}
 ```
 
@@ -167,7 +177,7 @@ to be there because a configuration is allowed to contain three asterisks of its
 own, and then the censored value and the real one are the same string:
 
 ```console
-$ ./bin/ngx inspect -c internal/cli/testdata/redaction.conf | jq -c '[.. | objects | select(.directive? == "proxy_set_header")]'
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/redaction.conf | jq -c '[.. | objects | select(.directive? == "proxy_set_header")]'
 [{"directive":"proxy_set_header","args":["Authorization","***"],"file":"internal/cli/testdata/redaction.conf","line":9,"column":13,"span":{"start":143,"end":196},"head_span":{"start":143,"end":195},"redacted_args":[1],"id":"h.s0.l0.d0"},{"directive":"proxy_set_header","args":["X-Masked-Upstream","***"],"file":"internal/cli/testdata/redaction.conf","line":10,"column":13,"span":{"start":209,"end":248},"head_span":{"start":209,"end":247},"id":"h.s0.l0.d1"}]
 ```
 
@@ -182,6 +192,86 @@ that is what keeps a future `ngx fmt` from writing `***` into the file.
 
 `--combine` resolves the `include`s into a single tree instead of a list of
 files.
+
+#### Finding a file: `--file` and `--server`
+
+`--file` matches against the **whole path**, never against the base name. A
+fragment matches by substring; a value starting with `/` is an absolute path
+and matches exactly. There is no globbing rule to learn.
+
+```console
+$ ./bin/ngx inspect --file sites/portal.conf -c internal/cli/testdata/filters/nginx.conf | jq -c '.data.config[0].parsed[1] | {directive, args, id}'
+{"directive":"server","args":[],"id":"s1"}
+```
+
+Matching the whole path is what makes the same base name in two directories
+come out as a question instead of a guess. Several matches is a refusal with
+the candidates named, and exit 2 — `ngx` never picks one:
+
+```console
+$ ./bin/ngx inspect --file portal.conf -c internal/cli/testdata/filters/nginx.conf; echo "exit=$?"
+{"ok":false,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0101","message":"--file \"portal.conf\" matches 2 files: internal/cli/testdata/filters/sites/portal.conf, internal/cli/testdata/filters/sites-extra/portal.conf. Use a longer fragment, or the absolute path, which matches exactly"}],"meta":{"duration_ms":0,"target":"local"}}
+exit=2
+```
+
+No match is also a refusal, and it says what **was** there — an empty result
+and a misspelt name look identical otherwise:
+
+```console
+$ ./bin/ngx inspect --file backend -c internal/cli/testdata/filters/nginx.conf | jq -r '.diagnostics[0].message'
+--file "backend" matches no file. Read: internal/cli/testdata/filters/nginx.conf, internal/cli/testdata/filters/sites/portal.conf, internal/cli/testdata/filters/sites-extra/portal.conf
+```
+
+`--server` works the same way over `server_name`, with one addition: an exact
+`server_name` wins outright, so `--server example.com` is not made ambiguous by
+the existence of `api.example.com`. With no exact hit the value is a fragment,
+and several names is the same refusal as above (`NGX-0103`):
+
+```console
+$ ./bin/ngx inspect --server portal -c internal/cli/testdata/filters/nginx.conf | jq -r '.diagnostics[0].message'
+--server "portal" matches 2 server names: portal.example.com, portal-admin.example.com. Use a longer fragment; an exact server_name matches only itself
+```
+
+Ambiguity is over the **name**, not over the number of blocks: one
+`server_name` served by a `:80` block and a `:443` block is ordinary nginx, and
+both blocks come out.
+
+The two flags combine with **AND**. `--file a.conf --server x.example.com`
+means "the `x.example.com` blocks that live in `a.conf`", never their union —
+and the names offered when nothing matches are the ones of the narrowed scope:
+
+```console
+$ ./bin/ngx inspect --file sites-extra/portal.conf --server portal.example.com -c internal/cli/testdata/filters/nginx.conf; echo "exit=$?"
+{"ok":false,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0104","message":"--server \"portal.example.com\" matches no server_name. Declared: portal-admin.example.com"}],"meta":{"duration_ms":0,"target":"local"}}
+exit=2
+```
+
+Both flags filter what is **emitted**, not what is read. `--file` could prune
+the read as well and does not yet; `--server` structurally never can, because
+knowing which file declares a `server_name` requires reading the file.
+
+#### A filtered answer says so, and drops the hash
+
+A filtered tree is a subset by design, and the marker lives inside `data`,
+where an agent reading only `data` trips over it while looking at `config`:
+
+```console
+$ ./bin/ngx inspect --file sites/portal.conf -c internal/cli/testdata/filters/nginx.conf | jq -c '.data.scope, .meta'
+{"partial":true,"filters":{"file":"sites/portal.conf"},"files_emitted":1,"config_hash_omitted":true}
+{"duration_ms":0,"target":"local"}
+```
+
+`meta.config_hash` is **omitted**, and that is the point. The hash is computed
+over the tree it is given, so the hash of a filtered tree is a valid hash *of a
+subset* and indistinguishable from the hash of the whole. Harmless while
+reading, and a corrupted write the moment a future `ngx apply` uses it for
+optimistic locking — so a filtered answer never carries one, and
+`scope.config_hash_omitted` says why instead of leaving the caller to guess.
+
+`data.summary` still describes the **whole** configuration that was read (three
+files above, of which one came out), which is what makes it comparable between
+a filtered call and an unfiltered one. `scope.files_emitted` is how much came
+out.
 
 ### `ngx test`
 
@@ -264,6 +354,21 @@ exit=3
 
 Codes 7 (drift) and 9 (hash mismatch) are reserved for the mutation commands
 of v0.2.
+
+The exit code says how bad it was; `diagnostics[].code` says what happened, and
+is the field to branch on. It is allocated by range: `0001`–`0009` generic and
+aligned to the exit code of the same number, `0100`–`0199` configuration,
+`0200`–`0299` transport and SSH, `0300`–`0399` update and distribution. The
+`inspect` filters use the configuration range, all of them on exit 2 — the
+invocation named nothing, and neither `ngx` nor the `.conf` is at fault:
+
+| Code | Condition |
+|---|---|
+| `NGX-0101` | `--file` names more than one file |
+| `NGX-0102` | `--file` names no file |
+| `NGX-0103` | `--server` names more than one `server_name` |
+| `NGX-0104` | `--server` names no `server_name` |
+| `NGX-0105` | *info*: the answer is a filtered subset |
 
 ### Global flags
 

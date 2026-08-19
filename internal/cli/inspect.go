@@ -19,10 +19,49 @@ type Summary struct {
 	Upstreams int `json:"upstreams"`
 }
 
-// InspectData is the complete dump: tree plus summary.
+// InspectData is what inspect answers with: always the summary, and the tree
+// only when it was asked for.
+//
+// Config is ABSENT, not empty, when no tree was requested -- an unavailable
+// field is omitted, and "config":[] would claim the configuration has no
+// files. The tree is not the default because on a real production nginx it is
+// 1.6 MB of JSON, which is a context budget spent to answer a question about
+// one file; --full-tree asks for it and the name says what it costs. Whenever
+// Config IS present it holds at least one file: config.Parse always yields the
+// top-level file, and a filter that matches nothing fails before reaching
+// here.
 type InspectData struct {
-	Config  []*config.File `json:"config"`
+	Config  []*config.File `json:"config,omitempty"`
 	Summary Summary        `json:"summary"`
+
+	// Scope is present only when the tree is a subset. Its absence means
+	// "not filtered".
+	Scope *Scope `json:"scope,omitempty"`
+}
+
+// Scope marks the result as a deliberate subset, INSIDE data, where an agent
+// reading only data trips over it while looking at config.
+//
+// ConfigHashOmitted is the other half of the same fact. config.Hash is
+// computed over the tree it is handed, so a hash of a filtered tree is a valid
+// hash OF A SUBSET and indistinguishable from the hash of the whole -- and the
+// moment v0.2 uses the hash for optimistic locking, an agent could apply a
+// change against a configuration the hash never covered. So a filtered answer
+// drops meta.config_hash entirely, and says here that it did, rather than
+// leaving the caller to guess why a field it relies on went missing.
+type Scope struct {
+	Partial           bool         `json:"partial"`
+	Filters           ScopeFilters `json:"filters"`
+	FilesEmitted      int          `json:"files_emitted"`
+	ConfigHashOmitted bool         `json:"config_hash_omitted"`
+}
+
+// ScopeFilters echoes the filters that produced the subset, so the caller can
+// tell a narrow answer from a small configuration without keeping the command
+// line around.
+type ScopeFilters struct {
+	File   string `json:"file,omitempty"`
+	Server string `json:"server,omitempty"`
 }
 
 // Redacted returns a copy with the sensitive values replaced. The copy is deep
@@ -40,15 +79,20 @@ func (d InspectData) Redacted(rs output.RedactSet) any {
 		return d
 	}
 
-	files := make([]*config.File, 0, len(d.Config))
-	for _, f := range d.Config {
-		files = append(files, &config.File{
-			Path:   f.Path,
-			Source: f.Source,
-			Nodes:  redactNodes(f.Nodes, rs),
-		})
+	// A nil Config stays nil: the tree was not asked for, and an empty slice
+	// here would put "config":[] back into the output.
+	var files []*config.File
+	if d.Config != nil {
+		files = make([]*config.File, 0, len(d.Config))
+		for _, f := range d.Config {
+			files = append(files, &config.File{
+				Path:   f.Path,
+				Source: f.Source,
+				Nodes:  redactNodes(f.Nodes, rs),
+			})
+		}
 	}
-	return InspectData{Config: files, Summary: d.Summary}
+	return InspectData{Config: files, Summary: d.Summary, Scope: d.Scope}
 }
 
 func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
@@ -77,11 +121,15 @@ func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
 }
 
 func newInspectCmd(ctx *Context) *cobra.Command {
-	var combine bool
+	var (
+		combine  bool
+		fullTree bool
+		filter   inspectFilter
+	)
 
 	cmd := &cobra.Command{
 		Use:   "inspect",
-		Short: "Complete dump: configuration tree and summary",
+		Short: "Summary of the configuration; the tree with --file, --server or --full-tree",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := configPathOf(ctx)
@@ -123,13 +171,61 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 
 			env := ctx.NewEnvelope("inspect")
 			env.Diagnostics = append(env.Diagnostics, readDiags...)
-			env.Data = InspectData{Config: tree.Files, Summary: summarize(tree)}
-			env.Meta.ConfigHash = tree.Hash
+
+			// The summary always describes the WHOLE configuration that was
+			// read, filtered or not. That is what makes it comparable
+			// between calls -- "12 servers, and here is the one you asked
+			// for" -- and scope.files_emitted is what says how much of it
+			// came out.
+			data := InspectData{Summary: summarize(tree)}
+
+			switch {
+			case filter.active():
+				files, ferr := filter.apply(tree)
+				if ferr != nil {
+					// The read diagnostics survive the failure: which files
+					// needed privilege is context the caller loses nowhere
+					// else.
+					ferr.Extras = append(ferr.Extras, readDiags...)
+					return ferr
+				}
+				data.Config = files
+				data.Scope = &Scope{
+					Partial:           true,
+					Filters:           ScopeFilters{File: filter.File, Server: filter.Server},
+					FilesEmitted:      len(files),
+					ConfigHashOmitted: true,
+				}
+				// meta.config_hash is deliberately NOT set: see Scope.
+				env.AddDiagnostic(output.Diagnostic{
+					Severity: output.SeverityInfo,
+					Code:     CodePartialResult,
+					Message: "partial result: data.config is the subset the filters name, " +
+						"and meta.config_hash is omitted because it would be a valid hash of a subset",
+				})
+			default:
+				if fullTree {
+					data.Config = tree.Files
+				}
+				env.Meta.ConfigHash = tree.Hash
+			}
+
+			env.Data = data
 			return ctx.Renderer.Render(env)
 		},
 	}
 
 	cmd.Flags().BoolVar(&combine, "combine", false, "resolve the includes into a single tree")
+	cmd.Flags().BoolVar(&fullTree, "full-tree", false,
+		"emit every node of every file; on a production nginx this is megabytes of JSON")
+	// The help text says "emitted", not "read": --file could prune the read
+	// and does not yet, and --server structurally never can, because knowing
+	// which file declares a server_name means reading the file. Promising a
+	// saving here is the kind of claim a user discovers with a stopwatch.
+	cmd.Flags().StringVar(&filter.File, "file", "",
+		"emit only this file: a fragment matches anywhere in the path, a path starting with / matches exactly")
+	cmd.Flags().StringVar(&filter.Server, "server", "",
+		"emit only the server blocks with this server_name; combines with --file as AND")
 	return cmd
 }
 
