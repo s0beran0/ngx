@@ -56,18 +56,33 @@ dependency, cross-builds on all six platforms without cgo.
 error recorded here so it is not repeated. What `jq` does require is knowing
 the envelope shape, which belongs to A4.
 
-### A3 — Let the shape of the data choose the format
+### A3 — Let the question choose the format
 
-Research on token-optimised formats converges on this: for flat, uniform data,
-tabular formats cost around half of JSON; for data nested beyond two levels,
-JSON is the only practical option and YAML saves about a quarter.
+Measured on this codebase, same file three ways:
 
-Our output has both shapes. A configuration tree is deeply nested. A result
-list — matches, files, diagnostics — is flat and uniform, and **measured on our
-own data it is 47% smaller and roughly 60% cheaper in tokens as a table**.
+| | bytes |
+|---|---|
+| the nginx source text | **351** |
+| the JSON tree of it | 2,635 |
 
-*Answer:* `--format table` for flat results, JSON everywhere else, and never a
-table for the tree. The rule is the data's shape, not a preference.
+Three questions, three answers, and no single format wins:
+
+| Question | Format | Why |
+|---|---|---|
+| "how is site X configured?" | **nginx text** | 7.5x smaller than the JSON tree on the file measured, and the syntax every model already reads |
+| "list every port / upstream / match" | **TSV** | flat and uniform; a realistic 269-match result is 47% fewer bytes and roughly 60% fewer tokens |
+| "give me the structure to process" | **JSON** | lossless, argument boundaries preserved |
+
+TOON was measured and rejected: on our real shape it came out **13% larger
+than JSON**, because one field being a list (`args`) drops it out of its
+tabular fast path. Flattening `args` to a string recovers 41% — still worse
+than TSV's 47%, and at the cost of destroying the argument boundary. Recorded
+as a negative decision so the next reader who sees "TOON saves 40%" does not
+re-litigate it.
+
+The same honesty applies to TSV: it flattens `args` too. A table is a **view**,
+not a serialisation, and a lossy view is fine only when the loss is obvious and
+a lossless option sits beside it.
 
 ### A4 — Usable without reading a specification
 
@@ -111,6 +126,87 @@ does the caller do next?" and finding no good answer.
 | A build from source has no channel | Default `direct`, so `go build` gives a working updater. |
 | A packager mistypes the channel flag | An unknown value refuses too. A typo must not re-enable self-update. |
 
+## Holes found while reviewing this plan
+
+Each of these was found by checking the plan against the code rather than
+against itself. They are recorded with their consequence, because a plan that
+hides its own weak points is worse than one that has none.
+
+### H1 — `--format nginx` needs per-argument spans, which do not exist
+
+**Blocking.** A node carries `span` (the whole directive) and `head_span`
+(name **and** arguments together). Verified: for `ssl_certificate_key
+/etc/ssl/secret.pem`, `head_span` covers the entire string. There is no span
+per argument.
+
+Emitting the source text therefore cannot redact: the value's byte range is
+unknown. Emitting it raw would leak `ssl_certificate_key` and every password in
+the configuration — the exact thing the redactor exists to prevent, bypassed by
+a new output format.
+
+*Consequence:* `--format nginx` costs one prerequisite, per-argument spans in
+the aligner. That is not wasted work — v0.2 needs the same thing to replace one
+argument without rewriting the directive — but it means the format is not the
+cheap win it looked like. It moves behind that prerequisite in the order.
+
+*Rejected alternative:* re-tokenising `head_span` at render time. It duplicates
+tokeniser logic in a second place, and the two would drift. This codebase has
+already paid for a divergence of exactly that kind.
+
+### H2 — A filtered read makes `config_hash` a lie
+
+`Hash` is computed over the tree it is given. Filtered with `--file`, the tree
+is a subset, so the hash is a valid hash **of a subset** — and indistinguishable
+from the hash of the whole thing.
+
+That is harmless while reading and dangerous the moment v0.2 uses the hash for
+optimistic locking: an agent could read filtered, get a hash, and apply a change
+against a configuration the hash never covered.
+
+*Demand:* a filtered result either omits `config_hash` — absence is
+information, and the rule already exists in this project — or carries a scope
+marker beside it. It must never look authoritative about a whole it never saw.
+
+### H3 — `--server` cannot prune reads, only `--file` can
+
+A1 says filters should reach the reading layer. That works for `--file`: read
+the top file, expand the includes, read only what matches.
+
+It cannot work for `--server`. Knowing which file declares a `server_name`
+requires reading the file. The saving there is in what is **emitted**, not in
+what is read.
+
+*Demand:* the flags' help must not imply otherwise, and the plan must not
+promise 132 round trips becoming one for `--server`. Overstating this would be
+the kind of claim that gets discovered by a user timing it.
+
+### H4 — TSV has no escaping rule yet
+
+nginx arguments can contain quotes and, in principle, tabs. TSV with an
+unescaped tab inside a field silently produces an extra column, and a consumer
+reads a shifted row without any error.
+
+*Demand:* pick and document one rule before shipping — escape, or refuse the
+row with a diagnostic. Silent corruption is the worst of the three options.
+
+### H5 — The 5 KB budget in the release gate is not well posed
+
+"The answer must cost under 5 KB" is wrong as an absolute: a large site's
+configuration is legitimately larger than that, and the gate would fail on
+success.
+
+*Demand:* state it relative — the filtered answer must be within a small factor
+of the source file it describes, and orders of magnitude below the full dump.
+
+### H6 — "The contract gets more expensive by waiting" is weaker than I wrote
+
+v0.1.0 is already published, so the envelope shape is already public. Adding a
+schema version is additive and safe, and reordering around urgency that has
+partly already elapsed would be arguing from a fact that is no longer true.
+
+*Correction:* the contract work goes first because it is cheap and unblocks
+honest deprecation later, not because a deadline is passing.
+
 ## Phases
 
 Two tracks on disjoint files: **R** (reading) and **P** (packaging). They meet
@@ -134,18 +230,27 @@ with no filter returns the summary.
 
 R3: `--query` with embedded `gojq`. Discharges A2 on its own.
 
-### Phase 3 — `get` and `--format table`  ‖  P3 tap, P4 AUR/Scoop/winget
+### Phase 3 — `get`, per-argument spans, and the formats  ‖  P3 tap, P4 AUR/Scoop/winget
 
 R4: `get` with flat flags — `--directive`, `--in`, `--value`. No grammar to be
 subtly wrong about. Property test against `inspect`: a node from `get` must be
 byte-identical to the same node in the full tree, which is what keeps the two
 commands from drifting into two truths.
 
-R5: `--format table` for flat results.
+R5: **per-argument spans in the aligner** (H1). Prerequisite for anything that
+renders source text, and the same thing v0.2 needs to replace one argument
+without rewriting the directive. It gets its own differential test against the
+tokeniser, like every span work in this codebase.
+
+R6: `--format nginx`, only after R5. Redaction is applied by byte substitution
+over the argument spans — which is a rehearsal of the v0.2 edit path, performed
+where getting it wrong corrupts nobody's file.
+
+R7: `--format table` for flat results, with the escaping rule decided in H4.
 
 **Read pruning comes last within this phase**, after the property test is
-green. An optimisation on top of an unproven evaluator produces a wrong answer
-faster.
+green, and only for `--file` (H3). An optimisation on top of an unproven
+evaluator produces a wrong answer faster.
 
 ### Phase 4 — `--help` that teaches, human rendering, docs, release
 
@@ -164,8 +269,14 @@ The 0.1.0 gate, plus:
   alone — which ports are listened on, what a given site's configuration looks
   like, whether the configuration is valid. If any needs the spec, Phase 4 is
   not done.
-- **the token budget**: the answer to "show me this site's config" must cost
-  under 5 KB. Today the only way to get it is the 1.6 MB dump.
+- **the token budget, stated relatively** (H5): the answer to "show me this
+  site's config" must be within a small factor of the source file it describes,
+  and orders of magnitude below the full dump. An absolute ceiling would fail on
+  a legitimately large site.
+- **no filtered result carries an authoritative `config_hash`** (H2): either it
+  is omitted or it is scoped. A hash that describes a subset while looking like
+  it describes the whole is how a v0.2 client applies a change against something
+  it never read.
 
 ## What this sets up for v0.2
 
