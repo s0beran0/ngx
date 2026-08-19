@@ -28,9 +28,17 @@ const (
 
 // GlobalFlags mirrors the global flags from the spec.
 type GlobalFlags struct {
-	ConfigPath   string
-	JSON         bool
-	Human        bool
+	ConfigPath string
+	JSON       bool
+	Human      bool
+
+	// Format is --format: the long form of --json/--human plus the two
+	// formats that have no shorthand, nginx and table. It is a separate
+	// field from JSON/Human because it also has to be told apart from "not
+	// given" -- an empty value falls back to output.format in the settings
+	// file, and "auto" typed explicitly does not.
+	Format string
+
 	Quiet        bool
 	NoColor      bool
 	NginxBin     string
@@ -194,6 +202,16 @@ func renderError(ctx *Context, stderr io.Writer, err error) {
 	// gate: the agent needs to know what went wrong.
 	r.Quiet = false
 	r.NoRedact = false
+
+	// nginx text and TSV cannot carry a failure: the error envelope has no
+	// configuration and no rows, so the requested format would refuse it and
+	// the refusal would REPLACE the real diagnostic -- the caller would read
+	// "this output is not nginx text" instead of "no tree was read". The
+	// error falls back to the ordinary presentation, which is the only one
+	// that can hold a diagnostic.
+	if r.Format == output.FormatNginx || r.Format == output.FormatTable {
+		r.Format = output.FormatAuto
+	}
 	if renderErr := r.Render(env); renderErr != nil {
 		// Cobra is running with SilenceErrors; if rendering the error
 		// envelope itself fails, the user cannot be left with an exit code
@@ -220,6 +238,8 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.StringVarP(&f.ConfigPath, "config", "c", "", "nginx main configuration file")
 	p.BoolVar(&f.JSON, "json", false, "force JSON output")
 	p.BoolVar(&f.Human, "human", false, "force human-readable output")
+	p.StringVar(&f.Format, "format", "",
+		"output format: auto, json, human, nginx (the configuration text) or table (TSV, flat results only)")
 	p.BoolVarP(&f.Quiet, "quiet", "q", false, "errors only")
 	p.BoolVar(&f.NoColor, "no-color", false, "turn colors off")
 	p.StringVar(&f.NginxBin, "nginx-bin", "", "path to the nginx binary")
@@ -262,6 +282,18 @@ func prepare(ctx *Context, cmd *cobra.Command) error {
 		return output.Usage("--json and --human are mutually exclusive")
 	}
 
+	// --format is the same choice as --json/--human, spelled in full. Two
+	// spellings of it on the same command line have no coherent winner, and
+	// picking one silently would make the other flag look broken.
+	if f.Format != "" {
+		switch {
+		case f.JSON:
+			return output.Usage("--format and --json are mutually exclusive")
+		case f.Human:
+			return output.Usage("--format and --human are mutually exclusive")
+		}
+	}
+
 	// --field and --query both take something OUT of the envelope, each in
 	// its own shape, and there is no coherent answer to being asked for two
 	// projections of the same output at once. Whichever won silently would
@@ -289,6 +321,8 @@ func prepare(ctx *Context, cmd *cobra.Command) error {
 			return output.Usage("%s and --json are mutually exclusive", sel.flag)
 		case f.Human:
 			return output.Usage("%s and --human are mutually exclusive", sel.flag)
+		case f.Format != "":
+			return output.Usage("%s and --format are mutually exclusive", sel.flag)
 		case f.Quiet:
 			return output.Usage("%s and --quiet are mutually exclusive", sel.flag)
 		}
@@ -369,6 +403,8 @@ func prepare(ctx *Context, cmd *cobra.Command) error {
 
 func resolveFormat(f *GlobalFlags, s *settings.Settings) output.Format {
 	switch {
+	case f.Format != "":
+		return output.Format(f.Format)
 	case f.JSON:
 		return output.FormatJSON
 	case f.Human:
@@ -378,17 +414,22 @@ func resolveFormat(f *GlobalFlags, s *settings.Settings) output.Format {
 	}
 }
 
-// validateFormat rejects any format outside auto/json/human. The
-// --json/--human flags only produce one of those values by construction; the
-// only possible source of an invalid format in prepare is output.format from
-// the configuration file.
+// validateFormat rejects any format outside auto/json/human/nginx/table. The
+// --json/--human flags only produce a valid value by construction; the two
+// sources that can be wrong are --format, typed by hand, and output.format
+// from the configuration file, which is free-form YAML.
+//
+// Both are rejected here, before the transport opens and before the --quiet
+// gate in the renderer: a bad format with --quiet would otherwise suppress
+// the very error that explains why nothing came out.
 func validateFormat(format output.Format) error {
 	switch format {
-	case output.FormatAuto, output.FormatJSON, output.FormatHuman, "":
+	case output.FormatAuto, output.FormatJSON, output.FormatHuman,
+		output.FormatNginx, output.FormatTable, "":
 		return nil
 	default:
 		return output.Usage(
-			"invalid output.format in the configuration: %q (expected auto, json or human)",
+			"invalid output format: %q (expected auto, json, human, nginx or table)",
 			string(format),
 		)
 	}

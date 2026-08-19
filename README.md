@@ -404,6 +404,7 @@ invocation named nothing, and neither `ngx` nor the `.conf` is at fault:
 ```
 -c, --config          main nginx configuration
     --json/--human    force the output format
+    --format          auto, json, human, nginx or table
 -q, --quiet           errors only
     --no-color        turn off colors
     --nginx-bin       path to the nginx binary
@@ -414,6 +415,11 @@ invocation named nothing, and neither `ngx` nor the `.conf` is at fault:
     --field           print a single value from the envelope, by dot path
     --query           apply a jq expression to the envelope, one line per result
 ```
+
+`--format` is the long spelling of `--json`/`--human` plus the two formats that
+have no shorthand. It is refused together with `--json`, `--human`, `--field`
+and `--query`, and an unknown value is a usage error with the valid ones named
+— never a silent fallback to JSON.
 
 #### `--field`: one value comes out as one value
 
@@ -572,6 +578,122 @@ $ echo $?
 output, no coherent answer) and with `--json`, `--human` or `--quiet`, for the
 same reasons `--field` is.
 
+#### `--format nginx`: the configuration as text, not as a tree
+
+The tree is the right answer to "give me the structure to process". It is the
+wrong answer to "how is this site configured?", and expensively so — measured
+on the fixture below, the same configuration is **416 bytes as nginx text and
+3,175 bytes as the JSON tree**, 7.6x. And nginx syntax is the one every model
+already reads, so the cheaper answer is also the more familiar one.
+
+```console
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/nginx_format.conf --format nginx
+# internal/cli/testdata/nginx_format.conf
+events {}
+http {
+    # the site this fixture stands for
+    server {
+        listen 443 ssl;
+        server_name api.example.com;
+        ssl_certificate_key ***;
+
+        location / {
+            if ($request_method = POST) {
+                return 405;
+            }
+            proxy_set_header Authorization ***;
+            proxy_pass http://backend;
+        }
+    }
+}
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/nginx_format.conf --format nginx | wc -c
+     416
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/nginx_format.conf --json | wc -c
+    3175
+```
+
+**Redaction happens here too**, and that is the whole difficulty of this
+format: emitting the source is a path that goes around the tree, so it would
+go around the redactor that acts on the tree. What comes out is the source with
+the bytes of each sensitive argument **replaced** — the span of the whole
+lexeme, quotes included, so `***` lands as a valid argument with nothing to
+escape. The author's formatting, comments and quoting survive everywhere else.
+
+Two limits are deliberate, and both refuse instead of guessing:
+
+- **`if` has no per-argument spans.** Crossplane rewrites its arguments, so
+  there is no lexeme matching each one and `arg_spans` is *unavailable* rather
+  than empty. An `if` that a redaction rule matches has its whole head replaced
+  (`if *** {`) instead of being cut at a guessed offset — over-redacting is the
+  safe side; a guessed cut prints half of what it was hiding.
+- **`--combine` has no source.** The combined tree assembles nodes from several
+  files and keeps no text, so `--format nginx` refuses it (exit 2) rather than
+  slicing one file's spans out of another file's bytes.
+
+A filtered answer emits only what the filter kept. The blocks around it are
+rebuilt rather than cut from the source, because their span still covers the
+siblings that were left out — and those siblings were never redacted:
+
+```console
+$ ./bin/ngx inspect --server api.example.com -c internal/cli/testdata/two_sites.conf --format nginx
+# info: partial result: data.config is the subset the filters name, and meta.config_hash is omitted because it would be a valid hash of a subset
+# internal/cli/testdata/two_sites.conf
+http {
+    server {
+        server_name api.example.com;
+        ssl_certificate_key ***;
+        proxy_pass http://api-backend;
+    }
+}
+```
+
+Diagnostics travel as `#` comments, as above: the format has nowhere else to
+put them, and dropping them would silence exactly the warnings that must not be
+silent — "redaction is OFF" among them. An error envelope is never rendered
+this way; it falls back to JSON, because a refusal that cannot be printed is a
+refusal nobody reads.
+
+#### `--format table`: TSV, for results that are flat
+
+For "list every port / upstream / match", the tabular answer is measurably
+cheaper: on a real 269-match result, TSV was **47% fewer bytes and roughly 60%
+fewer tokens** than the same result as JSON.
+
+```console
+$ ./bin/ngx inspect -c internal/cli/testdata/two_sites.conf --format table
+files	servers	locations	upstreams
+1	2	0	0
+```
+
+**Nested data is refused, never flattened.** A tree squashed into rows loses
+which server each `listen` belonged to, and nothing in the output would say so
+— a wrong answer that looks like an answer:
+
+```console
+$ ./bin/ngx inspect --full-tree -c internal/cli/testdata/two_sites.conf --format table | jq -r '.diagnostics[0].message'; echo "exit=${PIPESTATUS[0]}"
+--format table: the configuration tree is nested and a table cannot hold it without losing which block each directive is in. Use --json for the tree, or drop --full-tree/--file/--server for the summary
+exit=2
+```
+
+**The escaping rule.** TSV has none of its own, and an unescaped tab inside a
+field silently produces one extra column — the consumer reads a shifted row
+with no error at all, which is worse than any refusal. `ngx` uses the rule
+PostgreSQL's `COPY ... TEXT` and `mysql --batch` already use, so it is neither
+new nor ours:
+
+| in the value | in the stream |
+|---|---|
+| `\` | `\\` |
+| tab | `\t` |
+| newline | `\n` |
+| carriage return | `\r` |
+
+It is reversible, and byte-for-byte identical to the original for every field
+that holds none of those four characters — which is every ordinary nginx
+argument. Quotes are **not** touched: TSV has no quoting, and escaping them
+would corrupt an argument that legitimately contains one. A row whose number of
+fields does not match the header is refused, never padded nor truncated.
+
 The remote access flags (`--host`, `--user`, `--port`, `--key`,
 `--known-hosts`, `--insecure-host-key`, `--sudo`) are documented in
 [`docs/remote.md`](docs/remote.md).
@@ -593,7 +715,7 @@ nginx:
   binary: /usr/sbin/nginx
   config: /etc/nginx/nginx.conf
 output:
-  format: auto      # auto, json or human
+  format: auto      # auto, json, human, nginx or table
   redact:
     - ssl_certificate_key
 ```

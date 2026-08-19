@@ -16,6 +16,16 @@ const (
 	FormatAuto  Format = "auto"
 	FormatJSON  Format = "json"
 	FormatHuman Format = "human"
+
+	// FormatNginx emits the configuration SOURCE TEXT, not the tree. It is
+	// only available for data that implements NginxRenderable; anything
+	// else is a usage error, never a silent fallback to JSON.
+	FormatNginx Format = "nginx"
+
+	// FormatTable emits TSV, and only for data that is flat
+	// (TableRenderable). Nested data refuses the format with a reason
+	// instead of flattening itself.
+	FormatTable Format = "table"
 )
 
 // HumanRenderable is implemented by data that knows how to present itself to
@@ -102,9 +112,16 @@ func (r *Renderer) Render(env *Envelope) error {
 	}
 
 	data := env.Data
+	// redacted records that the copy really was produced, and not merely
+	// that rules are active. --format nginx emits the source bytes and can
+	// only redact them through the marks that copy carries, so it needs to
+	// tell "nothing matched" from "this data does not know how to redact
+	// itself" -- the second one has to refuse.
+	redacted := false
 	if !r.NoRedact && !r.Redact.Empty() {
 		if red, ok := data.(Redactable); ok {
 			data = red.Redacted(r.Redact)
+			redacted = true
 		}
 	}
 
@@ -135,13 +152,19 @@ func (r *Renderer) Render(env *Envelope) error {
 	switch format {
 	case FormatHuman:
 		return r.renderHuman(&out)
+	case FormatNginx:
+		return r.renderNginx(&out, redacted)
+	case FormatTable:
+		return r.renderTable(&out)
 	default:
 		return r.renderJSON(&out)
 	}
 }
 
 // resolveFormat decides the effective format. FormatAuto (or the zero value)
-// decides by IsTTY. Any value outside auto/json/human is a usage error:
+// decides by IsTTY -- nginx and table are never chosen automatically, because
+// they are answers to a particular question and not a default presentation.
+// Any value outside auto/json/human/nginx/table is a usage error:
 // Format usually comes from output.format in the configuration file, which is
 // free-form string, and an invalid value must not silently become JSON.
 func (r *Renderer) resolveFormat() (Format, error) {
@@ -151,7 +174,7 @@ func (r *Renderer) resolveFormat() (Format, error) {
 			return FormatHuman, nil
 		}
 		return FormatJSON, nil
-	case FormatJSON, FormatHuman:
+	case FormatJSON, FormatHuman, FormatNginx, FormatTable:
 		return r.Format, nil
 	default:
 		return "", Usage("invalid output format: %q", string(r.Format))
