@@ -66,6 +66,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 		ErrorOnUnknownDirectives:  false,
 		Open:                      mirroredOpen,
 		Glob:                      opts.glob,
+		LexOptions:                LuaLexOptions(),
 	})
 
 	// The refusal from the up-front validation comes before any crossplane
@@ -133,7 +134,7 @@ func Parse(opts ParseOptions) (*Tree, error) {
 // It covers the parser goroutine, which is this one; a panic inside
 // crossplane's lexer goroutine would still escape, and there is no way to
 // recover it from here. The known case -- prepareIfArgs (util.go:71-86) -- is
-// in the parser, and besides is already blocked earlier by validateIfExpressions.
+// in the parser, and besides is already blocked earlier by validateBeforeParse.
 func parseGuarded(path string, opts *crossplane.ParseOptions) (payload *crossplane.Payload, err error) {
 	defer func() {
 		r := recover()
@@ -269,7 +270,7 @@ func (c *sourceCache) wrap(openOriginal func(string) (io.ReadCloser, error)) fun
 			return nil, err
 		}
 
-		if problems := validateIfExpressions(path, content); len(problems) > 0 {
+		if problems := validateBeforeParse(path, content); len(problems) > 0 {
 			c.storeRefusals(problems)
 			return nil, problems
 		}

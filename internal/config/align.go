@@ -35,6 +35,16 @@ func align(f *File) error {
 				Token:   quote.Quote,
 			}}
 		}
+		var lua *LuaBlockError
+		if errors.As(err, &lua) {
+			return ParseErrors{{
+				File:    f.Path,
+				Line:    lua.Line,
+				Message: lua.Error(),
+				Class:   RefusalInvalidLuaBlock,
+				Token:   lua.Directive,
+			}}
+		}
 		return fmt.Errorf("while tokenizing %s: %w", f.Path, err)
 	}
 

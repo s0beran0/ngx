@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -31,20 +32,43 @@ import (
 // being caught afterwards. The recover barrier in parse.go stays around for
 // the next surprise from the dependency, not for this one.
 
+// validateBeforeParse returns the refusals that have to be decided BEFORE a
+// single token reaches crossplane's parser. It tokenizes the source once and
+// hands the tokens to the checks that need them.
+//
+// Two things live here, for two different reasons. The malformed "if" is here
+// because further down the line it brings the process down (see below). The
+// malformed *_by_lua_block is here for the diagnostic: crossplane fails on it
+// too, but with "premature end of file" pointing at the end of the file, when
+// what the reader needs to know is which directive has no body -- and that is
+// something only the tokenizer knows.
+//
+// Any other tokenizing failure yields zero refusals on purpose: at that point
+// the decision belongs to the aligner (which classifies the refusal) or to
+// crossplane itself, and guessing about tokens that do not exist would only
+// produce a wrong message.
+func validateBeforeParse(path string, src []byte) ParseErrors {
+	toks, err := Tokenize(src)
+	if err != nil {
+		var lua *LuaBlockError
+		if errors.As(err, &lua) {
+			return ParseErrors{{
+				File:    path,
+				Line:    lua.Line,
+				Message: lua.Error(),
+				Class:   RefusalInvalidLuaBlock,
+				Token:   lua.Directive,
+			}}
+		}
+		return nil
+	}
+	return validateIfExpressions(path, toks)
+}
+
 // validateIfExpressions returns the refusals of the "if" directives whose
 // expression is not parenthesized. It works over this package's tokens, which
 // match crossplane's lexer token for token.
-//
-// A source that does not tokenize yields zero refusals on purpose: at that
-// point the decision belongs to the aligner (which classifies the refusal) or
-// to crossplane itself, and guessing about tokens that do not exist would
-// only produce a wrong message.
-func validateIfExpressions(path string, src []byte) ParseErrors {
-	toks, err := Tokenize(src)
-	if err != nil {
-		return nil
-	}
-
+func validateIfExpressions(path string, toks []Token) ParseErrors {
 	var problems ParseErrors
 	// mapLike counts the open map-like blocks. Inside them crossplane never
 	// even reaches analyze/prepareIfArgs: parse.go:304-321 appends the

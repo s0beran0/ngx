@@ -37,6 +37,16 @@ type Token struct {
 	Line   int
 	Column int
 	Quoted bool
+
+	// Verbatim marks a token whose Value is the literal text of the span --
+	// delimiters excluded, invalid UTF-8 replaced by U+FFFD, and nothing
+	// else interpreted. It is what the Lua lexer of lua-nginx-module blocks
+	// produces (see lua.go): inside a *_by_lua_block body a backslash is a
+	// backslash and a quote is a quote, because the content is Lua code and
+	// not nginx configuration. Without the mark there is no way to tell that
+	// token apart from an ordinary word, whose Value has escapes resolved --
+	// and the two disagree for the same Raw.
+	Verbatim bool
 }
 
 type tokenizer struct {
@@ -45,6 +55,13 @@ type tokenizer struct {
 	line   int
 	col    int
 	tokens []Token
+
+	// nextIsDirective mirrors crossplane's nextTokenIsDirective
+	// (lex.go:146), the flag that decides whether a word in this position is
+	// read as a directive NAME -- which is what allows a *_by_lua_block body
+	// to be lexed as Lua. See luaTriggers in lua.go for what turns it on and
+	// off, which is not what the name suggests.
+	nextIsDirective bool
 }
 
 // Tokenize breaks the source into tokens with byte offsets. It interprets no
@@ -53,7 +70,7 @@ type tokenizer struct {
 // matching nginx-go-crossplane's lexer token for token, which is what Task 9
 // uses to align against the semantic tree.
 func Tokenize(src []byte) ([]Token, error) {
-	t := &tokenizer{src: src, line: 1, col: 1}
+	t := &tokenizer{src: src, line: 1, col: 1, nextIsDirective: true}
 	for {
 		t.skipSpaces()
 		if t.pos >= len(t.src) {
@@ -87,6 +104,11 @@ func (t *tokenizer) spaceHere() bool {
 
 // advance consumes one whole rune (1 or more bytes) starting at t.pos,
 // updating position, line and column. Column counts runes; pos stays in bytes.
+//
+// A line break also puts the lexer back in directive position, mirroring
+// crossplane/lex.go:164-167, which does it for EVERY character it scans. The
+// flag is cleared again by whoever closes a word on that same character (see
+// consumeWordTerminator), exactly as lex.go:230-233 does right after.
 func (t *tokenizer) advance() {
 	r, size := t.runeHere()
 	if size == 0 {
@@ -96,6 +118,7 @@ func (t *tokenizer) advance() {
 	if r == '\n' {
 		t.line++
 		t.col = 1
+		t.nextIsDirective = true
 	} else {
 		t.col++
 	}
@@ -149,20 +172,28 @@ func (t *tokenizer) skipSpaces() {
 func (t *tokenizer) next() error {
 	start, line, col := t.pos, t.line, t.col
 
+	// ';', '{' and '}' put the lexer back in directive position and '#' takes
+	// it out of it, mirroring crossplane/lex.go:296 and :223. What that flag
+	// decides is whether the next word can be a *_by_lua_block name -- see
+	// luaTriggers in lua.go.
 	switch c := t.src[t.pos]; {
 	case c == ';':
 		t.advance()
 		t.emit(TokenSemicolon, ";", start, line, col, false)
+		t.nextIsDirective = true
 		return nil
 	case c == '{':
 		t.advance()
 		t.emit(TokenBlockStart, "{", start, line, col, false)
+		t.nextIsDirective = true
 		return nil
 	case c == '}':
 		t.advance()
 		t.emit(TokenBlockEnd, "}", start, line, col, false)
+		t.nextIsDirective = true
 		return nil
 	case c == '#':
+		t.nextIsDirective = false
 		t.readComment(start, line, col)
 		return nil
 	case c == '"' || c == '\'':
@@ -203,6 +234,13 @@ func (t *tokenizer) readQuoted(quote byte, start, line, col int) error {
 
 	var value []byte
 	for t.pos < len(t.src) {
+		// A quoted directive name also reaches the Lua lexer: crossplane
+		// checks the accumulated buffer in every state, the quoted one
+		// included (lex.go:186-206, with the inQuote special case at
+		// :190-204). See readLuaBlock.
+		if t.luaTriggers(value) {
+			return t.readLuaBlock(string(value), start, line, col, quote)
+		}
 		c := t.src[t.pos]
 		switch {
 		case c == '\\':
@@ -257,7 +295,15 @@ func (e *QuoteError) Error() string {
 // (and the \r) vanish leaving no content, exactly like in crossplane.
 func (t *tokenizer) readWord(start, line, col int) error {
 	var value []byte
+	endedAtSpace := false
 	for t.pos < len(t.src) {
+		// The name of a *_by_lua_block directive ends the word here, before
+		// the character that follows it is even looked at: from this point
+		// on the body is Lua code, not nginx configuration. See lua.go.
+		if t.luaTriggers(value) {
+			return t.readLuaBlock(string(value), start, line, col, 0)
+		}
+
 		if len(value) > 0 && value[len(value)-1] == '$' && t.src[t.pos] == '{' {
 			from := t.pos
 			t.advance() // consumes the '{' that opens the expansion
@@ -280,12 +326,17 @@ func (t *tokenizer) readWord(start, line, col int) error {
 			// the word. Only a stray CR (with no \n after it) is invisible
 			// and consumed here.
 			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
+				endedAtSpace = true
 				break
 			}
 			t.advance()
 			continue
 		}
-		if t.spaceHere() || c == ';' || c == '{' || c == '}' {
+		if t.spaceHere() {
+			endedAtSpace = true
+			break
+		}
+		if c == ';' || c == '{' || c == '}' {
 			break
 		}
 
@@ -298,7 +349,27 @@ func (t *tokenizer) readWord(start, line, col int) error {
 		return nil
 	}
 	t.emit(TokenWord, string(value), start, line, col, false)
+	if endedAtSpace {
+		t.consumeWordTerminator()
+	}
 	return nil
+}
+
+// consumeWordTerminator swallows the whitespace that closed the word and
+// takes the lexer OUT of directive position. Both halves come from
+// crossplane/lex.go:230-233: the character had already been read as lookahead
+// before the token was emitted, and nextTokenIsDirective is cleared right
+// after -- even when that same character is a line break that had just set it
+// (lex.go:164-167). Consuming it here is what keeps the two in that order,
+// and it is why `foo bar\ncontent_by_lua_block { x }` does not take the Lua
+// path while `foo bar\n\ncontent_by_lua_block { x }` does. Bare \r are
+// invisible to that lexer (lex.go:173-175) and are skipped along with it.
+func (t *tokenizer) consumeWordTerminator() {
+	t.skipCRs()
+	if t.pos < len(t.src) {
+		t.advance()
+	}
+	t.nextIsDirective = false
 }
 
 // readVar consumes the body of a parameter expansion (${...}) after the
@@ -328,11 +399,16 @@ func (t *tokenizer) readVar(value *[]byte) {
 			continue
 		}
 		if c == '\r' {
-			// same handling as in readWord: the CR of a CRLF stays out of
-			// the span, it does not go into the expansion.
-			if t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
-				return
-			}
+			// Every \r is invisible here, the one before a \n included --
+			// and that exception is NOT the same as readWord's. There the
+			// \n ends the word, so leaving the \r out of the span changes
+			// nothing but the span. Inside an expansion the \n does not end
+			// anything: crossplane skips the \r (lex.go:173-175) and then
+			// writes the \n into the token, which goes on growing. Returning
+			// here instead used to end the word one token early --
+			// "${\r\nx" came out as two tokens against crossplane's one,
+			// which is a desync of the aligner, not a cosmetic difference.
+			// Found by FuzzTokenizeSpans (corpus fb069b4c398a72be).
 			t.advance()
 			continue
 		}
@@ -356,4 +432,11 @@ func (t *tokenizer) emit(kind TokenKind, value string, start, line, col int, quo
 		Column: col,
 		Quoted: quoted,
 	})
+}
+
+// emitVerbatim emits a token whose Value is the literal text of the span --
+// see the Verbatim field of Token.
+func (t *tokenizer) emitVerbatim(kind TokenKind, value string, start, line, col int, quoted bool) {
+	t.emit(kind, value, start, line, col, quoted)
+	t.tokens[len(t.tokens)-1].Verbatim = true
 }

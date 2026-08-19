@@ -47,6 +47,7 @@ func acceptedByCrossplane(t *testing.T, path string) {
 		SkipDirectiveArgsCheck:    true,
 		SkipDirectiveContextCheck: true,
 		ErrorOnUnknownDirectives:  false,
+		LexOptions:                config.LuaLexOptions(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, "ok", payload.Status)

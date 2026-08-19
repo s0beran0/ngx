@@ -39,6 +39,18 @@ func FuzzTokenizeSpans(f *testing.F) {
 	f.Add("# comment ç\nserver_name example.com.br;")
 	f.Add("proxy_pass http://\"host\";")
 	f.Add("foo \\")
+	// R8: a Lua body is a single opaque token for crossplane, and has to be
+	// one for us too -- with the braces, the ';' and the quotes inside it
+	// belonging to the body and not to the configuration.
+	f.Add("content_by_lua_block {\n    if t.x > 0 then ngx.say(\"oi; tchau\") end\n}\nlisten 80;\n")
+	f.Add("set_by_lua_block $a { return 1 }\nlisten 80;\n")
+	f.Add("content_by_lua_block { s = \"}\" }\nlisten 80;\n")
+	f.Add("content_by_lua_block { a { b } c }\n")
+	// The two inputs that separate "is at the start of a line" from
+	// crossplane's real rule for directive position, which is what decides
+	// whether the body is read as Lua at all -- see luaTriggers in lua.go.
+	f.Add("foo bar\ncontent_by_lua_block { x }\n")
+	f.Add("foo bar\n\ncontent_by_lua_block { x }\n")
 
 	f.Fuzz(func(t *testing.T, s string) {
 		toks, err := config.Tokenize([]byte(s))
@@ -138,6 +150,12 @@ func checkKindRawCoherence(t *testing.T, toks []config.Token) {
 	for _, tok := range toks {
 		switch tok.Kind {
 		case config.TokenSemicolon:
+			// The terminator of a *_by_lua_block does not exist in the file:
+			// crossplane emits it out of thin air (lua.go:143) and we mirror
+			// it with an empty span. Every other semicolon is a real byte.
+			if tok.Start == tok.End && tok.Raw == "" {
+				continue
+			}
 			if tok.Raw != ";" {
 				t.Fatalf("TokenSemicolon with raw %q", tok.Raw)
 			}
@@ -154,6 +172,14 @@ func checkKindRawCoherence(t *testing.T, toks []config.Token) {
 				t.Fatalf("TokenComment with raw %q and no leading #", tok.Raw)
 			}
 		case config.TokenWord:
+			if tok.Verbatim {
+				expected := expectedValueForVerbatim(t, tok)
+				if tok.Value != expected {
+					t.Fatalf("verbatim TokenWord with value %q != expected %q (raw %q)",
+						tok.Value, expected, tok.Raw)
+				}
+				continue
+			}
 			if tok.Quoted {
 				continue
 			}
@@ -164,6 +190,42 @@ func checkKindRawCoherence(t *testing.T, toks []config.Token) {
 			}
 		}
 	}
+}
+
+// expectedValueForVerbatim recomputes the Value of a token read by the Lua
+// lexer (R8): the literal text of the span, with the two braces of a
+// *_by_lua_block body removed -- they are its delimiters, like the quotes of
+// a quoted token -- and invalid UTF-8 replaced by U+FFFD, which is what
+// bufio.ScanRunes hands crossplane. Nothing else is interpreted: inside a Lua
+// body a backslash is a backslash, and that is the whole point of the mark.
+func expectedValueForVerbatim(t *testing.T, tok config.Token) string {
+	raw := tok.Raw
+	if tok.Quoted {
+		// the body of the block: Raw is "{...}", Value is what is inside
+		if len(raw) < 2 || raw[0] != '{' || raw[len(raw)-1] != '}' {
+			t.Fatalf("verbatim quoted token with raw %q, expected it delimited by braces", raw)
+		}
+		raw = raw[1 : len(raw)-1]
+	}
+	return replaceInvalidRunes(raw)
+}
+
+// replaceInvalidRunes mirrors consumeIntoValue (tokens.go): each byte that is
+// not valid UTF-8 becomes U+FFFD, which is what crossplane's rune scanner
+// produces for it.
+func replaceInvalidRunes(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			out.WriteRune(utf8.RuneError)
+			i++
+			continue
+		}
+		out.WriteString(s[i : i+size])
+		i += size
+	}
+	return out.String()
 }
 
 // expectedValueForWord recomputes, from the Raw of an unquoted TokenWord,
@@ -267,7 +329,11 @@ func checkIdempotence(t *testing.T, s string, toks []config.Token) {
 // divergence. If crossplane rejects the input (an error on some token), that
 // input is out of scope and the comparison is skipped.
 func checkDifferentialAgainstCrossplane(t *testing.T, s string, toks []config.Token) {
-	ch := crossplane.Lex(strings.NewReader(s))
+	// The oracle runs with the SAME lexer extensions as production
+	// (config.LuaLexOptions, registered in parse.go): a crossplane without
+	// the Lua lexer reads a different language from the one ngx parses, and
+	// comparing against it would prove nothing about the alignment.
+	ch := crossplane.LexWithOptions(strings.NewReader(s), config.LuaLexOptions())
 
 	var reference []crossplane.NgxToken
 	for tok := range ch {
@@ -349,6 +415,13 @@ func FuzzAlignment(f *testing.F) {
 	// introduced -- was left with no property coverage.
 	f.Add("include included.conf;")
 	f.Add("http { include included.conf; }\n# after\n")
+	// R8: what the seeds are really for here is the property that the block
+	// does not throw off what comes AFTER it -- hence a directive following
+	// every Lua body.
+	f.Add("content_by_lua_block {\n    if t.x > 0 then ngx.say(\"oi; tchau\") end\n}\nlisten 80;\n")
+	f.Add("http { server { content_by_lua_block { if x then end }\n listen 80; } }\n")
+	f.Add("set_by_lua_block $a { return 1 }\nlisten 80;\n")
+	f.Add("content_by_lua_block { s = \"}\" }\nlisten 80;\n")
 
 	f.Fuzz(func(t *testing.T, s string) {
 		dir := t.TempDir()
@@ -415,6 +488,16 @@ func checkArgSpans(t *testing.T, file *config.File) {
 				t.Fatalf("%q has %d args and %d arg spans", n.Directive, len(n.Args), len(n.ArgSpans))
 			}
 
+			// A statement whose LAST argument starts with "{" was read by the
+			// Lua lexer (R8): no other lexeme can start with a brace, since
+			// the tokenizer breaks words there. Its arguments do not
+			// round-trip through Tokenize on their own -- the body is Lua
+			// code, and outside the directive it is not even nginx --, so
+			// the property is checked directly against the bytes, which is
+			// stronger: the span has to REPRODUCE the argument.
+			luaLexed := len(n.ArgSpans) > 0 &&
+				file.Source[n.ArgSpans[len(n.ArgSpans)-1].Start] == '{'
+
 			previous := n.HeadSpan.Start
 			for i, s := range n.ArgSpans {
 				if s.Start < previous || s.End <= s.Start || s.End > n.HeadSpan.End {
@@ -424,6 +507,9 @@ func checkArgSpans(t *testing.T, file *config.File) {
 				previous = s.End
 
 				text := file.Source[s.Start:s.End]
+				if luaLexed && checkLuaArgSpan(t, n, i, string(text)) {
+					continue
+				}
 				toks, err := config.Tokenize(text)
 				if err != nil {
 					t.Fatalf("arg span %d of %q does not retokenize (%v); text=%q",
@@ -442,6 +528,39 @@ func checkArgSpans(t *testing.T, file *config.File) {
 		}
 	}
 	walk(file.Nodes)
+}
+
+// checkLuaArgSpan checks the arguments of a statement read by the Lua lexer
+// and reports whether it took charge of this one.
+//
+// Two shapes come out of that lexer (crossplane/lua.go). The body of the
+// block is the last argument, and its span covers "{...}" -- the braces are
+// its delimiters, exactly as the quotes are of a quoted argument, and
+// including them is what makes the span a self-contained lexeme to overwrite.
+// The first argument of set_by_lua_block is a run of non-space characters
+// read with no notion of quote or escape (lua.go:68-90), so `"$a"` is its
+// value, quotation marks and all.
+//
+// Every other argument -- the `content_by_lua_block` that ended up as the
+// argument of another directive, for instance -- was read by the ordinary
+// word reader and goes back to the general check.
+func checkLuaArgSpan(t *testing.T, n *config.Node, i int, text string) bool {
+	if i == len(n.ArgSpans)-1 {
+		if len(text) < 2 || text[0] != '{' || text[len(text)-1] != '}' {
+			t.Fatalf("body span of %q is %q, expected it delimited by braces", n.Directive, text)
+		}
+		if got := replaceInvalidRunes(text[1 : len(text)-1]); got != n.Args[i] {
+			t.Fatalf("body span of %q holds %q, crossplane read %q", n.Directive, got, n.Args[i])
+		}
+		return true
+	}
+	if n.Directive != "set_by_lua_block" {
+		return false
+	}
+	if got := replaceInvalidRunes(text); got != n.Args[i] {
+		t.Fatalf("arg span %d of %q holds %q, crossplane read %q", i, n.Directive, got, n.Args[i])
+	}
+	return true
 }
 
 // onlyCR reports whether the rest of the source is only \r (or nothing).
@@ -500,6 +619,7 @@ func parseWithOracle(path string) (payload *crossplane.Payload, err error) {
 		SkipDirectiveArgsCheck:    true,
 		SkipDirectiveContextCheck: true,
 		ErrorOnUnknownDirectives:  false,
+		LexOptions:                config.LuaLexOptions(),
 	})
 }
 
@@ -552,6 +672,18 @@ func knownDivergence(pe config.ParseError) bool {
 		// "if", quoted or not (parse.go:352-354 compares without looking at
 		// IsQuoted). See TestIfWithEmptyExpressionIsTypedRefusalNotPanic.
 		return pe.Token == "if" || pe.Token == `"if"` || pe.Token == "'if'"
+
+	case config.RefusalInvalidLuaBlock:
+		// The hook of lex.go:186-206 reads one character past the directive
+		// name before handing over to the Lua lexer and re-processes it
+		// AFTER the block: for `content_by_lua_blockx { y }` crossplane's
+		// stream is [content_by_lua_block, " y ", ";", x], with the "x"
+		// coming out after text that sits behind it. Tokens with byte spans
+		// cannot describe that, and nginx refuses all of these anyway --
+		// unknown directive, or a *_by_lua_block with no body. The token is
+		// always the name of a Lua directive, which is a closed list. See
+		// TestDivergenceLuaBlockWithoutBody.
+		return config.IsLuaBlockDirective(pe.Token)
 
 	case config.RefusalTargetNotRegular:
 		// "include .;" -- the only entry enumerated by CLASS alone, with no
@@ -696,6 +828,13 @@ func checkHeadSpanIsNamePlusArgs(t *testing.T, file *config.File) {
 			var words int
 			for _, tk := range toks {
 				if tk.Kind == config.TokenComment {
+					continue
+				}
+				// The implied terminator of a *_by_lua_block (R8) occupies
+				// no byte, so it is inside every span that ends at the "}"
+				// of the block -- including this one. It is not the aligner
+				// advancing too far: there is nothing to advance over.
+				if tk.Kind == config.TokenSemicolon && tk.Start == tk.End {
 					continue
 				}
 				if tk.Kind != config.TokenWord {

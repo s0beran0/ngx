@@ -40,6 +40,12 @@ const (
 	// RefusalInvalidIfExpression: "if" with no parenthesized expression.
 	RefusalInvalidIfExpression RefusalClass = "invalid_if_expression"
 
+	// RefusalInvalidLuaBlock: a *_by_lua_block directive whose body ngx
+	// cannot point at -- no "{" after the name, or the file ending inside
+	// the block. See LuaBlockError in lua.go for why those inputs cannot be
+	// described by byte spans at all.
+	RefusalInvalidLuaBlock RefusalClass = "invalid_lua_block"
+
 	// RefusalTargetNotRegular: the path exists and opened, but is not a
 	// regular file -- directory, socket, fifo, device.
 	RefusalTargetNotRegular RefusalClass = "target_not_regular_file"
