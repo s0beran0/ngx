@@ -300,14 +300,23 @@ Structure identical to §6 of spec v1.0:
 
 ```go
 type Envelope struct {
-    OK          bool         `json:"ok"`
-    Command     string       `json:"command"`
-    NgxVersion  string       `json:"ngx_version"`
-    Data        any          `json:"data"`
-    Diagnostics []Diagnostic `json:"diagnostics"`
-    Meta        Meta         `json:"meta"`
+    OK            bool         `json:"ok"`
+    Command       string       `json:"command"`
+    SchemaVersion int          `json:"schema_version"`
+    NgxVersion    string       `json:"ngx_version"`
+    Data          any          `json:"data"`
+    Diagnostics   []Diagnostic `json:"diagnostics"`
+    Meta          Meta         `json:"meta"`
 }
 ```
+
+`schema_version` (added in v0.1.1) versions the SHAPE, and it is what a consumer
+branches on. A plain integer, not semver: nothing to parse wrong. It increments
+only on a change that breaks whoever reads the output — a field renamed or
+removed, a type changed, the meaning of a field changed — and never on a field
+being added. `ngx_version` cannot serve: it moves on every release, including
+the ones that leave the shape untouched. It goes out in every envelope, error
+ones included.
 
 `Meta` from v0.1 loads `duration_ms`, `nginx_version` and `config_hash` (D3).
 
@@ -359,6 +368,14 @@ Behavior:
 - The **value** is replaced by `***`; the directive, `id` and line remain.
   Removing the entire node would cause the agent to conclude that the policy does not exist, which
   It's worse than hiding the value.
+- The node carries `redacted_args` (added in v0.1.1), the indices of the
+  arguments that were replaced. A configuration may contain `***` of its own,
+  and without the list the consumer cannot tell censorship from content — it
+  retries in a loop or reports the key as empty. The field is omitted when
+  nothing was redacted, and only the arguments AFTER the rule's matched prefix
+  are replaced: the prefix is text the user wrote in `output.redact`, and
+  keeping it visible is what says WHICH header was censored. Like the `***`
+  itself, the mark is written on the render copy, never on the tree (D5).
 - `diff` passes through the redaction like any other output. It's the easiest point to
   leak without realizing it.
 - `fmt` writing to disk **doesn't** redact (D5).

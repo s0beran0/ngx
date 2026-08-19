@@ -46,7 +46,7 @@ connection will use that user:
 
 ```console
 $ ngx --user deploy version; echo "exit=$?"
-{"ok":false,"command":"version","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--user only makes sense together with --host"}],"meta":{"duration_ms":0}}
+{"ok":false,"command":"version","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--user only makes sense together with --host"}],"meta":{"duration_ms":0}}
 exit=2
 ```
 
@@ -132,7 +132,7 @@ The missing-file case, for real:
 
 ```console
 $ ngx --host 127.0.0.1 --port 2222 --known-hosts /tmp/does-not-exist-known-hosts --timeout 3s version; echo "exit=$?"
-{"ok":false,"command":"version","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0204","message":"/tmp/does-not-exist-known-hosts does not exist: ngx has no recorded key to compare with the one from 127.0.0.1. Run `ssh 127.0.0.1` once to record the host, point at another file with --known-hosts, or accept any key with --insecure-host-key (insecure)","file":"/tmp/does-not-exist-known-hosts"}],"meta":{"duration_ms":0}}
+{"ok":false,"command":"version","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0204","message":"/tmp/does-not-exist-known-hosts does not exist: ngx has no recorded key to compare with the one from 127.0.0.1. Run `ssh 127.0.0.1` once to record the host, point at another file with --known-hosts, or accept any key with --insecure-host-key (insecure)","file":"/tmp/does-not-exist-known-hosts"}],"meta":{"duration_ms":0}}
 exit=1
 ```
 
@@ -174,7 +174,7 @@ the route can impersonate the server, and `ngx` would have no way to notice.
 
 ```console
 $ ngx --host 127.0.0.1 --port 2222 --insecure-host-key --timeout 3s version
-{"ok":false,"command":"version","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"warning","code":"NGX-0211","message":"--insecure-host-key: the host key of 127.0.0.1 will be accepted with no verification at all. The connection is not protected against interception (man-in-the-middle) and any machine on the route can impersonate the server"},{"severity":"error","code":"NGX-0206","message":"could not connect to eduardoborges@127.0.0.1:2222: dial tcp 127.0.0.1:2222: connect: connection refused. Authentication methods offered: ssh-agent"}],"meta":{"duration_ms":0}}
+{"ok":false,"command":"version","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"warning","code":"NGX-0211","message":"--insecure-host-key: the host key of 127.0.0.1 will be accepted with no verification at all. The connection is not protected against interception (man-in-the-middle) and any machine on the route can impersonate the server"},{"severity":"error","code":"NGX-0206","message":"could not connect to eduardoborges@127.0.0.1:2222: dial tcp 127.0.0.1:2222: connect: connection refused. Authentication methods offered: ssh-agent"}],"meta":{"duration_ms":0}}
 ```
 
 The `NGX-0211` warning appears in the output **every time**, alongside the

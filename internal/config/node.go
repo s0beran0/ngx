@@ -38,11 +38,25 @@ type Node struct {
 	// the tree and the v0.2 rewrite, which replaces the bytes of HeadSpan,
 	// would erase a comment the user wrote. Empty for the overwhelming
 	// majority of nodes, hence omitempty.
-	HeadComments []Span  `json:"head_comments,omitempty"`
-	ID           string  `json:"id,omitempty"`
-	Comment      *string `json:"comment,omitempty"`
-	Block        []*Node `json:"block,omitempty"`
-	Origin       *Origin `json:"origin,omitempty"`
+	HeadComments []Span `json:"head_comments,omitempty"`
+
+	// RedactedArgs holds the indices of Args whose value was replaced by
+	// "***" at RENDER time. It is what tells a censored value apart from a
+	// configuration that literally contains three asterisks; without it the
+	// two are the same string and the consumer has no way to ask.
+	//
+	// It is only ever filled on the COPY the renderer makes (see
+	// InspectData.Redacted): the parsed tree keeps the real values, because
+	// redacting it in place would make the v0.2 fmt write "***" into the
+	// user's .conf. On a node that comes out of Parse this field is always
+	// nil -- guarded by TestParseNeverMarksRedactedArgs. Omitted when
+	// nothing was redacted, which is the overwhelming majority of nodes.
+	RedactedArgs []int `json:"redacted_args,omitempty"`
+
+	ID      string  `json:"id,omitempty"`
+	Comment *string `json:"comment,omitempty"`
+	Block   []*Node `json:"block,omitempty"`
+	Origin  *Origin `json:"origin,omitempty"`
 
 	// hasBlock tells "server {}" apart from "server;". The Block field
 	// cannot do it: an empty block is an empty slice, indistinguishable

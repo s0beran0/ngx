@@ -20,7 +20,7 @@ terminal:
 
 ```console
 $ ngx --no-redact inspect -c nginx.conf | cat
-{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--no-redact is only accepted when the output is a terminal"}],"meta":{"duration_ms":0,"target":"local"}}
+{"ok":false,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--no-redact is only accepted when the output is a terminal"}],"meta":{"duration_ms":0,"target":"local"}}
 ```
 
 A human who asks to see the secret sees it on screen. An agent reading the
@@ -82,7 +82,7 @@ $ make build
 CGO_ENABLED=0 go build -o bin/ngx ./cmd/ngx
 
 $ ./bin/ngx version
-{"ok":true,"command":"version","ngx_version":"0.1.0-dev","data":{"version":"0.1.0-dev"},"diagnostics":[],"meta":{"duration_ms":0,"target":"local"}}
+{"ok":true,"command":"version","schema_version":1,"ngx_version":"0.1.0-dev","data":{"version":"0.1.0-dev"},"diagnostics":[],"meta":{"duration_ms":0,"target":"local"}}
 ```
 
 Copy `bin/ngx` wherever you want — it is a static binary, no installer needed.
@@ -119,6 +119,26 @@ The SHA256 checksum is always checked and there is no way to turn it off.
 
 ## Using it today
 
+### The envelope
+
+Every answer — success or failure — comes in the same envelope:
+
+```console
+$ ./bin/ngx version
+{"ok":true,"command":"version","schema_version":1,"ngx_version":"0.1.0-dev","data":{"version":"0.1.0-dev"},"diagnostics":[],"meta":{"duration_ms":0,"target":"local"}}
+```
+
+`schema_version` is the field to branch on. It describes the **shape** of the
+output and is a plain integer, not semver: compare it with `>=` and there is
+nothing to parse wrong. It moves only when a change breaks whoever reads the
+output — a field renamed or removed, a type changed, the meaning of a field
+changed. A field being *added* never moves it, which is why adding one is safe.
+`ngx_version` cannot do this job: it changes on every release, including the
+ones that change nothing about the output.
+
+It is present in the failure envelope too — see [Errors](#errors) — because an
+agent that only ever sees errors still needs to know which shape it is reading.
+
 ### `ngx inspect`
 
 Reads the configuration and returns the whole tree plus a summary. The path
@@ -139,8 +159,26 @@ Sensitive values come out redacted by default:
 
 ```console
 $ ./bin/ngx inspect -c internal/cli/testdata/example.conf | jq -c '.data.config[0].parsed[1].block[0].block[2]'
-{"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/example.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"id":"h.s0.d2"}
+{"directive":"ssl_certificate_key","args":["***"],"file":"internal/cli/testdata/example.conf","line":7,"column":9,"span":{"start":100,"end":145},"head_span":{"start":100,"end":144},"redacted_args":[0],"id":"h.s0.d2"}
 ```
+
+`redacted_args` holds the indices of the arguments that were replaced. It has
+to be there because a configuration is allowed to contain three asterisks of its
+own, and then the censored value and the real one are the same string:
+
+```console
+$ ./bin/ngx inspect -c internal/cli/testdata/redaction.conf | jq -c '[.. | objects | select(.directive? == "proxy_set_header")]'
+[{"directive":"proxy_set_header","args":["Authorization","***"],"file":"internal/cli/testdata/redaction.conf","line":9,"column":13,"span":{"start":143,"end":196},"head_span":{"start":143,"end":195},"redacted_args":[1],"id":"h.s0.l0.d0"},{"directive":"proxy_set_header","args":["X-Masked-Upstream","***"],"file":"internal/cli/testdata/redaction.conf","line":10,"column":13,"span":{"start":209,"end":248},"head_span":{"start":209,"end":247},"id":"h.s0.l0.d1"}]
+```
+
+Both print `***`. The first one was censored, and `redacted_args` says at which
+argument; the second one is what the file really says, and carries no mark at
+all — the field is omitted when nothing was redacted, never sent as an empty
+list. The header name stays visible, so an agent can still tell which header it
+is not being shown.
+
+Redaction is applied when the output is written, never to the tree in memory:
+that is what keeps a future `ngx fmt` from writing `***` into the file.
 
 `--combine` resolves the `include`s into a single tree instead of a list of
 files.
@@ -213,7 +251,7 @@ code 3:
 
 ```console
 $ ./bin/ngx inspect -c internal/cli/testdata/invalid.conf; echo "exit=$?"
-{"ok":false,"command":"inspect","ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0003","message":"internal/cli/testdata/invalid.conf:5: unexpected end of file, expecting \"}\" in internal/cli/testdata/invalid.conf:5","file":"internal/cli/testdata/invalid.conf","line":5}],"meta":{"duration_ms":0,"target":"local"}}
+{"ok":false,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0003","message":"internal/cli/testdata/invalid.conf:5: unexpected end of file, expecting \"}\" in internal/cli/testdata/invalid.conf:5","file":"internal/cli/testdata/invalid.conf","line":5}],"meta":{"duration_ms":0,"target":"local"}}
 exit=3
 ```
 

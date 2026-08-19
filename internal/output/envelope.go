@@ -5,6 +5,24 @@ package output
 // Version is the ngx version. Overridden at build time via -ldflags.
 var Version = "0.1.0-dev"
 
+// SchemaVersion is the version of the envelope's SHAPE, and it is the number a
+// consumer branches on. It exists because ngx_version cannot answer the
+// question: ngx_version moves on every release, including the ones that change
+// nothing about the output, so an agent pinned to it re-checks its assumptions
+// for no reason -- and a build from source ("0.1.0-dev") tells it nothing at
+// all.
+//
+// It is a plain integer, not semver: there is no minor/patch axis to get wrong
+// and no string to parse. Compare it with >= and be done.
+//
+// WHEN TO INCREMENT: only on a change that BREAKS whoever reads the output --
+// a field renamed or removed, a type changed, the meaning of an existing field
+// changed, a list that stops being a list. NEVER on a field being added: a new
+// key is invisible to a consumer that does not read it, which is exactly why
+// adding one is safe. Bumping this on every change would make it a second
+// ngx_version and just as useless.
+const SchemaVersion = 1
+
 // Severity classifies a diagnostic. Only SeverityError brings down the
 // envelope's ok.
 type Severity string
@@ -47,10 +65,16 @@ type Meta struct {
 
 // Envelope is the single format of every JSON output from ngx.
 type Envelope struct {
-	OK         bool   `json:"ok"`
-	Command    string `json:"command"`
-	NgxVersion string `json:"ngx_version"`
-	Data       any    `json:"data"`
+	OK      bool   `json:"ok"`
+	Command string `json:"command"`
+	// SchemaVersion goes out in EVERY envelope, the failure ones included:
+	// an agent that only ever sees error envelopes still has to know which
+	// shape it is reading, and the shape of the failure is part of the
+	// contract too. It is not omitempty for the same reason -- a missing
+	// key would be indistinguishable from version zero.
+	SchemaVersion int    `json:"schema_version"`
+	NgxVersion    string `json:"ngx_version"`
+	Data          any    `json:"data"`
 	// Diagnostics is never nil: a null list would serialize as
 	// "diagnostics":null and would break the `.diagnostics.length` of
 	// whoever consumes the output. Build the envelope with New, which
@@ -63,10 +87,11 @@ type Envelope struct {
 // New creates a success envelope for the given command.
 func New(command string) *Envelope {
 	return &Envelope{
-		OK:          true,
-		Command:     command,
-		NgxVersion:  Version,
-		Diagnostics: []Diagnostic{},
+		OK:            true,
+		Command:       command,
+		SchemaVersion: SchemaVersion,
+		NgxVersion:    Version,
+		Diagnostics:   []Diagnostic{},
 	}
 }
 

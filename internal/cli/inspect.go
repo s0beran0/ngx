@@ -55,8 +55,18 @@ func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
 	out := make([]*config.Node, 0, len(nodes))
 	for _, n := range nodes {
 		clone := *n
-		if rs.Matches(n.Directive, n.Args) {
-			clone.Args = []string{output.RedactedValue}
+		// Argument by argument, never collapsing Args into a single
+		// "***": the boundary between arguments is information the tree
+		// exists to preserve, and the indices in RedactedArgs only mean
+		// anything if they still address the original positions.
+		if indices := rs.RedactedArgs(n.Directive, n.Args); len(indices) > 0 {
+			args := make([]string, len(n.Args))
+			copy(args, n.Args)
+			for _, i := range indices {
+				args[i] = output.RedactedValue
+			}
+			clone.Args = args
+			clone.RedactedArgs = indices
 		}
 		if len(n.Block) > 0 {
 			clone.Block = redactNodes(n.Block, rs)

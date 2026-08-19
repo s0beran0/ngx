@@ -159,6 +159,65 @@ func TestRedactSetMatchesAnyRule(t *testing.T) {
 	require.False(t, set.Matches("listen", []string{"443", "ssl"}))
 }
 
+// A rule with no argument prefix hides every argument: it is the form used for
+// "ssl_certificate_key", where the value IS the secret.
+func TestRedactedArgsCoversEveryArgumentOfABareRule(t *testing.T) {
+	set, err := output.NewRedactSet([]string{"ssl_certificate_key"})
+	require.NoError(t, err)
+
+	require.Equal(t, []int{0}, set.RedactedArgs("ssl_certificate_key", []string{"/k.pem"}))
+	require.Nil(t, set.RedactedArgs("ssl_certificate", []string{"/c.pem"}))
+}
+
+// The prefix stays visible because the user typed it in output.redact: it is
+// what says WHICH header was censored. Two redacted headers reported as
+// "proxy_set_header ***" would be the same node twice over.
+func TestRedactedArgsKeepsTheMatchedPrefixVisible(t *testing.T) {
+	set, err := output.NewRedactSet([]string{"proxy_set_header Authorization"})
+	require.NoError(t, err)
+
+	require.Equal(t, []int{1},
+		set.RedactedArgs("proxy_set_header", []string{"Authorization", "Bearer xyz"}))
+	require.Nil(t, set.RedactedArgs("proxy_set_header", []string{"Host", "$host"}))
+}
+
+// A directive can carry the secret among several arguments, and the mark has
+// to point at the ones that were actually replaced -- otherwise the consumer
+// still cannot tell which value it is missing.
+func TestRedactedArgsMarksEveryArgumentAfterThePrefix(t *testing.T) {
+	set, err := output.NewRedactSet([]string{"some_directive X-Custom"})
+	require.NoError(t, err)
+
+	require.Equal(t, []int{1, 2},
+		set.RedactedArgs("some_directive", []string{"X-Custom", "user", "password"}))
+}
+
+// The union of the rules is what protects, so the rule that hides the most
+// decides. Otherwise adding a narrow rule next to a broad one would UNDO part
+// of the broad one -- redaction failing open by addition.
+func TestRedactedArgsUsesTheShortestMatchingPrefix(t *testing.T) {
+	set, err := output.NewRedactSet([]string{
+		"proxy_set_header Authorization",
+		"proxy_set_header",
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []int{0, 1},
+		set.RedactedArgs("proxy_set_header", []string{"Authorization", "Bearer xyz"}))
+}
+
+// With nothing left to hide there is no mark: a matching directive whose
+// arguments are all part of the rule's own text, and a matching directive with
+// no arguments at all. Inventing a "***" argument there would report an
+// argument the configuration does not have.
+func TestRedactedArgsIsNilWhenThereIsNothingToHide(t *testing.T) {
+	set, err := output.NewRedactSet([]string{"proxy_set_header Authorization", "some_flag"})
+	require.NoError(t, err)
+
+	require.Nil(t, set.RedactedArgs("proxy_set_header", []string{"Authorization"}))
+	require.Nil(t, set.RedactedArgs("some_flag", nil))
+}
+
 func TestEmptyRedactSetMatchesNothing(t *testing.T) {
 	set, err := output.NewRedactSet(nil)
 	require.NoError(t, err)

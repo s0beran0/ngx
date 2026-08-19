@@ -88,6 +88,98 @@ func TestInspectRedactsThePrivateKey(t *testing.T) {
 	require.Contains(t, raw, output.RedactedValue)
 }
 
+// inspectNode is the reader's view of a node: the fields this file needs, read
+// out of the JSON by their published names, so the test breaks if a tag moves.
+type inspectNode struct {
+	Directive    string        `json:"directive"`
+	Args         []string      `json:"args"`
+	RedactedArgs []int         `json:"redacted_args"`
+	Block        []inspectNode `json:"block"`
+}
+
+// directivesNamed collects every node with the given name from the rendered
+// tree, in document order.
+func directivesNamed(t *testing.T, raw, name string) []inspectNode {
+	t.Helper()
+
+	var response struct {
+		Data struct {
+			Config []struct {
+				Parsed []inspectNode `json:"parsed"`
+			} `json:"config"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &response))
+
+	var found []inspectNode
+	var walk func(nodes []inspectNode)
+	walk = func(nodes []inspectNode) {
+		for _, n := range nodes {
+			if n.Directive == name {
+				found = append(found, n)
+			}
+			walk(n.Block)
+		}
+	}
+	for _, f := range response.Data.Config {
+		walk(f.Parsed)
+	}
+	return found
+}
+
+// The test the marker exists for. The fixture holds a real secret AND an
+// argument that is literally "***": both come out as "***" in the JSON, so the
+// string alone cannot answer whether the value was censored or is the content
+// itself. Only redacted_args separates them -- a fixture with a secret alone
+// would pass with the defect still in place.
+func TestInspectDistinguishesARedactedValueFromALiteralAsterisks(t *testing.T) {
+	_, _, raw := runInspect(t, "inspect", "-c", filepath.Join("testdata", "redaction.conf"))
+
+	require.NotContains(t, raw, "s3cr3t-token", "the secret cannot reach the output")
+
+	headers := directivesNamed(t, raw, "proxy_set_header")
+	require.Len(t, headers, 2)
+
+	censored, literal := headers[0], headers[1]
+	require.Equal(t, []string{"Authorization", output.RedactedValue}, censored.Args)
+	require.Equal(t, []string{"X-Masked-Upstream", output.RedactedValue}, literal.Args)
+	require.Equal(t, censored.Args[1], literal.Args[1],
+		"the two values are the same string: the text cannot be what tells them apart")
+
+	require.Equal(t, []int{1}, censored.RedactedArgs)
+	require.Nil(t, literal.RedactedArgs,
+		"a value the configuration really holds must not be reported as redacted")
+}
+
+// The mark points at the argument, not at the directive: the header name stays
+// readable, which is what says WHICH header was censored.
+func TestInspectRedactsTheArgumentWithoutCollapsingTheOthers(t *testing.T) {
+	_, _, raw := runInspect(t, "inspect", "-c", filepath.Join("testdata", "redaction.conf"))
+
+	keys := directivesNamed(t, raw, "ssl_certificate_key")
+	require.Len(t, keys, 1)
+	require.Equal(t, []string{output.RedactedValue}, keys[0].Args)
+	require.Equal(t, []int{0}, keys[0].RedactedArgs)
+
+	// An untouched directive carries no mark at all.
+	pass := directivesNamed(t, raw, "proxy_pass")
+	require.Len(t, pass, 1)
+	require.Nil(t, pass[0].RedactedArgs)
+	require.NotContains(t, raw, `"redacted_args":[]`,
+		"an empty list would say something was redacted when nothing was")
+}
+
+// The schema version has to be in the FAILURE envelope too: an agent that only
+// ever sees errors still has to know which shape it is reading.
+func TestInspectFailureEnvelopeCarriesTheSchemaVersion(t *testing.T) {
+	code, _, raw := runInspect(t, "inspect", "-c", filepath.Join("testdata", "invalid.conf"))
+	require.Equal(t, output.ExitInvalidConfig, code)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &decoded))
+	require.Equal(t, float64(output.SchemaVersion), decoded["schema_version"])
+}
+
 // A nonexistent file is an IO failure, not a usage error: the flag was
 // correct, it was the disk that did not have the file.
 func TestInspectWithNonexistentFileIsAnInternalFailure(t *testing.T) {

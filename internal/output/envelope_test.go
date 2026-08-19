@@ -28,6 +28,39 @@ func TestEnvelopeStartsOK(t *testing.T) {
 	require.Equal(t, output.Version, env.NgxVersion)
 }
 
+// The schema version is what a consumer branches on, so it has to be in the
+// envelope always -- and it has to be a number, not a version string that
+// happens to look like one.
+func TestEnvelopeCarriesTheSchemaVersion(t *testing.T) {
+	env := output.New("status")
+	require.Equal(t, output.SchemaVersion, env.SchemaVersion)
+
+	b, err := json.Marshal(env)
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(b, &decoded))
+
+	value, ok := decoded["schema_version"]
+	require.True(t, ok, "schema_version must never be omitted")
+	require.IsType(t, float64(0), value, "the schema version is an integer, not semver")
+}
+
+// The schema version does not move with the release. Pinning them together
+// here is what stops a future -ldflags -X of Version from being read as a
+// change of shape.
+func TestSchemaVersionIsIndependentOfNgxVersion(t *testing.T) {
+	original := output.Version
+	t.Cleanup(func() { output.Version = original })
+
+	output.Version = "9.9.9"
+	env := output.New("status")
+
+	require.Equal(t, "9.9.9", env.NgxVersion)
+	require.Equal(t, 1, env.SchemaVersion,
+		"a new release does not change the shape; only a breaking change does")
+}
+
 // Golden test: locks the JSON tags of the envelope, the diagnostic and the
 // meta against future renaming. Later tasks consume those names verbatim;
 // without this test, any field could be renamed without breaking anything
@@ -58,6 +91,7 @@ func TestEnvelopeSerializesAllFieldsWithExpectedTags(t *testing.T) {
 	expected := `{
 		"ok": false,
 		"command": "lint",
+		"schema_version": 1,
 		"ngx_version": "0.1.0-dev",
 		"data": {"result": "ok"},
 		"diagnostics": [

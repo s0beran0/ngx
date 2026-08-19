@@ -131,6 +131,47 @@ func NewRedactSet(entries []string) (RedactSet, error) {
 	return set, nil
 }
 
+// RedactedArgs returns the indices of the arguments that have to be replaced
+// by RedactedValue, or nil when nothing is redacted. The indices are what makes
+// a redacted value tellable from a value that is literally "***": a
+// configuration is allowed to contain three asterisks, and without this list
+// the consumer cannot tell censorship from content -- it either retries in a
+// loop or reports the key as empty.
+//
+// Only the arguments AFTER the rule's matched prefix are redacted. The prefix
+// is text the user themselves wrote in output.redact ("proxy_set_header
+// Authorization"), so it is not a secret, and keeping it visible is what tells
+// two redacted headers apart -- "proxy_set_header ***" twice over says nothing
+// about which header carries what. A rule with no prefix keeps redacting every
+// argument, which is what makes the bare "ssl_certificate_key" form the safe
+// default it has always been.
+//
+// When more than one rule matches, the SHORTEST prefix wins: the union of the
+// rules is what protects, so the most restrictive one decides. A prefix that
+// covers every argument leaves nothing to redact and returns nil, and so does
+// a matching directive with no arguments -- there is no value there to hide,
+// and inventing a "***" argument would report an argument that does not exist.
+func (s RedactSet) RedactedArgs(directive string, args []string) []int {
+	keep := -1
+	for _, r := range s.rules {
+		if !r.Matches(directive, args) {
+			continue
+		}
+		if keep < 0 || len(r.ArgPrefix) < keep {
+			keep = len(r.ArgPrefix)
+		}
+	}
+	if keep < 0 || keep >= len(args) {
+		return nil
+	}
+
+	indices := make([]int, 0, len(args)-keep)
+	for i := keep; i < len(args); i++ {
+		indices = append(indices, i)
+	}
+	return indices
+}
+
 // Empty reports whether no rule is active.
 func (s RedactSet) Empty() bool { return len(s.rules) == 0 }
 

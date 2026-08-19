@@ -117,6 +117,20 @@ func TestInMemoryTreeIsNotRedacted(t *testing.T) {
 	require.True(t, found)
 }
 
+// The mark of a redacted argument is a rendering artifact, exactly like the
+// "***" it explains: it is written on the copy the renderer makes, never on the
+// parsed tree. A node coming out of Parse carrying RedactedArgs would mean the
+// redaction leaked into the tree, and from there into whatever v0.2 writes back
+// to the user's file.
+func TestParseNeverMarksRedactedArgs(t *testing.T) {
+	tree := parseSimple(t)
+
+	tree.Walk(func(n *config.Node) bool {
+		require.Nil(t, n.RedactedArgs, "%s must come out of Parse unmarked", n.Directive)
+		return true
+	})
+}
+
 // Crossplane does not abort on a syntax error: it records the problem in
 // payload.Errors/cfg.Errors and returns err == nil. Without this handling,
 // TestParseSyntaxErrorBecomesParseErrors would fail because config.Parse would
