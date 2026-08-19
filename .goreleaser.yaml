@@ -565,15 +565,18 @@ release:
     ### Installing from a package manager
 
     ```sh
-    brew install s0beran0/tap/ngx        # macOS
-    scoop install ngx                    # Windows
-    winget install EduardoBenck.ngx      # Windows
-    yay -S ngx-bin                       # Arch
     dpkg -i ngx_*_linux_amd64.deb        # Debian, Ubuntu
     rpm -i ngx_*_linux_amd64.rpm         # Fedora, RHEL
+    apk add --allow-untrusted ngx_*.apk  # Alpine
     ```
 
-    Every one of those knows it was installed by a package manager, so `ngx
+    Homebrew, Scoop, WinGet and the AUR are built by this release and **not
+    published to** — their artifacts and manifests exist, the upload is skipped,
+    and the job summary names each one. They are waiting on the project being
+    accepted by those registries, not on anything in this repository. Until then
+    take a package above, a tarball, or `install.sh`.
+
+    A packaged binary knows it was installed by a package manager, so `ngx
     update` refuses to replace itself and points at the command that belongs to
     that manager — `brew upgrade ngx`, `apt upgrade ngx`, `scoop update ngx`.
     Only the tarballs and `install.sh` self-update. `ngx version` reports which

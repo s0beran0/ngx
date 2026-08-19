@@ -17,19 +17,36 @@ silence or fails.
 The binary knows which channel it came from because the build said so, at link
 time. It never guesses from its own path.
 
+## Which of these work today
+
+Only the channels that need nobody's permission are live: `install.sh`, the
+tarballs, and the `.deb`/`.rpm`/`.apk` attached to every release. Those cover
+Linux, macOS and Windows on their own.
+
+The other four — Homebrew, Scoop, WinGet and the AUR — are **built and idle**.
+Every release compiles their artifacts, proves each one carries its own channel
+identity, and writes the manifests; the upload is skipped and the release log
+says which were skipped and why. What they wait on is not work in this
+repository: it is the project becoming something those registries accept. They
+each ask for evidence a new project does not have yet, and asking early gets a
+submission rejected rather than queued.
+
+So the table below is the map of the design, not a menu that is all open. Take
+`install.sh` or a package until this section says otherwise.
+
 ## The channels
 
 | Channel | Command | Platforms | Self-updates? | Instead, run |
 |---|---|---|---|---|
 | direct (`install.sh` / `install.ps1`) | `curl -fsSL https://raw.githubusercontent.com/s0beran0/ngx/main/install.sh \| sh` | Linux, macOS, Windows | **yes** — `ngx update` | — |
 | tarball / `go build` | download from the release page | all | **yes** — `ngx update` | — |
-| Homebrew tap | `brew install s0beran0/tap/ngx` | macOS only | no | `brew upgrade ngx` |
+| Homebrew tap *(not live yet)* | `brew install s0beran0/tap/ngx` | macOS only | no | `brew upgrade ngx` |
 | `.deb` | `dpkg -i ngx_*_linux_amd64.deb` | Debian, Ubuntu | no | `apt upgrade ngx` |
 | `.rpm` | `rpm -i ngx_*_linux_amd64.rpm` | Fedora, RHEL, Oracle Linux | no | `dnf upgrade ngx` |
 | `.apk` | `apk add --allow-untrusted ngx_*_linux_amd64.apk` | Alpine | no | `apk upgrade ngx` |
-| Scoop | `scoop bucket add s0beran0 https://github.com/s0beran0/scoop-bucket && scoop install ngx` | Windows | no | `scoop update ngx` |
-| WinGet | `winget install EduardoBenck.ngx` | Windows | no | `winget upgrade ngx` |
-| AUR | `yay -S ngx-bin` | Arch Linux | no | `pacman -Syu ngx` |
+| Scoop *(not live yet)* | `scoop bucket add s0beran0 https://github.com/s0beran0/scoop-bucket && scoop install ngx` | Windows | no | `scoop update ngx` |
+| WinGet *(not live yet)* | `winget install EduardoBenck.ngx` | Windows | no | `winget upgrade ngx` |
+| AUR *(not live yet)* | `yay -S ngx-bin` | Arch Linux | no | `pacman -Syu ngx` |
 
 `ngx version --json` always reports `install_channel`, so a script never has to
 guess either.

@@ -127,19 +127,23 @@ The SHA256 checksum is always checked and there is no way to turn it off.
 ### Installing from a package manager
 
 `curl | sh` comes first in this list because it is the one that works
-everywhere today. The rest are there for whoever already lives in a package
-manager:
+everywhere today. So do the `.deb`, `.rpm` and `.apk` on every release.
+
+The four marked *(not live yet)* are built by every release and not published:
+the registries behind them ask for evidence a new project does not have, and
+the release log names each one it skipped. They are listed so the design is
+visible, not so you try them.
 
 | Channel | Command | Self-updates? |
 |---|---|---|
 | installer | `curl -fsSL .../install.sh \| sh` | yes, `ngx update` |
-| Homebrew (macOS) | `brew install s0beran0/tap/ngx` | no — `brew upgrade ngx` |
+| Homebrew (macOS) *(not live yet)* | `brew install s0beran0/tap/ngx` | no — `brew upgrade ngx` |
 | Debian/Ubuntu | `dpkg -i ngx_*_linux_amd64.deb` | no — `apt upgrade ngx` |
 | Fedora/RHEL | `rpm -i ngx_*_linux_amd64.rpm` | no — `dnf upgrade ngx` |
 | Alpine | `apk add --allow-untrusted ngx_*.apk` | no — `apk upgrade ngx` |
-| Scoop | `scoop install ngx` | no — `scoop update ngx` |
-| WinGet | `winget install EduardoBenck.ngx` | no — `winget upgrade ngx` |
-| Arch (AUR) | `yay -S ngx-bin` | no — `pacman -Syu ngx` |
+| Scoop *(not live yet)* | `scoop install ngx` | no — `scoop update ngx` |
+| WinGet *(not live yet)* | `winget install EduardoBenck.ngx` | no — `winget upgrade ngx` |
+| Arch (AUR) *(not live yet)* | `yay -S ngx-bin` | no — `pacman -Syu ngx` |
 
 **A packaged `ngx` does not update itself, on purpose.** The binary knows which
 channel installed it — `ngx version` reports `install_channel` — and when that
