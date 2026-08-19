@@ -328,6 +328,17 @@ nfpms:
 # its own credential, supplied as a repository secret, and the exact steps to
 # create them are in docs/install-channels.md.
 #
+# `goreleaser check` DOES NOT VALIDATE THESE TEMPLATES. Measured: replacing
+# `ne` with a function that does not exist leaves the check green. So a broken
+# skip_upload would first be discovered while publishing -- the same shape of
+# silent failure as `-ldflags -X` against a missing symbol (DD6), where the
+# tool that was supposed to object stays quiet.
+#
+# The guard below was therefore proven by running it, not by checking it: with
+# the repository on the stable tag v0.1.1, `.Prerelease` renders empty, and on
+# a local tag v9.9.9-rc.1 it renders `rc.1`. Both were observed by rendering
+# the field into an archive name, which goreleaser really does evaluate.
+#
 # A PRE-RELEASE PUBLISHES TO NONE OF THESE. `.Prerelease` is non-empty for a
 # tag like v1.2.3-rc.1, and every skip_upload below refuses on it. Without that
 # clause a release candidate reaches `brew install` and `scoop install` as if
