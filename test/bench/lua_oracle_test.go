@@ -153,15 +153,15 @@ func TestNgxReadsTheLuaSurfaceWithTheSameValues(t *testing.T) {
 	// init_by_lua_block: `;` separating table fields, and braces inside a
 	// string. Read as configuration, they would become directives.
 	require.Len(t, luaNodes[0].Args, 1)
-	require.Contains(t, luaNodes[0].Args[0], `local cfg = { limite = 10; name = "a; b { c }" }`)
-	require.Contains(t, luaNodes[0].Args[0], "if cfg.limite > 0 then")
+	require.Contains(t, luaNodes[0].Args[0], `local cfg = { limit = 10; name = "a; b { c }" }`)
+	require.Contains(t, luaNodes[0].Args[0], "if cfg.limit > 0 then")
 
 	// set_by_lua_block is the only one with an argument BEFORE the body, and
 	// that argument is read as a run of non-spaces, with no notion of quotes.
 	require.Len(t, luaNodes[1].Args, 2, "set_by_lua_block has the variable and the body")
-	require.Equal(t, "$marca", luaNodes[1].Args[0])
-	require.Equal(t, "$marca", text(file, luaNodes[1].ArgSpans[0]))
-	require.Contains(t, luaNodes[1].Args[1], `return "dois; { itens }"`)
+	require.Equal(t, "$mark", luaNodes[1].Args[0])
+	require.Equal(t, "$mark", text(file, luaNodes[1].ArgSpans[0]))
+	require.Contains(t, luaNodes[1].Args[1], `return "two; { items }"`)
 
 	// The single-line body, exactly: it is short enough that there is no
 	// excuse for an approximation.
@@ -172,7 +172,7 @@ func TestNgxReadsTheLuaSurfaceWithTheSameValues(t *testing.T) {
 	// shows -- silently, with spans pointing at the wrong text.
 	for _, want := range []struct{ directive, span string }{
 		{"keepalive_timeout", "keepalive_timeout 65;"},
-		{"add_header", "add_header X-Marca $marca;"},
+		{"add_header", "add_header X-Mark $mark;"},
 		{"access_log", "access_log off;"},
 	} {
 		var found *config.Node
