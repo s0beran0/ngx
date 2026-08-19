@@ -534,6 +534,20 @@ release:
     Nothing that writes to an nginx configuration exists yet: v0.1.1 is still
     read-only, and mutation is v0.2.
 
+    ## One limit worth knowing before you build on `id`
+
+    The `id` on a node is unique within its FILE, not within the configuration.
+    IDs count siblings from the root of the file they live in, so on the
+    `conf.d/*.conf` layout that every distribution ships, the first `server` of
+    every file is `s0` and its first directive is `s0.d0`. Measured against the
+    test bench: 112 `listen` directives, one distinct ID.
+
+    This is why every output that carries an `id` carries its `file` next to
+    it. Treat the pair as the reference; an `id` on its own does not name a
+    node. No v0.1.1 command takes an `id` as input, so nothing resolves one
+    today — and settling what the reference should be is a prerequisite for
+    v0.2, not something to infer from this output.
+
   footer: |
     ---
 
