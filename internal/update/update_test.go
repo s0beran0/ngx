@@ -358,3 +358,155 @@ func TestNewerThanFollowsSemver(t *testing.T) {
 	// An unreadable remote version never counts as newer.
 	assert.False(t, newerThan("junk", "v0.1.0"))
 }
+
+// comCanalDeInstalacao troca a variavel de pacote e a restaura no fim. Serve
+// para exercitar o caminho de PRODUCAO — o valor que `-ldflags -X` injeta —
+// e nao apenas o override de Options.
+func comCanalDeInstalacao(t *testing.T, canal string) {
+	t.Helper()
+	anterior := InstallChannel
+	InstallChannel = canal
+	t.Cleanup(func() { InstallChannel = anterior })
+}
+
+func TestInstallChannelIsDirectByDefault(t *testing.T) {
+	// O default e o que um `go build ./cmd/ngx` produz. Se alguem trocar
+	// este valor para "agradar o goreleaser", todo build do fonte perde o
+	// auto-update em silencio.
+	assert.Equal(t, InstallChannelDirect, InstallChannel)
+	assert.NotContains(t, upgradeCommands, InstallChannelDirect,
+		"direct nao e gerenciado por ninguem: nao pode estar na tabela de recusa")
+}
+
+func TestUpgradeCommandCoversEveryPackagedChannel(t *testing.T) {
+	esperado := map[string]string{
+		"homebrew": "brew upgrade ngx",
+		"deb":      "apt upgrade ngx",
+		"rpm":      "dnf upgrade ngx",
+		"aur":      "pacman -Syu ngx",
+		"scoop":    "scoop update ngx",
+		"winget":   "winget upgrade ngx",
+	}
+	for canal, comando := range esperado {
+		got, ok := UpgradeCommand(canal)
+		require.True(t, ok, "canal %q tem de ser conhecido", canal)
+		assert.Equal(t, comando, got)
+	}
+	assert.Equal(t, len(esperado), len(upgradeCommands),
+		"todo canal na tabela precisa de um caso aqui")
+
+	_, ok := UpgradeCommand("direct")
+	assert.False(t, ok, "direct nao tem comando externo de atualizacao")
+}
+
+// A prova que importa: num canal empacotado, ngx nao troca o binario. Verificar
+// so `Updated == false` passaria com um defeito que recusa com uma mao e troca
+// com a outra, entao o teste olha o arquivo em disco — conteudo, permissao,
+// tamanho — e ainda exige que nenhuma requisicao tenha saido.
+func TestExecuteRefusesPackagedChannelWithoutTouchingTheBinary(t *testing.T) {
+	casos := []struct {
+		canal   string
+		comando string
+	}{
+		{"homebrew", "brew upgrade ngx"},
+		{"deb", "apt upgrade ngx"},
+		{"rpm", "dnf upgrade ngx"},
+		{"aur", "pacman -Syu ngx"},
+		{"scoop", "scoop update ngx"},
+		{"winget", "winget upgrade ngx"},
+		{"HOMEBREW", "brew upgrade ngx"},
+		{"  deb  ", "apt upgrade ngx"},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.canal, func(t *testing.T) {
+			c := newScenario(t, "0.3.0", "ngx v0.3.0")
+			path := testBinary(t, "ngx v0.2.0 EM USO", 0o755)
+			antes, err := os.Stat(path)
+			require.NoError(t, err)
+
+			opts := c.options(path, "v0.2.0")
+			opts.InstallChannelOverride = caso.canal
+
+			res, err := Run(context.Background(), opts)
+
+			require.Nil(t, res)
+			assert.Equal(t, CodePackagedInstall, codeOf(t, err))
+			assert.Contains(t, err.Error(), caso.comando,
+				"a recusa tem de nomear o comando certo daquele canal")
+
+			assert.Equal(t, "ngx v0.2.0 EM USO", contentOf(t, path),
+				"o binario em uso foi trocado apesar da recusa")
+			depois, err := os.Stat(path)
+			require.NoError(t, err)
+			assert.Equal(t, antes.Mode().Perm(), depois.Mode().Perm())
+			assert.Equal(t, antes.Size(), depois.Size())
+
+			entradas, err := os.ReadDir(filepath.Dir(path))
+			require.NoError(t, err)
+			assert.Len(t, entradas, 1, "a recusa deixou lixo no diretorio")
+
+			assert.Empty(t, c.srv.visited(),
+				"a recusa vem antes de qualquer requisicao")
+		})
+	}
+}
+
+// Um erro de digitacao na flag de quem empacota nao pode reabilitar o
+// auto-update. O modo de falha seguro e recusar: quem recusa por engano perde
+// um comando, quem aceita por engano corrompe uma instalacao.
+func TestExecuteRefusesUnknownInstallChannel(t *testing.T) {
+	for _, canal := range []string{"homebrwe", "brew", "apt", "", "   ", "nixpkgs"} {
+		t.Run("canal="+canal, func(t *testing.T) {
+			c := newScenario(t, "0.3.0", "ngx v0.3.0")
+			path := testBinary(t, "ngx v0.2.0 EM USO", 0o755)
+			comCanalDeInstalacao(t, canal)
+
+			res, err := Run(context.Background(), c.options(path, "v0.2.0"))
+
+			require.Nil(t, res)
+			assert.Equal(t, CodeUnknownInstall, codeOf(t, err))
+			assert.Contains(t, err.Error(), "homebrew",
+				"a mensagem tem de listar os canais que existem")
+			assert.Equal(t, "ngx v0.2.0 EM USO", contentOf(t, path))
+			assert.Empty(t, c.srv.visited())
+		})
+	}
+}
+
+// O caminho de producao e a variavel de pacote, nao o override de Options:
+// e nela que `-ldflags -X` escreve. Se a recusa so olhasse o override, todo
+// build empacotado continuaria se atualizando sozinho.
+func TestExecuteHonorsTheInjectedPackageVariable(t *testing.T) {
+	c := newScenario(t, "0.3.0", "ngx v0.3.0")
+	path := testBinary(t, "ngx v0.2.0 EM USO", 0o755)
+	comCanalDeInstalacao(t, "homebrew")
+
+	res, err := Run(context.Background(), c.options(path, "v0.2.0"))
+
+	require.Nil(t, res)
+	assert.Equal(t, CodePackagedInstall, codeOf(t, err))
+	assert.Contains(t, err.Error(), "brew upgrade ngx")
+	assert.Equal(t, "ngx v0.2.0 EM USO", contentOf(t, path))
+	assert.Empty(t, c.srv.visited())
+}
+
+// --check tambem recusa: num canal empacotado, a ultima release no GitHub nao
+// e a versao que o gerenciador tem para oferecer, entao "ha atualizacao
+// disponivel" seria a resposta de outra pergunta.
+func TestExecuteCheckOnlyAlsoRefusesOnPackagedChannel(t *testing.T) {
+	c := newScenario(t, "0.3.0", "ngx v0.3.0")
+	path := testBinary(t, "ngx v0.2.0 EM USO", 0o755)
+
+	opts := c.options(path, "v0.2.0")
+	opts.InstallChannelOverride = "deb"
+	opts.CheckOnly = true
+
+	res, err := Run(context.Background(), opts)
+
+	require.Nil(t, res)
+	assert.Equal(t, CodePackagedInstall, codeOf(t, err))
+	assert.Contains(t, err.Error(), "apt upgrade ngx")
+	assert.Equal(t, "ngx v0.2.0 EM USO", contentOf(t, path))
+	assert.Empty(t, c.srv.visited())
+}

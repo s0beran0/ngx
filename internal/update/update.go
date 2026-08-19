@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -40,6 +41,8 @@ const (
 	CodeDowngrade        = "NGX-0313"
 	CodeNetwork          = "NGX-0314"
 	CodeInvalidArtifact  = "NGX-0315"
+	CodePackagedInstall  = "NGX-0316"
+	CodeUnknownInstall   = "NGX-0317"
 )
 
 // PublicKey is the minisign public key embedded in the binary (DD2/DD3).
@@ -64,6 +67,105 @@ var PublicKey = ""
 // It exists so that a placeholder forgotten somewhere in the build chain
 // fails with a message of its own instead of becoming an obscure parse error.
 const PublicKeyPlaceholder = "MINISIGN-KEY-PENDING-NOT-GENERATED"
+
+// InstallChannel diz como este binario foi instalado (DC1). E um fato de
+// build: quem empacota injeta o valor com
+// `-ldflags -X github.com/s0beran0/ngx/internal/update.InstallChannel=<canal>`.
+// O binario nunca tenta adivinhar — nao olha o proprio caminho, nao procura
+// /usr/bin/dpkg, nao consulta o dono do arquivo. Toda inferencia erra em algum
+// lugar, e o erro aqui corromperia o estado de outro programa.
+//
+// O default e "direct" porque e isso que um `go build ./cmd/ngx` produz: quem
+// compila do fonte tem auto-update funcionando. Todo build empacotado
+// sobrescreve.
+//
+// ATENCAO (DD6): `-ldflags -X` contra um simbolo inexistente falha em
+// SILENCIO. Renomear esta variavel, mover o pacote ou trocar o tipo exige
+// acompanhar `.goreleaser.yaml` e o workflow de release no mesmo commit —
+// senao o canal volta a "direct" sem ninguem perceber, que e exatamente o
+// estado que esta variavel existe para evitar.
+var InstallChannel = "direct"
+
+// InstallChannelDirect e o unico canal em que ngx se atualiza sozinho.
+const InstallChannelDirect = "direct"
+
+// upgradeCommands mapeia canal de instalacao para o comando que atualiza o ngx
+// naquele canal. Estar nesta tabela significa "gerenciado por outro programa":
+// ngx se recusa a atualizar e ensina o comando certo (DC2).
+var upgradeCommands = map[string]string{
+	"homebrew": "brew upgrade ngx",
+	"deb":      "apt upgrade ngx",
+	"rpm":      "dnf upgrade ngx",
+	"aur":      "pacman -Syu ngx",
+	"scoop":    "scoop update ngx",
+	"winget":   "winget upgrade ngx",
+}
+
+// UpgradeCommand devolve o comando de atualizacao do canal, e se o canal e
+// conhecido. "direct" nao esta na tabela: nele o comando de atualizacao e o
+// proprio `ngx update`.
+func UpgradeCommand(channel string) (string, bool) {
+	cmd, ok := upgradeCommands[normalizeInstallChannel(channel)]
+	return cmd, ok
+}
+
+// InstallChannels lista os canais gerenciados por pacote, em ordem estavel.
+// A ordem e fixa porque o valor entra em mensagem de erro, e uma mensagem que
+// muda de execucao para execucao e ruido para quem le a saida.
+func InstallChannels() []string {
+	nomes := make([]string, 0, len(upgradeCommands))
+	for c := range upgradeCommands {
+		nomes = append(nomes, c)
+	}
+	sort.Strings(nomes)
+	return nomes
+}
+
+func normalizeInstallChannel(c string) string {
+	return strings.ToLower(strings.TrimSpace(c))
+}
+
+// installChannelOf resolve o canal desta execucao. O override existe para
+// teste, como PublicKeyOverride; em producao fica vazio e vale a variavel do
+// pacote.
+func installChannelOf(opts Options) string {
+	if strings.TrimSpace(opts.InstallChannelOverride) != "" {
+		return opts.InstallChannelOverride
+	}
+	return InstallChannel
+}
+
+// checkInstallChannel recusa a auto-atualizacao quando o binario nao veio do
+// canal "direct" (DC2). Nao ha fallback, nao ha pergunta, nao ha --force:
+// trocar o binario debaixo de um gerenciador de pacotes deixa o banco dele
+// apontando para um arquivo que ele nao conhece mais.
+//
+// Um canal desconhecido tambem recusa. Um erro de digitacao na flag de quem
+// empacota nao pode reabilitar auto-update em silencio — o modo de falha
+// seguro aqui e recusar, porque quem recusa por engano perde um comando e quem
+// aceita por engano corrompe uma instalacao.
+//
+// A recusa vale inclusive para --check: num canal empacotado, a ultima release
+// no GitHub nao e a versao que aquele gerenciador tem para oferecer, entao
+// responder "ha atualizacao disponivel" seria responder outra pergunta.
+func checkInstallChannel(channel string) error {
+	c := normalizeInstallChannel(channel)
+	if c == InstallChannelDirect {
+		return nil
+	}
+	if cmd, ok := upgradeCommands[c]; ok {
+		return newError(CodePackagedInstall,
+			"this ngx was installed through %s, which keeps track of its own versions: "+
+				"replacing the binary in place would leave that package manager pointing "+
+				"at a file it no longer knows. Run `%s` instead", c, cmd)
+	}
+	return newError(CodeUnknownInstall,
+		"this binary declares the install channel %q, which ngx does not recognize, so it "+
+			"refuses to update itself rather than risk corrupting whatever installed it. "+
+			"The known channels are %s, plus \"%s\" for a build from source; until the build "+
+			"is fixed, update by hand from the releases page",
+		channel, strings.Join(InstallChannels(), ", "), InstallChannelDirect)
+}
 
 // Channel is the update channel. The channels are derived from the semver of
 // the tag (DD1), not from branches: "v0.2.0" is stable, "v0.2.0-rc.1" is a
@@ -122,6 +224,10 @@ type Options struct {
 	// PublicKey overrides the embedded key. It exists for testing; in
 	// production it stays empty and the package uses PublicKey.
 	PublicKeyOverride string
+	// InstallChannelOverride substitui InstallChannel. Existe para teste,
+	// pelo mesmo motivo de PublicKeyOverride; em producao fica vazio e vale
+	// a variavel do pacote.
+	InstallChannelOverride string
 	// Client is the GitHub API client. Empty uses the default one.
 	Client *Client
 	// CheckOnly downloads and swaps nothing: it only reports whether
@@ -148,6 +254,13 @@ type Result struct {
 // function the `ngx update` command calls; it prints nothing and picks no
 // exit code.
 func Run(ctx context.Context, opts Options) (*Result, error) {
+	// Primeira coisa da funcao, antes de validar flag e antes de qualquer
+	// rede: se este binario nao pode se atualizar, nada mais precisa
+	// acontecer.
+	if err := checkInstallChannel(installChannelOf(opts)); err != nil {
+		return nil, err
+	}
+
 	channel := opts.Channel
 	if channel == "" {
 		channel = ChannelStable
