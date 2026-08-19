@@ -153,6 +153,14 @@ later does not require editing the workflow.
 
 ### `AUR_SSH_KEY` — Arch User Repository
 
+> **Blocked upstream since 2026-08-19.** AUR account registration is paused
+> while Arch deals with a wave of automated account creation — the register
+> page answers HTTP 503. It is temporary and not specific to this project or
+> network. **Do not script retries against that page**; the reopening is
+> announced on `aur-general` and the Arch news feed, and polling will not learn
+> it any sooner. Everything below applies once registration reopens.
+
+
 The AUR is not GitHub: it authenticates with SSH only, so this one is a
 private key rather than a token.
 
