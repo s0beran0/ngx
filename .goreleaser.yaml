@@ -509,6 +509,31 @@ release:
   # stable channel (DD1).
   prerelease: auto
   draft: false
+  # The header carries what a changelog of commit subjects cannot: the shape of
+  # the output changed, and a consumer that never reads schema_version has no
+  # other way to find out. "It was in the schema version" is not a defence for
+  # silence.
+  header: |
+    ## Breaking changes for anyone reading the JSON
+
+    This release introduces `schema_version` in the envelope, with value `1`.
+    v0.1.0 declared no schema version at all, so anything without the field is
+    pre-contract. Two shapes changed:
+
+    - **`inspect` no longer returns the tree by default.** `data.config` is
+      absent unless `--full-tree` is given. On a 132-file production
+      configuration this is the difference between 1.6 MB and a few hundred
+      bytes — the point of the release — but code that read `data.config`
+      unconditionally now gets nothing.
+    - **A redacted directive keeps its other arguments.** `args` used to
+      collapse to `["***"]`; it is now `["Authorization", "***"]`, with the
+      censored positions listed in the new `redacted_args`. That is what makes
+      a censored value distinguishable from a literal `***` in the
+      configuration, and it breaks anyone reading `args[0]`.
+
+    Nothing that writes to an nginx configuration exists yet: v0.1.1 is still
+    read-only, and mutation is v0.2.
+
   footer: |
     ---
 
