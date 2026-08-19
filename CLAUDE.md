@@ -37,6 +37,14 @@ which half to trust.
 
 Code comments carry no accents.
 
+This is **checked, not remembered**: `test/language` fails the suite on
+Portuguese in a comment, an identifier or a Markdown file, over everything git
+tracks. It exists because the rule was broken the day after it was written, in
+four files, by whoever wrote it -- the translation was committed as "finish
+translating the repository", which reads as a migration that ended, and nothing
+looked afterwards. The check has an allowlist for text that is ABOUT a
+Portuguese word, and an allowlist entry that stops matching fails too.
+
 ## Conventions
 
 - Go 1.25, zero CGO, static binary.

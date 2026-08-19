@@ -1,10 +1,10 @@
 //go:build integration
 
-// Package bench_test valida a bancada de Lua. Ele fica fora de
-// internal/config de proposito: a fixture que ele usa e um ARTEFATO DA
-// BANCADA, nao de um pacote -- ela so tem sentido quando existe um binario
-// com lua-nginx-module para responder por ela, e o `make bench-lua-up` que
-// sobe esse binario mora aqui.
+// Package bench_test validates the Lua bench. It lives outside internal/config
+// on purpose: the fixture it uses is an ARTEFACT OF THE BENCH rather than of a
+// package -- it only means anything when there is a binary with
+// lua-nginx-module to answer for it, and the `make bench-lua-up` that brings
+// that binary up lives here.
 package bench_test
 
 import (
@@ -18,53 +18,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// O container que `make bench-lua-up` sobe.
+// The container `make bench-lua-up` brings up.
 const luaCT = "ngx-bench-lua"
 
-// fixtureLua e a superficie de sintaxe Lua, o par de
+// fixtureLua is the Lua syntax surface, the counterpart of
 // internal/config/testdata/syntax_surface.conf.
 const fixtureLua = "testdata/lua_surface.conf"
 
-// exigeOraculo pula o teste quando a bancada de Lua nao esta de pe. Pular e
-// mais honesto que falhar: quem roda `go test -tags integration ./...` sem
-// docker nao tem defeito nenhum no codigo.
-func exigeOraculo(t *testing.T) {
+// requireOracle skips the test when the Lua bench is not up. Skipping is more
+// honest than failing: whoever runs `go test -tags integration ./...` without
+// docker has no defect in their code.
+func requireOracle(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker nao esta disponivel; suba a bancada para rodar isto")
+		t.Skip("docker is not available; bring the bench up to run this")
 	}
 	if err := exec.Command("docker", "inspect", luaCT).Run(); err != nil {
-		t.Skip("a bancada de Lua nao esta de pe: rode `make bench-lua-up`")
+		t.Skip("the Lua bench is not up: run `make bench-lua-up`")
 	}
 }
 
-// openrestyTest roda `openresty -t` de verdade sobre src, dentro do container,
-// e devolve a saida combinada e se o binario aceitou.
+// openrestyTest runs a real `openresty -t` over src, inside the container, and
+// returns the combined output and whether the binary accepted it.
 //
-// Uma medida que vale registrar, porque delimita o que este oraculo prova:
-// `openresty -t` NAO compila o corpo Lua. `content_by_lua_block { if end }` e
-// ate `{ isto nao e lua !!! }` passam. O modulo so lexa o corpo para achar
-// onde ele TERMINA -- que e exatamente a pergunta que o ngx tambem responde.
-// Entao o oraculo cobre a delimitacao do bloco, e nada alem dela.
+// One measurement worth recording, because it bounds what this oracle proves:
+// `openresty -t` does NOT compile the Lua body. `content_by_lua_block { if end }`
+// passes, and so does `{ this is not lua !!! }`. The module only lexes the body
+// to find where it ENDS -- which is exactly the question ngx answers too. So
+// the oracle covers block delimitation, and nothing beyond it.
 func openrestyTest(t *testing.T, src string) (string, bool) {
 	t.Helper()
 
-	copiar := exec.Command("docker", "exec", "-i", luaCT,
+	writeIn := exec.Command("docker", "exec", "-i", luaCT,
 		"sh", "-c", "cat > /tmp/oracle.conf")
-	copiar.Stdin = strings.NewReader(src)
-	require.NoError(t, copiar.Run(), "nao consegui colocar a configuracao no container")
+	writeIn.Stdin = strings.NewReader(src)
+	require.NoError(t, writeIn.Run(), "could not place the configuration in the container")
 
-	saida, err := exec.Command("docker", "exec", luaCT,
+	output, err := exec.Command("docker", "exec", luaCT,
 		"openresty", "-t", "-c", "/tmp/oracle.conf").CombinedOutput()
-	return string(saida), err == nil
+	return string(output), err == nil
 }
 
-// ngxParse tenta parsear src com o ngx e devolve o arquivo e o erro.
+// ngxParse tries to parse src with ngx and returns the file and the error.
 func ngxParse(t *testing.T, src string) (*config.File, error) {
 	t.Helper()
-	caminho := filepath.Join(t.TempDir(), "ngx.conf")
-	require.NoError(t, os.WriteFile(caminho, []byte(src), 0o644))
-	tree, err := config.Parse(config.ParseOptions{Path: caminho})
+	path := filepath.Join(t.TempDir(), "ngx.conf")
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o644))
+	tree, err := config.Parse(config.ParseOptions{Path: path})
 	if err != nil {
 		return nil, err
 	}
@@ -72,46 +72,46 @@ func ngxParse(t *testing.T, src string) (*config.File, error) {
 	return tree.Files[0], nil
 }
 
-func lerFixture(t *testing.T) string {
+func readFixture(t *testing.T) string {
 	t.Helper()
-	dados, err := os.ReadFile(fixtureLua)
+	data, err := os.ReadFile(fixtureLua)
 	require.NoError(t, err)
-	return string(dados)
+	return string(data)
 }
 
-func texto(f *config.File, s config.Span) string { return string(f.Source[s.Start:s.End]) }
+func text(f *config.File, s config.Span) string { return string(f.Source[s.Start:s.End]) }
 
-// O oraculo que faltava. Ate aqui, tudo que o projeto afirmava sobre aceitar
-// configuracao OpenResty se apoiava no lexer do crossplane e em raciocinio
-// sobre sintaxe Lua -- sem binario nenhum para dizer o contrario. Este teste e
-// o binario dizendo.
-func TestSuperficieLuaEhAceitaPeloOpenRestyReal(t *testing.T) {
-	exigeOraculo(t)
+// The oracle that was missing. Until now, everything the project claimed about
+// accepting OpenResty configuration rested on crossplane's lexer and on
+// reasoning about Lua syntax -- with no binary to say otherwise. This test is
+// the binary saying.
+func TestTheLuaSurfaceIsAcceptedByRealOpenResty(t *testing.T) {
+	requireOracle(t)
 
-	saida, ok := openrestyTest(t, lerFixture(t))
+	output, ok := openrestyTest(t, readFixture(t))
 	require.Truef(t, ok,
-		"o OpenResty real recusou a fixture, entao ela deixou de ser uma "+
-			"descricao de configuracao valida:\n%s", saida)
-	require.Contains(t, saida, "syntax is ok")
+		"real OpenResty refused the fixture, so it has stopped being a "+
+			"description of valid configuration:\n%s", output)
+	require.Contains(t, output, "syntax is ok")
 }
 
-// A outra metade: o ngx le a MESMA fixture e chega nos mesmos valores. Sem
-// isto, o teste acima provaria apenas que a fixture e valida, e nao que nos
-// concordamos com quem a valida.
-func TestSuperficieLuaEhLidaPeloNgxComOsMesmosValores(t *testing.T) {
-	fonte := lerFixture(t)
-	file, err := ngxParse(t, fonte)
-	require.NoError(t, err, "o ngx recusou uma configuracao que o OpenResty aceita")
+// The other half: ngx reads the SAME fixture and arrives at the same values.
+// Without this, the test above would prove only that the fixture is valid, not
+// that we agree with whoever validates it.
+func TestNgxReadsTheLuaSurfaceWithTheSameValues(t *testing.T) {
+	source := readFixture(t)
+	file, err := ngxParse(t, source)
+	require.NoError(t, err, "ngx refused a configuration OpenResty accepts")
 
-	// Os corpos Lua, na ordem em que aparecem. Cada um e uma armadilha
-	// diferente: `;` como separador de tabela, `if`/`end`, chaves dentro de
-	// string, e o unico caso com argumento antes do corpo.
-	var luas []*config.Node
+	// The Lua bodies, in the order they appear. Each one is a different trap:
+	// `;` as a table separator, `if`/`end`, braces inside a string, and the
+	// only case with an argument before the body.
+	var luaNodes []*config.Node
 	var ifs int
 	file2 := &config.Tree{Files: []*config.File{file}}
 	file2.Walk(func(n *config.Node) bool {
 		if config.IsLuaBlockDirective(n.Directive) {
-			luas = append(luas, n)
+			luaNodes = append(luaNodes, n)
 		}
 		if n.Directive == "if" {
 			ifs++
@@ -119,9 +119,9 @@ func TestSuperficieLuaEhLidaPeloNgxComOsMesmosValores(t *testing.T) {
 		return true
 	})
 
-	nomes := make([]string, len(luas))
-	for i, n := range luas {
-		nomes[i] = n.Directive
+	names := make([]string, len(luaNodes))
+	for i, n := range luaNodes {
+		names[i] = n.Directive
 	}
 	require.Equal(t, []string{
 		"init_by_lua_block",
@@ -129,168 +129,169 @@ func TestSuperficieLuaEhLidaPeloNgxComOsMesmosValores(t *testing.T) {
 		"rewrite_by_lua_block",
 		"content_by_lua_block",
 		"content_by_lua_block",
-	}, nomes)
+	}, names)
 
-	// A propriedade que da nome ao defeito original: nenhum `if` do Lua virou
-	// diretiva `if` do nginx. A fixture tem tres, e nenhum e do nginx.
-	require.Zero(t, ifs, "um `if` de dentro do Lua foi lido como diretiva nginx")
+	// The property that named the original defect: no Lua `if` became an nginx
+	// `if` directive. The fixture has three, and none of them is nginx's.
+	require.Zero(t, ifs, "an `if` from inside Lua was read as an nginx directive")
 
-	// Nenhum bloco Lua abriu um bloco de diretivas: o corpo e ARGUMENTO.
-	for _, n := range luas {
-		require.Falsef(t, n.HasBlock(), "%s abriu um bloco de diretivas", n.Directive)
+	// No Lua block opened a directive block: the body is an ARGUMENT.
+	for _, n := range luaNodes {
+		require.Falsef(t, n.HasBlock(), "%s opened a directive block", n.Directive)
 	}
 
-	// O corpo, byte a byte. O span do argumento cobre o lexema inteiro,
-	// chaves incluidas -- a mesma regra das aspas de um argumento aspado --,
-	// entao o texto apontado e sempre "{" + Args[ultimo] + "}".
-	for _, n := range luas {
-		require.Lenf(t, n.ArgSpans, len(n.Args), "%s: um span por argumento", n.Directive)
-		corpo := n.Args[len(n.Args)-1]
-		require.Equalf(t, "{"+corpo+"}", texto(file, n.ArgSpans[len(n.ArgSpans)-1]),
-			"%s: o span do corpo nao aponta para o corpo", n.Directive)
+	// The body, byte for byte. The argument span covers the whole lexeme,
+	// braces included -- the same rule as the quotes of a quoted argument --
+	// so the text pointed at is always "{" + Args[last] + "}".
+	for _, n := range luaNodes {
+		require.Lenf(t, n.ArgSpans, len(n.Args), "%s: one span per argument", n.Directive)
+		body := n.Args[len(n.Args)-1]
+		require.Equalf(t, "{"+body+"}", text(file, n.ArgSpans[len(n.ArgSpans)-1]),
+			"%s: the body span does not point at the body", n.Directive)
 	}
 
-	// init_by_lua_block: `;` separando campos de tabela e chaves dentro de
-	// string. Lidos como configuracao, virariam diretivas.
-	require.Len(t, luas[0].Args, 1)
-	require.Contains(t, luas[0].Args[0], `local cfg = { limite = 10; nome = "a; b { c }" }`)
-	require.Contains(t, luas[0].Args[0], "if cfg.limite > 0 then")
+	// init_by_lua_block: `;` separating table fields, and braces inside a
+	// string. Read as configuration, they would become directives.
+	require.Len(t, luaNodes[0].Args, 1)
+	require.Contains(t, luaNodes[0].Args[0], `local cfg = { limite = 10; name = "a; b { c }" }`)
+	require.Contains(t, luaNodes[0].Args[0], "if cfg.limite > 0 then")
 
-	// set_by_lua_block e o unico com argumento ANTES do corpo, e o argumento
-	// e lido como uma sequencia de nao-espacos, sem nocao de aspas.
-	require.Len(t, luas[1].Args, 2, "set_by_lua_block tem a variavel e o corpo")
-	require.Equal(t, "$marca", luas[1].Args[0])
-	require.Equal(t, "$marca", texto(file, luas[1].ArgSpans[0]))
-	require.Contains(t, luas[1].Args[1], `return "dois; { itens }"`)
+	// set_by_lua_block is the only one with an argument BEFORE the body, and
+	// that argument is read as a run of non-spaces, with no notion of quotes.
+	require.Len(t, luaNodes[1].Args, 2, "set_by_lua_block has the variable and the body")
+	require.Equal(t, "$marca", luaNodes[1].Args[0])
+	require.Equal(t, "$marca", text(file, luaNodes[1].ArgSpans[0]))
+	require.Contains(t, luaNodes[1].Args[1], `return "dois; { itens }"`)
 
-	// O corpo de uma linha so, exato: e curto o bastante para nao haver
-	// desculpa para aproximacao.
-	require.Equal(t, []string{` ngx.say("ok; {1}") `}, luas[4].Args)
+	// The single-line body, exactly: it is short enough that there is no
+	// excuse for an approximation.
+	require.Equal(t, []string{` ngx.say("ok; {1}") `}, luaNodes[4].Args)
 
-	// E o que este trabalho inteiro protege: a diretiva DEPOIS do bloco. Se o
-	// nosso fluxo de tokens dessincronizar do fluxo do crossplane, e aqui que
-	// aparece -- em silencio, com spans apontando para o texto errado.
-	for _, esperado := range []struct{ diretiva, span string }{
+	// And what this whole effort protects: the directive AFTER the block. If
+	// our token stream desynchronises from crossplane's, this is where it
+	// shows -- silently, with spans pointing at the wrong text.
+	for _, want := range []struct{ directive, span string }{
 		{"keepalive_timeout", "keepalive_timeout 65;"},
 		{"add_header", "add_header X-Marca $marca;"},
 		{"access_log", "access_log off;"},
 	} {
-		var achou *config.Node
+		var found *config.Node
 		file2.Walk(func(n *config.Node) bool {
-			if achou == nil && n.Directive == esperado.diretiva {
-				achou = n
+			if found == nil && n.Directive == want.directive {
+				found = n
 			}
 			return true
 		})
-		require.NotNilf(t, achou, "diretiva %s sumiu da arvore", esperado.diretiva)
-		require.Equal(t, esperado.span, texto(file, achou.Span))
-		require.Equal(t, esperado.diretiva, texto(file, achou.HeadSpan)[:len(esperado.diretiva)])
+		require.NotNilf(t, found, "directive %s vanished from the tree", want.directive)
+		require.Equal(t, want.span, text(file, found.Span))
+		require.Equal(t, want.directive, text(file, found.HeadSpan)[:len(want.directive)])
 	}
 }
 
-// As DIVERGENCIAS entre o oraculo e o ngx, medidas e nao supostas.
+// The DIVERGENCES between the oracle and ngx, measured rather than assumed.
 //
-// Elas ficam registradas como teste, e nao so como prosa, por um motivo: se
-// um dia o crossplane consertar o lexer de Lua upstream, ou o lua-nginx-module
-// mudar de ideia, este teste fica vermelho e alguem revisa a nota. Uma
-// divergencia documentada em markdown envelhece em silencio.
+// They are recorded as a test and not only as prose for one reason: if
+// crossplane one day fixes its Lua lexer upstream, or lua-nginx-module changes
+// its mind, this test goes red and somebody revisits the note. A divergence
+// documented in markdown ages in silence.
 //
-// Consertar qualquer uma delas esta FORA do escopo de quem escreveu este
-// arquivo: o defeito, quando existe, e do lexer da dependencia, e esta base ja
-// recusou uma vez a saida de forkar o crossplane.
-func TestDivergenciasEntreOraculoENgx(t *testing.T) {
-	exigeOraculo(t)
+// Fixing any of them is OUT of scope for whoever wrote this file: the defect,
+// where there is one, belongs to the dependency's lexer, and this codebase has
+// already once refused the option of forking crossplane.
+func TestDivergencesBetweenTheOracleAndNgx(t *testing.T) {
+	requireOracle(t)
 
-	const molde = "events { worker_connections 16; }\n" +
+	const template = "events { worker_connections 16; }\n" +
 		"http { server { listen 8080; location / {\n" +
 		"content_by_lua_block {%s}\n" +
 		"access_log off;\n" +
 		"} } }\n"
 
-	casos := []struct {
-		nome      string
-		corpo     string
-		openresty bool // o binario aceita?
-		ngx       bool // o ngx aceita?
-		porque    string
+	cases := []struct {
+		name      string
+		body      string
+		openresty bool // does the binary accept it?
+		ngx       bool // does ngx accept it?
+		why       string
 	}{
 		{
-			nome:      "aspas simples escapadas",
-			corpo:     ` local s = 'a\'b' `,
+			name:      "aspas simples escapadas",
+			body:      ` local s = 'a\'b' `,
 			openresty: true,
 			ngx:       false,
-			porque: "DIVERGENCIA. Lua aceita \\' dentro de string simples; o lexer do " +
+			why: "DIVERGENCIA. Lua aceita \\' dentro de string simples; o lexer do " +
 				"crossplane (lua.go) trata a barra invertida como um caractere qualquer, " +
 				"entao a segunda aspa FECHA a string e a chave que fecha o bloco cai " +
 				"'dentro de aspas'. O bloco nunca termina e o arquivo e recusado.",
 		},
 		{
-			nome:      "aspas duplas escapadas",
-			corpo:     ` local s = "a\"b" `,
+			name:      "aspas duplas escapadas",
+			body:      ` local s = "a\"b" `,
 			openresty: true,
 			ngx:       false,
-			porque:    "Mesma causa da anterior: a barra invertida nao escapa nada no lexer da dependencia.",
+			why:       "Mesma causa da anterior: a barra invertida nao escapa nada no lexer da dependencia.",
 		},
 		{
-			nome:      "corpo vazio",
-			corpo:     "",
+			name:      "body vazio",
+			body:      "",
 			openresty: false,
 			ngx:       true,
-			porque: "DIVERGENCIA NA OUTRA DIRECAO, e semantica, nao sintatica: o " +
+			why: "DIVERGENCIA NA OUTRA DIRECAO, e semantica, nao sintatica: o " +
 				"lua-nginx-module recusa com 'no runnable Lua code'. Nao e um defeito " +
 				"do ngx -- delimitar um bloco vazio esta certo --, mas e a razao de a " +
 				"fixture nao ter um.",
 		},
 		{
-			nome:      "colchete longo com chave desbalanceada",
-			corpo:     ` local s = [[ } ]] `,
+			name:      "colchete longo com chave desbalanceada",
+			body:      ` local s = [[ } ]] `,
 			openresty: true,
 			ngx:       false,
-			porque: "O colchete longo do Lua nao e string para o lexer do crossplane: a " +
+			why: "O colchete longo do Lua nao e string para o lexer do crossplane: a " +
 				"chave de dentro dele conta, e o bloco fecha cedo demais.",
 		},
 		{
-			nome:      "comentario Lua com chave desbalanceada",
-			corpo:     " -- }\n ngx.say(1) ",
+			name:      "comentario Lua com chave desbalanceada",
+			body:      " -- }\n ngx.say(1) ",
 			openresty: true,
 			ngx:       false,
-			porque:    "Mesma causa: o lexer da dependencia nao conhece comentario Lua.",
+			why:       "Mesma causa: o lexer da dependencia nao conhece comentario Lua.",
 		},
 	}
 
-	for _, c := range casos {
-		t.Run(c.nome, func(t *testing.T) {
-			src := strings.Replace(molde, "%s", c.corpo, 1)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := strings.Replace(template, "%s", c.body, 1)
 
-			saida, aceitou := openrestyTest(t, src)
-			require.Equalf(t, c.openresty, aceitou,
-				"o OpenResty mudou de comportamento para %q.\n%s\n%s", c.nome, c.porque, saida)
+			output, accepted := openrestyTest(t, src)
+			require.Equalf(t, c.openresty, accepted,
+				"o OpenResty mudou de comportamento para %q.\n%s\n%s", c.name, c.why, output)
 
 			_, err := ngxParse(t, src)
 			if c.ngx {
-				require.NoErrorf(t, err, "o ngx mudou de comportamento para %q.\n%s", c.nome, c.porque)
+				require.NoErrorf(t, err, "o ngx mudou de comportamento para %q.\n%s", c.name, c.why)
 				return
 			}
 			require.Errorf(t, err,
 				"o ngx passou a aceitar %q -- se foi upstream, a nota abaixo envelheceu.\n%s",
-				c.nome, c.porque)
+				c.name, c.why)
 		})
 	}
 }
 
-// A divergencia mais grave das medidas, e a unica que nao cabe no molde acima
-// porque depende do texto que vem DEPOIS do bloco.
+// The most serious of the measured divergences, and the only one that does not
+// fit the template above, because it depends on the text that comes AFTER the
+// block.
 //
-// Um comentario Lua com uma chave desbalanceada faz o lexer do crossplane
-// fechar o bloco CEDO. Nos casos da tabela acima isso vira erro, o que e ruim
-// mas visivel. Aqui nao: o ngx ACEITA o arquivo e monta uma arvore, enquanto o
-// OpenResty o RECUSA. Ou seja, o ngx descreve uma estrutura que o servidor real
-// nunca teve -- e sem nenhum sinal para quem consome a saida.
+// A Lua comment holding an unbalanced brace makes crossplane's lexer close the
+// block EARLY. In the table cases above that becomes an error, which is bad but
+// visible. Not here: ngx ACCEPTS the file and builds a tree, while OpenResty
+// REFUSES it. That is, ngx describes a structure the real server never had --
+// with no signal at all to whoever consumes the output.
 //
-// Continua fora do escopo consertar: a delimitacao vem do lexer da dependencia.
-// Fica registrado aqui para que a nota nao envelheca em silencio.
-func TestComentarioLuaComChaveFazNgxAceitarOQueOOpenRestyRecusa(t *testing.T) {
-	exigeOraculo(t)
+// Fixing it stays out of scope: the delimitation comes from the dependency's
+// lexer. It is recorded here so the note does not age in silence.
+func TestALuaCommentWithABraceMakesNgxAcceptWhatOpenRestyRefuses(t *testing.T) {
+	requireOracle(t)
 
 	src := "events { worker_connections 16; }\n" +
 		"http { server { listen 8080; location / {\n" +
@@ -298,8 +299,8 @@ func TestComentarioLuaComChaveFazNgxAceitarOQueOOpenRestyRecusa(t *testing.T) {
 		"access_log off; }\n" +
 		"} }\n"
 
-	saida, aceitou := openrestyTest(t, src)
-	require.Falsef(t, aceitou, "o OpenResty passou a aceitar isto; a nota envelheceu:\n%s", saida)
+	output, accepted := openrestyTest(t, src)
+	require.Falsef(t, accepted, "o OpenResty passou a aceitar isto; a nota envelheceu:\n%s", output)
 
 	_, err := ngxParse(t, src)
 	require.NoError(t, err,

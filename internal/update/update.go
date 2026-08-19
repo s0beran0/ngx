@@ -68,30 +68,31 @@ var PublicKey = ""
 // fails with a message of its own instead of becoming an obscure parse error.
 const PublicKeyPlaceholder = "MINISIGN-KEY-PENDING-NOT-GENERATED"
 
-// InstallChannel diz como este binario foi instalado (DC1). E um fato de
-// build: quem empacota injeta o valor com
-// `-ldflags -X github.com/s0beran0/ngx/internal/update.InstallChannel=<canal>`.
-// O binario nunca tenta adivinhar — nao olha o proprio caminho, nao procura
-// /usr/bin/dpkg, nao consulta o dono do arquivo. Toda inferencia erra em algum
-// lugar, e o erro aqui corromperia o estado de outro programa.
+// InstallChannel says how this binary was installed (DC1). It is a build
+// fact: whoever packages injects the value with
+// `-ldflags -X github.com/s0beran0/ngx/internal/update.InstallChannel=<channel>`.
+// The binary never guesses -- it does not look at its own path, does not go
+// hunting for /usr/bin/dpkg, does not ask who owns the file. Every inference
+// is wrong somewhere, and being wrong here would corrupt another program's
+// state.
 //
-// O default e "direct" porque e isso que um `go build ./cmd/ngx` produz: quem
-// compila do fonte tem auto-update funcionando. Todo build empacotado
-// sobrescreve.
+// The default is "direct" because that is what a plain `go build ./cmd/ngx`
+// produces: whoever compiles from source gets a working self-update. Every
+// packaged build overrides it.
 //
-// ATENCAO (DD6): `-ldflags -X` contra um simbolo inexistente falha em
-// SILENCIO. Renomear esta variavel, mover o pacote ou trocar o tipo exige
-// acompanhar `.goreleaser.yaml` e o workflow de release no mesmo commit —
-// senao o canal volta a "direct" sem ninguem perceber, que e exatamente o
-// estado que esta variavel existe para evitar.
+// WARNING (DD6): `-ldflags -X` against a symbol that does not exist fails
+// SILENTLY. Renaming this variable, moving the package or changing the type
+// means following `.goreleaser.yaml` and the release workflow in the same
+// commit -- otherwise the channel falls back to "direct" with nobody
+// noticing, which is exactly the state this variable exists to prevent.
 var InstallChannel = "direct"
 
-// InstallChannelDirect e o unico canal em que ngx se atualiza sozinho.
+// InstallChannelDirect is the only channel in which ngx updates itself.
 const InstallChannelDirect = "direct"
 
-// upgradeCommands mapeia canal de instalacao para o comando que atualiza o ngx
-// naquele canal. Estar nesta tabela significa "gerenciado por outro programa":
-// ngx se recusa a atualizar e ensina o comando certo (DC2).
+// upgradeCommands maps an install channel to the command that updates ngx in
+// that channel. Being in this table means "managed by another program": ngx
+// refuses to update and names the right command instead (DC2).
 var upgradeCommands = map[string]string{
 	"homebrew": "brew upgrade ngx",
 	"deb":      "apt upgrade ngx",
@@ -127,17 +128,17 @@ func CheckCommand(channel string) (string, bool) {
 	return cmd, ok
 }
 
-// UpgradeCommand devolve o comando de atualizacao do canal, e se o canal e
-// conhecido. "direct" nao esta na tabela: nele o comando de atualizacao e o
-// proprio `ngx update`.
+// UpgradeCommand returns the update command for the channel, and whether the
+// channel is known. "direct" is not in the table: there, the update command is
+// `ngx update` itself.
 func UpgradeCommand(channel string) (string, bool) {
 	cmd, ok := upgradeCommands[normalizeInstallChannel(channel)]
 	return cmd, ok
 }
 
-// InstallChannels lista os canais gerenciados por pacote, em ordem estavel.
-// A ordem e fixa porque o valor entra em mensagem de erro, e uma mensagem que
-// muda de execucao para execucao e ruido para quem le a saida.
+// InstallChannels lists the package-managed channels, in a stable order. The
+// order is fixed because the value goes into an error message, and a message
+// that changes between runs is noise to whoever reads the output.
 func InstallChannels() []string {
 	nomes := make([]string, 0, len(upgradeCommands))
 	for c := range upgradeCommands {
@@ -151,9 +152,9 @@ func normalizeInstallChannel(c string) string {
 	return strings.ToLower(strings.TrimSpace(c))
 }
 
-// installChannelOf resolve o canal desta execucao. O override existe para
-// teste, como PublicKeyOverride; em producao fica vazio e vale a variavel do
-// pacote.
+// installChannelOf resolves the channel for this run. The override exists for
+// tests, like PublicKeyOverride; in production it is empty and the package
+// variable is what counts.
 func installChannelOf(opts Options) string {
 	if strings.TrimSpace(opts.InstallChannelOverride) != "" {
 		return opts.InstallChannelOverride
@@ -161,19 +162,19 @@ func installChannelOf(opts Options) string {
 	return InstallChannel
 }
 
-// checkInstallChannel recusa a auto-atualizacao quando o binario nao veio do
-// canal "direct" (DC2). Nao ha fallback, nao ha pergunta, nao ha --force:
-// trocar o binario debaixo de um gerenciador de pacotes deixa o banco dele
-// apontando para um arquivo que ele nao conhece mais.
+// checkInstallChannel refuses to self-update when the binary did not come from
+// the "direct" channel (DC2). There is no fallback, no prompt, no --force:
+// swapping the binary under a package manager leaves its database pointing at
+// a file it no longer knows.
 //
-// Um canal desconhecido tambem recusa. Um erro de digitacao na flag de quem
-// empacota nao pode reabilitar auto-update em silencio — o modo de falha
-// seguro aqui e recusar, porque quem recusa por engano perde um comando e quem
-// aceita por engano corrompe uma instalacao.
+// An unknown channel refuses as well. A typo in the packager's flag must not
+// silently re-enable self-update -- refusing is the safe failure here, because
+// refusing by mistake costs one command while accepting by mistake corrupts an
+// installation.
 //
-// A recusa vale inclusive para --check: num canal empacotado, a ultima release
-// no GitHub nao e a versao que aquele gerenciador tem para oferecer, entao
-// responder "ha atualizacao disponivel" seria responder outra pergunta.
+// The refusal covers --check too: in a packaged channel the latest GitHub
+// release is not the version that manager has to offer, so answering "an
+// update is available" would be answering a different question.
 func checkInstallChannel(channel string, checkOnly bool) error {
 	c := normalizeInstallChannel(channel)
 	if c == InstallChannelDirect {
@@ -261,9 +262,9 @@ type Options struct {
 	// PublicKey overrides the embedded key. It exists for testing; in
 	// production it stays empty and the package uses PublicKey.
 	PublicKeyOverride string
-	// InstallChannelOverride substitui InstallChannel. Existe para teste,
-	// pelo mesmo motivo de PublicKeyOverride; em producao fica vazio e vale
-	// a variavel do pacote.
+	// InstallChannelOverride replaces InstallChannel. It exists for testing,
+	// for the same reason as PublicKeyOverride; in production it stays empty
+	// and the package variable is what counts.
 	InstallChannelOverride string
 	// Client is the GitHub API client. Empty uses the default one.
 	Client *Client
@@ -291,9 +292,9 @@ type Result struct {
 // function the `ngx update` command calls; it prints nothing and picks no
 // exit code.
 func Run(ctx context.Context, opts Options) (*Result, error) {
-	// Primeira coisa da funcao, antes de validar flag e antes de qualquer
-	// rede: se este binario nao pode se atualizar, nada mais precisa
-	// acontecer.
+	// The first thing this function does, before validating a flag and before
+	// touching the network: if this binary cannot update itself, nothing else
+	// needs to happen.
 	if err := checkInstallChannel(installChannelOf(opts), opts.CheckOnly); err != nil {
 		return nil, err
 	}

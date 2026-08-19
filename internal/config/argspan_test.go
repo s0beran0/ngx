@@ -97,24 +97,24 @@ func TestSpansPorArgumentoReproduzemOArgumento(t *testing.T) {
 	require.Greater(t, conferidos, 40, "the fixture no longer exercises enough arguments")
 }
 
-// TestSpanDeArgumentoEntreAspasCobreAsAspas pins the decision down in a test
+// TestTheSpanOfAQuotedArgumentCoversTheQuotes pins the decision down in a test
 // instead of only in a comment: the span covers the delimiters. It is what
 // makes redaction a substitution of the whole lexeme -- "***" written over
-// "valor; com { chaves }" is a valid argument -- instead of a substitution
+// "value; with { braces }" is a valid argument -- instead of a substitution
 // inside the quotes, which would leave the delimiters standing and force the
 // replacement to be escaped for that quote style.
-func TestSpanDeArgumentoEntreAspasCobreAsAspas(t *testing.T) {
+func TestTheSpanOfAQuotedArgumentCoversTheQuotes(t *testing.T) {
 	file := parseSuperficie(t)
 
-	casos := []struct {
+	cases := []struct {
 		directive  string
 		ocorrencia int
 		arg        int
 		texto      string
-		valor      string
+		want       string
 	}{
-		{"add_header", 0, 1, `"valor; com { chaves } e ponto-virgula"`, "valor; com { chaves } e ponto-virgula"},
-		{"add_header", 1, 1, `'outro; valor'`, "outro; valor"},
+		{"add_header", 0, 1, `"value; with { braces } and semicolon"`, "value; with { braces } and semicolon"},
+		{"add_header", 1, 1, `'another; value'`, "another; value"},
 		{"add_header", 2, 1, `"com \"aspas\" escapadas"`, `com "aspas" escapadas`},
 		{"location", 5, 0, `/com\ espaco`, `/com\ espaco`},
 		{"location", 2, 1, `\.php$`, `\.php$`},
@@ -128,14 +128,14 @@ func TestSpanDeArgumentoEntreAspasCobreAsAspas(t *testing.T) {
 		achado[n.Directive+"#"+string(rune('0'+i))] = n
 	}
 
-	for _, c := range casos {
+	for _, c := range cases {
 		n := achado[c.directive+"#"+string(rune('0'+c.ocorrencia))]
 		require.NotNil(t, n, "the fixture no longer has %q #%d", c.directive, c.ocorrencia)
 		require.Greater(t, len(n.ArgSpans), c.arg)
 		s := n.ArgSpans[c.arg]
 		assert.Equal(t, c.texto, string(file.Source[s.Start:s.End]),
 			"the span of arg %d of %q #%d is not the raw lexeme", c.arg, c.directive, c.ocorrencia)
-		assert.Equal(t, c.valor, n.Args[c.arg],
+		assert.Equal(t, c.want, n.Args[c.arg],
 			"the value of arg %d of %q #%d changed", c.arg, c.directive, c.ocorrencia)
 	}
 }
@@ -172,12 +172,12 @@ func TestSpansPorArgumentoAusentesNoIf(t *testing.T) {
 	t.Fatal("the fixture no longer has if ($request_method = POST)")
 }
 
-// TestSpansPorArgumentoSemArgumentoSaoListaVazia keeps the two absences apart,
+// TestPerArgumentSpansAreAnEmptyListWithNoArguments keeps the two absences apart,
 // which is the entire reason the tag is omitzero: [] means "this directive has
 // no arguments, iterate away"; the field missing means "the correspondence
 // does not exist here, do not assume". omitempty would print neither, and a
 // consumer could not tell an "if" from a "types {}".
-func TestSpansPorArgumentoSemArgumentoSaoListaVazia(t *testing.T) {
+func TestPerArgumentSpansAreAnEmptyListWithNoArguments(t *testing.T) {
 	file := parseSuperficie(t)
 
 	var semArgs, comIf *config.Node

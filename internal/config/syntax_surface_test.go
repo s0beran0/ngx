@@ -34,16 +34,16 @@ func TestSuperficieDeSintaxeDoNginx(t *testing.T) {
 	}
 	anda(tree.Files[0].Nodes)
 
-	casos := []struct {
+	cases := []struct {
 		nome      string
 		directive string
 		indice    int
 		esperado  []string
 	}{
 		{"a quoted value keeps its semicolon and braces", "add_header", 0,
-			[]string{"X-Um", "valor; com { chaves } e ponto-virgula"}},
+			[]string{"X-One", "value; with { braces } and semicolon"}},
 		{"single quotes work like double ones", "add_header", 1,
-			[]string{"X-Dois", "outro; valor"}},
+			[]string{"X-Two", "another; value"}},
 		{"escaped quotes are unescaped exactly once", "add_header", 2,
 			[]string{"X-Tres", `com "aspas" escapadas`}},
 		{"variables stay literal, both forms", "add_header", 3,
@@ -62,7 +62,7 @@ func TestSuperficieDeSintaxeDoNginx(t *testing.T) {
 			[]string{"1h30m"}},
 	}
 
-	for _, c := range casos {
+	for _, c := range cases {
 		t.Run(c.nome, func(t *testing.T) {
 			ocorrencias := achado[c.directive]
 			require.Greater(t, len(ocorrencias), c.indice,
@@ -74,13 +74,13 @@ func TestSuperficieDeSintaxeDoNginx(t *testing.T) {
 	// The map body is not made of directives -- it is free key/value pairs, and
 	// a regex key, an empty key and a backslash key are exactly where a
 	// tokeniser that treats them as directives goes wrong.
-	var corpoDoMap []string
+	var mapBody []string
 	for _, n := range tree.Files[0].Nodes {
-		anda2(n, &corpoDoMap)
+		anda2(n, &mapBody)
 	}
-	assert.Contains(t, corpoDoMap, "~*bot|crawler")
-	assert.Contains(t, corpoDoMap, `\d+`)
-	assert.Contains(t, corpoDoMap, "", "the empty-string key has to survive")
+	assert.Contains(t, mapBody, "~*bot|crawler")
+	assert.Contains(t, mapBody, `\d+`)
+	assert.Contains(t, mapBody, "", "the empty-string key has to survive")
 }
 
 func anda2(n *config.Node, out *[]string) {

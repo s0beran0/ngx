@@ -75,7 +75,7 @@ func TestSpansAfterLuaBlockStayCorrect(t *testing.T) {
 		"    listen 8080;\n" +
 		"    server_name a.example;\n" +
 		"}\n" +
-		"# depois\n"
+		"# after\n"
 
 	file := parseOne(t, src)
 	require.Len(t, file.Nodes, 2)
@@ -105,7 +105,7 @@ func TestSpansAfterLuaBlockStayCorrect(t *testing.T) {
 	// And the comment after the whole block, at the root level.
 	comment := file.Nodes[1]
 	require.Equal(t, "#", comment.Directive)
-	require.Equal(t, "# depois", text(file, comment.Span))
+	require.Equal(t, "# after", text(file, comment.Span))
 	require.Equal(t, 8, comment.Line)
 }
 

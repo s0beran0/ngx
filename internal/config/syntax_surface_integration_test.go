@@ -22,7 +22,7 @@ import (
 // somebody adds a construction we cannot parse, the unit test catches it. If
 // somebody adds one nginx does not accept, this catches it -- and without this,
 // the unit test would happily lock in a fixture nginx would refuse.
-func TestSuperficieDeSintaxeEhAceitaPeloNginxReal(t *testing.T) {
+func TestTheSyntaxSurfaceIsAcceptedByRealNginx(t *testing.T) {
 	caminho, err := filepath.Abs(filepath.Join("testdata", "syntax_surface.conf"))
 	require.NoError(t, err)
 
@@ -41,10 +41,10 @@ func TestSuperficieDeSintaxeEhAceitaPeloNginxReal(t *testing.T) {
 	copiar.Stdin = strings.NewReader(string(dados))
 	require.NoError(t, copiar.Run(), "could not place the fixture in the container")
 
-	saida, err := exec.Command("docker", "exec", "ngx-bench",
+	output, err := exec.Command("docker", "exec", "ngx-bench",
 		"nginx", "-t", "-c", "/tmp/syntax_surface.conf").CombinedOutput()
 	require.NoErrorf(t, err,
 		"real nginx refused the fixture, so it stopped being a description of "+
-			"valid configuration:\n%s", saida)
-	require.Contains(t, string(saida), "syntax is ok")
+			"valid configuration:\n%s", output)
+	require.Contains(t, string(output), "syntax is ok")
 }

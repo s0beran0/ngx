@@ -30,29 +30,29 @@ import (
 // The public key comes from the repository file rather than from the binary,
 // because `go test` does not go through the -ldflags that inject it.
 
-func chavePublica(t *testing.T) string {
+func publicKey(t *testing.T) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "ngx-minisign.pub"))
 	require.NoError(t, err, "the project public key has to be in the repository")
-	linhas := strings.Split(strings.TrimSpace(string(b)), "\n")
-	require.Len(t, linhas, 2, "a minisign .pub is a comment line plus the key")
-	return linhas[1]
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	require.Len(t, lines, 2, "a minisign .pub is a comment line plus the key")
+	return lines[1]
 }
 
 func opcoes(t *testing.T, destino string) update.Options {
 	return update.Options{
 		CurrentVersion:    "0.0.1-para-forcar-update",
 		BinaryPath:        destino,
-		PublicKeyOverride: chavePublica(t),
+		PublicKeyOverride: publicKey(t),
 		SO:                runtime.GOOS,
 		Arch:              runtime.GOARCH,
 	}
 }
 
-// binarioDeTeste is a copy that can be replaced without touching anything
+// testBinary is a copy that can be replaced without touching anything
 // real. Applying an update over the test runner's own binary would be a test
 // that breaks the machine it runs on.
-func binarioDeTeste(t *testing.T) string {
+func testBinary(t *testing.T) string {
 	t.Helper()
 	caminho := filepath.Join(t.TempDir(), "ngx")
 	require.NoError(t, os.WriteFile(caminho, []byte("#!/bin/sh\necho antigo\n"), 0o755))
@@ -70,25 +70,25 @@ func contexto(t *testing.T) context.Context {
 // binary -- and then RUN what came out. Checking only that the file changed
 // would pass on a corrupted download.
 func TestUpdateRealAplicaEProduzBinarioQueRoda(t *testing.T) {
-	destino := binarioDeTeste(t)
+	destino := testBinary(t)
 
 	res, err := update.Run(contexto(t), opcoes(t, destino))
 	require.NoError(t, err)
 	require.True(t, res.Updated, "there is a stable release newer than 0.0.1")
 	require.True(t, strings.HasPrefix(res.RemoteVersion, "v"), "GitHub tags carry the v")
 
-	saida, err := exec.Command(destino, "version", "--json").Output()
+	output, err := exec.Command(destino, "version", "--json").Output()
 	require.NoError(t, err, "the installed binary has to run")
-	assert.Contains(t, string(saida), strings.TrimPrefix(res.RemoteVersion, "v"),
+	assert.Contains(t, string(output), strings.TrimPrefix(res.RemoteVersion, "v"),
 		"the version reported by the binary has to be the one that was downloaded")
 }
 
 // --check must not touch anything. The assertion is on the file's content,
 // not on the returned flag: a bug that downloaded and swapped while still
 // reporting Updated=false would pass a flag-only check.
-func TestUpdateRealComCheckNaoTocaNoBinario(t *testing.T) {
-	destino := binarioDeTeste(t)
-	antes, err := os.ReadFile(destino)
+func TestARealCheckOnlyUpdateDoesNotTouchTheBinary(t *testing.T) {
+	destino := testBinary(t)
+	before, err := os.ReadFile(destino)
 	require.NoError(t, err)
 
 	opts := opcoes(t, destino)
@@ -99,9 +99,9 @@ func TestUpdateRealComCheckNaoTocaNoBinario(t *testing.T) {
 	assert.True(t, res.Available, "0.0.1 is older than any published release")
 	assert.False(t, res.Updated)
 
-	depois, err := os.ReadFile(destino)
+	after, err := os.ReadFile(destino)
 	require.NoError(t, err)
-	assert.Equal(t, antes, depois, "--check cannot write")
+	assert.Equal(t, before, after, "--check cannot write")
 }
 
 // The beta channel has to see the prereleases that the stable channel hides.
@@ -109,7 +109,7 @@ func TestUpdateRealComCheckNaoTocaNoBinario(t *testing.T) {
 // own, and it is invisible against a fake server that returns whatever it is
 // told to.
 func TestUpdateRealCanalBetaEnxergaPreLancamento(t *testing.T) {
-	destino := binarioDeTeste(t)
+	destino := testBinary(t)
 
 	opts := opcoes(t, destino)
 	opts.CheckOnly = true
@@ -132,8 +132,8 @@ func TestUpdateRealCanalBetaEnxergaPreLancamento(t *testing.T) {
 // halfway leaves the user with no working ngx, which is worse than an update
 // that never runs.
 func TestUpdateRealVersaoInexistentePreservaOBinario(t *testing.T) {
-	destino := binarioDeTeste(t)
-	antes, err := os.ReadFile(destino)
+	destino := testBinary(t)
+	before, err := os.ReadFile(destino)
 	require.NoError(t, err)
 
 	opts := opcoes(t, destino)
@@ -145,17 +145,17 @@ func TestUpdateRealVersaoInexistentePreservaOBinario(t *testing.T) {
 	require.True(t, errors.As(err, &tipado), "the refusal has to be typed")
 	assert.Equal(t, update.CodeReleaseMissing, tipado.Diag.Code)
 
-	depois, err := os.ReadFile(destino)
+	after, err := os.ReadFile(destino)
 	require.NoError(t, err)
-	assert.Equal(t, antes, depois, "a failed update cannot leave the binary damaged")
+	assert.Equal(t, before, after, "a failed update cannot leave the binary damaged")
 }
 
 // A key that is not the project's has to make verification fail, and the
 // binary has to survive. Without this the whole signature chain could be
 // inert -- accepting anything -- and every other test here would still pass.
-func TestUpdateRealChaveErradaRecusaEPreservaOBinario(t *testing.T) {
-	destino := binarioDeTeste(t)
-	antes, err := os.ReadFile(destino)
+func TestARealUpdateWithTheWrongKeyRefusesAndPreservesTheBinary(t *testing.T) {
+	destino := testBinary(t)
+	before, err := os.ReadFile(destino)
 	require.NoError(t, err)
 
 	opts := opcoes(t, destino)
@@ -164,7 +164,7 @@ func TestUpdateRealChaveErradaRecusaEPreservaOBinario(t *testing.T) {
 	_, err = update.Run(contexto(t), opts)
 	require.Error(t, err, "an artifact signed by another key cannot be accepted")
 
-	depois, err := os.ReadFile(destino)
+	after, err := os.ReadFile(destino)
 	require.NoError(t, err)
-	assert.Equal(t, antes, depois)
+	assert.Equal(t, before, after)
 }
