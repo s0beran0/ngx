@@ -663,7 +663,26 @@ func knownDivergence(pe config.ParseError) bool {
 		// "is not terminated by \";\"" check (analyze.go:224-227) does not
 		// run under SkipDirectiveArgsCheck (analyze.go:202-204). Only the "}"
 		// diverges. See TestDivergenceDirectiveWithoutSemicolon.
-		return pe.Token == "}"
+		if pe.Token == "}" {
+			return true
+		}
+
+		// A Lua block preceded by a comment on the same line, found by the
+		// fuzz: `set_by_lua_block $x #c {return 1}`. crossplane's Lua hook
+		// takes over at the directive name and never sees that the "#" has
+		// commented out the rest of the line -- including the "{" -- so it
+		// accepts a block that does not exist.
+		//
+		// Our refusal is the correct one, and this is not reasoning: OpenResty
+		// 1.27.1.2 refuses the same file with `unexpected "}"`, verified in
+		// the Lua bench. The "#" comments to end of line, so the block never
+		// opens.
+		//
+		// The token is what the tokeniser found where a ";" or "{" belonged,
+		// which for this shape is the brace-delimited text the comment
+		// swallowed. Narrow on purpose: any other token in this position is
+		// still a bug.
+		return strings.HasPrefix(pe.Token, "{") && strings.HasSuffix(pe.Token, "}")
 
 	case config.RefusalInvalidIfExpression:
 		// The validExpr guard (analyze.go:212, util.go:57-67) that
