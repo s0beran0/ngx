@@ -506,7 +506,15 @@ func TestExecuteCheckOnlyAlsoRefusesOnPackagedChannel(t *testing.T) {
 
 	require.Nil(t, res)
 	assert.Equal(t, CodePackagedInstall, codeOf(t, err))
-	assert.Contains(t, err.Error(), "apt upgrade ngx")
+
+	// --check asked "is there anything newer?", so the refusal has to answer
+	// THAT question with the command that can. Sending it to `apt upgrade`
+	// would turn a refusal into a dead end: the caller never wanted to
+	// upgrade, only to know.
+	assert.Contains(t, err.Error(), "apt list --upgradable ngx")
+	assert.NotContains(t, err.Error(), "apt upgrade ngx",
+		"the upgrade command answers a question --check did not ask")
+
 	assert.Equal(t, "ngx v0.2.0 EM USO", contentOf(t, path))
-	assert.Empty(t, c.srv.visited())
+	assert.Empty(t, c.srv.visited(), "--check on a packaged channel must not reach the network")
 }

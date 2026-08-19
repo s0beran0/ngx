@@ -50,6 +50,43 @@ not ask, does not offer `--force`.
 an unverifiable signature. A tool that finds a way around the constraint it was
 given teaches the user that the constraint is decorative.
 
+### DC3 — `--check` refuses too, but answers the question that was asked
+
+In a packaged channel `--check` does not report the newest GitHub release. That
+release is not what the package manager is able to install, so reporting it
+would invent an update the caller cannot apply — a wrong answer is worse than a
+refusal, because the caller cannot tell it is wrong.
+
+But a bare refusal answers the wrong question. `--check` asked "is there
+anything newer?", not "update me", so the refusal names the command that asks
+**that**: `brew outdated ngx`, `apt list --upgradable ngx`, `dnf check-update
+ngx`. Sending someone to `brew upgrade` when they only wanted to know turns a
+refusal into a dead end.
+
+*Also decided:* an empty channel counts as unknown and refuses. The default is
+`direct`, so empty can only come from `-ldflags -X` with no value — which is
+exactly the silent-failure mode this project already met once with the public
+key. Failing closed there costs a packager one clear error; failing open costs
+a user a corrupted installation.
+
+### DC4 — `redacted_args`, and the contract break it carries
+
+A redacted value and a literal `***` in the configuration were
+indistinguishable: both came out as `"***"`. An agent that cannot tell
+censorship from content either retries in a loop or reports the key as empty.
+Nodes now carry `redacted_args`, the indices of the arguments that were
+replaced, omitted when there are none.
+
+Making the indices mean anything required redacting **per argument** instead of
+collapsing the whole list. That is a better answer — `["Authorization", "***"]`
+keeps the header name that `["***"]` threw away — and it is a **breaking
+change** for anyone reading `args[0]` of a redacted directive.
+
+*How it is handled:* v0.1.0 declares no `schema_version`, so the field arriving
+with value **1** in 0.1.1 marks exactly this line. Anything without the field is
+pre-contract. The release notes have to state the break in words, because a
+consumer that never reads the schema version will not notice it any other way.
+
 ### DC3 — Reach comes before officialdom
 
 Channels that depend on nobody's approval come first: `.deb`/`.rpm`/`.apk`

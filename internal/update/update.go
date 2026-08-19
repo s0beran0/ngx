@@ -101,6 +101,30 @@ var upgradeCommands = map[string]string{
 	"winget":   "winget upgrade ngx",
 }
 
+// checkCommands is the counterpart for `--check`: how to ASK whether a newer
+// version exists, in a channel that ngx does not manage.
+//
+// It exists because refusing `--check` without it answers the wrong question.
+// The caller wanted to know whether it is up to date; telling it only that ngx
+// will not update leaves that unanswered, and an answer taken from the GitHub
+// releases would be worse than none -- in a packaged channel the newest release
+// is not what the package manager is able to install, so reporting it invents
+// an update the caller cannot apply.
+var checkCommands = map[string]string{
+	"homebrew": "brew outdated ngx",
+	"deb":      "apt list --upgradable ngx",
+	"rpm":      "dnf check-update ngx",
+	"aur":      "pacman -Qu ngx",
+	"scoop":    "scoop status ngx",
+	"winget":   "winget upgrade --id ngx",
+}
+
+// CheckCommand returns the command that asks about updates in this channel.
+func CheckCommand(channel string) (string, bool) {
+	cmd, ok := checkCommands[normalizeInstallChannel(channel)]
+	return cmd, ok
+}
+
 // UpgradeCommand devolve o comando de atualizacao do canal, e se o canal e
 // conhecido. "direct" nao esta na tabela: nele o comando de atualizacao e o
 // proprio `ngx update`.
@@ -148,12 +172,23 @@ func installChannelOf(opts Options) string {
 // A recusa vale inclusive para --check: num canal empacotado, a ultima release
 // no GitHub nao e a versao que aquele gerenciador tem para oferecer, entao
 // responder "ha atualizacao disponivel" seria responder outra pergunta.
-func checkInstallChannel(channel string) error {
+func checkInstallChannel(channel string, checkOnly bool) error {
 	c := normalizeInstallChannel(channel)
 	if c == InstallChannelDirect {
 		return nil
 	}
 	if cmd, ok := upgradeCommands[c]; ok {
+		// --check asked a different question -- "is there anything newer?" --
+		// so it gets the command that answers THAT one. Sending someone to
+		// `brew upgrade` when they only wanted to know is how a refusal turns
+		// into a dead end.
+		if checkOnly {
+			return newError(CodePackagedInstall,
+				"this ngx was installed through %s, so the newest release on GitHub is "+
+					"not what that package manager has to offer, and reporting it would "+
+					"invent an update you cannot apply. Run `%s` to ask %s instead",
+				c, checkCommands[c], c)
+		}
 		return newError(CodePackagedInstall,
 			"this ngx was installed through %s, which keeps track of its own versions: "+
 				"replacing the binary in place would leave that package manager pointing "+
@@ -257,7 +292,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// Primeira coisa da funcao, antes de validar flag e antes de qualquer
 	// rede: se este binario nao pode se atualizar, nada mais precisa
 	// acontecer.
-	if err := checkInstallChannel(installChannelOf(opts)); err != nil {
+	if err := checkInstallChannel(installChannelOf(opts), opts.CheckOnly); err != nil {
 		return nil, err
 	}
 
