@@ -1,0 +1,33 @@
+# Oraculo de Lua para a bancada.
+#
+# A bancada principal (Dockerfile) roda nginx 1.20.1 de Oracle Linux 9, que e a
+# forma medida em producao -- e que NAO tem lua-nginx-module: ela recusa
+# `content_by_lua_block` como diretiva desconhecida. Verificado, nao suposto.
+# Sem um segundo alvo, tudo que o projeto afirma sobre configuracao OpenResty
+# se apoia no lexer do crossplane e em raciocinio sobre sintaxe Lua, que e
+# exatamente o terreno em que esta base ja se queimou.
+#
+# Nao da para instalar lua-nginx-module na imagem principal sem trocar o
+# binario: o modulo nao existe empacotado para OL9 e o nginx de appstream nao
+# foi compilado com ele. Instalar o OpenResty ao lado significaria um segundo
+# nginx dentro da imagem que existe para reproduzir producao -- ou seja, uma
+# segunda imagem de qualquer jeito, so que escondida dentro da primeira.
+#
+# Entao esta imagem e separada e faz UMA coisa: rodar `openresty -t` sobre uma
+# configuracao. Nao tem sshd, nem usuario de teste, nem segredo, nem os 130
+# arquivos -- nada disso pertence ao caminho Lua, e a imagem oficial alpine sai
+# em dezenas de MB contra centenas da principal.
+#
+# A tag e fixada de proposito: `latest` faria o oraculo mudar sozinho um dia,
+# que e o mesmo motivo pelo qual a bancada principal desabilita o modulo nginx
+# do dnf.
+FROM openresty/openresty:1.27.1.2-0-alpine
+
+# Prova, na construcao da imagem, que o modulo que da sentido a ela esta
+# presente. Se um dia a tag mudar de conteudo, isto falha no `docker build` e
+# nao meia hora depois, dentro de um teste, como "sintaxe invalida".
+RUN openresty -V 2>&1 | grep -q -- '--add-module=../ngx_lua' \
+    || (echo "esta imagem nao tem lua-nginx-module compilado" >&2; exit 1)
+
+# O container so precisa ficar de pe para receber `docker exec ... openresty -t`.
+# A configuracao default da imagem sobe um servidor na 80, que ninguem publica.

@@ -86,6 +86,46 @@ effective configuration read from the container; the smoke test verifies this,
 and the Go integration test must point its local filesystem at that directory
 when exercising the case.
 
+## The Lua oracle, a second bench
+
+The bench above runs stock **nginx 1.20.1, which has no `lua-nginx-module`**:
+it refuses `content_by_lua_block` as an unknown directive. Measured, not
+assumed. So the fixture that gives "compatible with nginx" its meaning —
+`internal/config/testdata/syntax_surface.conf` — **cannot validate the Lua
+path at all**, and every claim about accepting OpenResty configuration used to
+rest on crossplane's lexer plus reasoning about Lua syntax.
+
+That is the hole `bench-lua` closes:
+
+```sh
+make bench-lua-up      # builds the OpenResty image and starts the container
+make bench-lua-smoke   # proves the properties of the oracle
+make bench-lua-down    # tears down the container and removes the image
+```
+
+It is a **separate** image, and deliberately so. `lua-nginx-module` is not
+packaged for Oracle Linux 9 and the appstream nginx was not compiled with it,
+so putting Lua into the main image would mean installing a second nginx binary
+inside the image whose whole purpose is reproducing production — a second
+image anyway, only hidden inside the first. This one has no `sshd`, no test
+user, no secret and none of the 130 files: it exists to answer
+`openresty -t` and nothing else.
+
+**What the oracle proves, and what it does not.** Measured on this image,
+`openresty -t` does **not compile** the Lua body: `content_by_lua_block
+{ if end }` and even `{ this is not lua !!! }` pass. The module only lexes the
+body to find where it **ends** — which is exactly the question `ngx` also
+answers. So the oracle covers the *delimitation* of the block, and nothing
+beyond it. `smoke-lua.sh` checks the oracle can still say no, otherwise the
+green would prove nothing.
+
+The Go side is `lua_oracle_test.go`, behind the `integration` build tag: one
+test runs the real `openresty -t` over `testdata/lua_surface.conf`, another
+reads the same fixture with `ngx` and checks the values, and the rest record
+the **divergences** between the two — including one where `ngx` accepts a file
+OpenResty refuses. They are tests and not prose on purpose: if crossplane fixes
+its Lua lexer upstream, the test turns red and somebody revisits the note.
+
 ## Files
 
 | File | Role |
@@ -96,6 +136,10 @@ when exercising the case.
 | `entrypoint.sh` | installs the public key, generates host keys, starts nginx and `sshd` |
 | `smoke.sh` | proves the properties above against the running container |
 | `local-trap/` | local namesake for the glob test |
+| `Dockerfile.openresty` | image of the Lua oracle: OpenResty 1.27.1.2 (alpine), pinned |
+| `smoke-lua.sh` | proves the properties of the Lua oracle |
+| `testdata/lua_surface.conf` | Lua syntax surface, the counterpart of `syntax_surface.conf` |
+| `lua_oracle_test.go` | `integration` tests: OpenResty vs. `ngx` over that fixture |
 
 The container is disposable and runs locally only: it has no hardening, and it
 should not be exposed. What it does not have, on purpose: a root password,

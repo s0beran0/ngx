@@ -167,6 +167,18 @@ jobs:
       - name: bench smoke test
         run: make bench-smoke
 
+      # The Lua oracle is a second, separate container: the main bench runs
+      # nginx 1.20.1 with no lua-nginx-module and refuses
+      # `content_by_lua_block` as an unknown directive, so it cannot validate
+      # the OpenResty path at all. Without this step the Lua tests in
+      # test/bench skip themselves and the job stays green having proved
+      # nothing about Lua.
+      - name: bring the Lua oracle up
+        run: make bench-lua-up
+
+      - name: Lua oracle smoke test
+        run: make bench-lua-smoke
+
       - name: integration tests
         env:
           CGO_ENABLED: "1"
@@ -183,3 +195,7 @@ jobs:
       - name: tear the bench down
         if: always()
         run: make bench-down
+
+      - name: tear the Lua oracle down
+        if: always()
+        run: make bench-lua-down

@@ -12,7 +12,16 @@ BENCH_CT    := ngx-bench
 BENCH_PORT ?= 2222
 BENCH_KEY := $(BENCH_DIR)/.key/id_ed25519
 
+# The Lua oracle is a SECOND bench, and separate on purpose: the main image
+# reproduces production (nginx 1.20.1, Oracle Linux 9) and has no
+# lua-nginx-module -- it refuses `content_by_lua_block` as an unknown
+# directive. See test/bench/Dockerfile.openresty for why it is not merged into
+# the first one. Nothing here touches the targets above.
+BENCH_LUA_IMG := ngx-bench-lua
+BENCH_LUA_CT  := ngx-bench-lua
+
 .PHONY: bench-up bench-down bench-smoke bench-logs bench-shell
+.PHONY: bench-lua-up bench-lua-down bench-lua-smoke bench-lua-logs bench-lua-shell
 
 # The test key is generated, never committed.
 $(BENCH_KEY):
@@ -62,6 +71,38 @@ bench-shell:
 		-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 		-o LogLevel=ERROR ngxtest@127.0.0.1
 
+# No port is published: the only thing anyone asks of this container is
+# `docker exec ... openresty -t`, over a file written into its /tmp.
+bench-lua-up:
+	@echo "bench-lua: building the image..."
+	@docker build -f $(BENCH_DIR)/Dockerfile.openresty -t $(BENCH_LUA_IMG) $(BENCH_DIR)
+	@docker rm -f $(BENCH_LUA_CT) >/dev/null 2>&1 || true
+	@docker run -d --name $(BENCH_LUA_CT) $(BENCH_LUA_IMG) >/dev/null
+	@echo "bench-lua: waiting for the container..."
+	@for i in $$(seq 1 30); do \
+		if docker exec $(BENCH_LUA_CT) openresty -v >/dev/null 2>&1; then \
+			echo "bench-lua: up ($$(docker exec $(BENCH_LUA_CT) openresty -v 2>&1))"; \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "bench-lua: container did not answer; see 'make bench-lua-logs'" >&2; \
+	exit 1
+
+bench-lua-smoke:
+	@$(BENCH_DIR)/smoke-lua.sh $(BENCH_LUA_CT)
+
+bench-lua-down:
+	@docker rm -f $(BENCH_LUA_CT) >/dev/null 2>&1 || true
+	@docker rmi -f $(BENCH_LUA_IMG) >/dev/null 2>&1 || true
+	@echo "bench-lua: container and image removed"
+
+bench-lua-logs:
+	@docker logs $(BENCH_LUA_CT)
+
+bench-lua-shell:
+	@docker exec -it $(BENCH_LUA_CT) sh
+
 .PHONY: help build test test-race fuzz cover fmt lint verify clean
 
 # `make` with no argument lists what can be done, instead of running
@@ -81,6 +122,9 @@ help:
 	@echo "  bench-up      brings up the test container (sshd + nginx)"
 	@echo "  bench-smoke   proves the properties of the bench"
 	@echo "  bench-down    tears down and cleans the bench"
+	@echo "  bench-lua-up     brings up the Lua oracle (OpenResty container)"
+	@echo "  bench-lua-smoke  proves the properties of the Lua oracle"
+	@echo "  bench-lua-down   tears down and cleans the Lua oracle"
 	@echo "  clean         removes bin/ and coverage artifacts"
 
 build:
