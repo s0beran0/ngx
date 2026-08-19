@@ -383,6 +383,7 @@ invocation named nothing, and neither `ngx` nor the `.conf` is at fault:
     --profile         profile from ngx's configuration file
     --no-redact       show sensitive values (terminal only)
     --field           print a single value from the envelope, by dot path
+    --query           apply a jq expression to the envelope, one line per result
 ```
 
 #### `--field`: one value comes out as one value
@@ -426,6 +427,121 @@ as compact JSON on one line. Redaction is applied before the selection, so
 `--human` or `--quiet`: the first two ask for the whole envelope at the same
 time as one field, and the third would suppress exactly the value that was
 asked for.
+
+#### `--query`: jq, embedded, for everything `--field` cannot address
+
+`jq` was **not installed** on the production host this project was validated
+against — neither was `minisign`. A tool that operates a remote server should
+not require installing a second one to read its answer. So the evaluator
+([`gojq`](https://github.com/itchyny/gojq), pure Go, MIT) ships inside the
+binary: `--query` works on a machine with nothing else on it.
+
+`--field` addresses **one** value by a fixed path. The moment the question is
+"all of them", it has no answer — and that is most questions about an nginx
+configuration:
+
+```console
+$ ./bin/ngx --field data.summary.servers inspect -c internal/cli/testdata/filters/nginx.conf
+4
+$ ./bin/ngx --query '.. | objects | select(.directive == "listen") | .args[0]' \
+    inspect --full-tree -c internal/cli/testdata/filters/nginx.conf
+80
+80
+443
+8080
+```
+
+There is no dot path that produces those four lines. The expression can also
+join fields across the tree, which is how "which file declares which name" is
+answered in one call:
+
+```console
+$ ./bin/ngx --query '.. | objects | select(.directive == "server_name") | "\(.file)\t\(.args[0])"' \
+    inspect --full-tree -c internal/cli/testdata/filters/nginx.conf
+internal/cli/testdata/filters/nginx.conf	legacy.example.com
+internal/cli/testdata/filters/sites/portal.conf	portal.example.com
+internal/cli/testdata/filters/sites/portal.conf	portal.example.com
+internal/cli/testdata/filters/sites-extra/portal.conf	portal-admin.example.com
+```
+
+**The expression runs on the redacted envelope**, never on the tree in memory.
+Redaction happens in the renderer, so a query that reads the tree directly
+would be a new flag walking around the whole redactor. Pointing `--query`
+straight at a private key returns what `--json` would have returned:
+
+```console
+$ ./bin/ngx --query '.. | objects | select(.directive == "ssl_certificate_key") | .args[0]' \
+    inspect --full-tree -c internal/cli/testdata/redaction.conf
+***
+```
+
+`--no-redact` still governs that, and still only on a terminal.
+
+Output follows `--field`'s rules, because it is the same code: a scalar comes
+out raw with no quotes, and an object or a list comes out as compact JSON. What
+is new is that gojq may produce **several** values — one line per value, always.
+
+A valid expression that matches nothing is **exit 0 with an empty stdout**.
+That is deliberate and it is *not* `--field`'s missing-path behaviour: in jq's
+semantics a wrong path yields `null`, which is a line, so nothing is only ever
+produced by a filter that deliberately excluded everything — "no server
+matches" is an answer, and failing on it would break every legitimate
+zero-match query under `set -e`.
+
+```console
+$ ./bin/ngx --query '.data.sumary' inspect -c internal/cli/testdata/filters/nginx.conf
+null
+$ ./bin/ngx --query '.. | objects | select(.directive == "grpc_pass") | .args[0]' \
+    inspect --full-tree -c internal/cli/testdata/filters/nginx.conf
+$ echo $?
+0
+```
+
+One line per value is what makes that readable: zero lines means zero values.
+A caller that needs a value even in the empty case wraps the expression —
+`--query '[ ... ] | length'` always prints a number.
+
+An expression that does not parse is a usage error, with gojq's own message,
+refused before the command even runs:
+
+```console
+$ ./bin/ngx --query '.data |' inspect -c internal/cli/testdata/filters/nginx.conf
+{"ok":false,"command":"inspect","schema_version":1,"ngx_version":"0.1.0-dev","data":null,"diagnostics":[{"severity":"error","code":"NGX-0002","message":"--query: unexpected EOF"}],"meta":{"duration_ms":0}}
+$ echo $?
+2
+```
+
+The refusal comes out as a whole envelope, not through the broken expression —
+filtering it through the very thing that is wrong would leave no envelope at
+all.
+
+An expression that parses but fails while running (indexing a string, say) is
+exit 2 as well, with **nothing** on stdout — never a half-written answer:
+
+```console
+$ ./bin/ngx --query '.command.length' inspect -c internal/cli/testdata/filters/nginx.conf
+--query: expected an object but got: string ("inspect")
+$ echo $?
+2
+```
+
+`halt_error` lands there too. A query never chooses ngx's exit code: that code
+says what happened to the nginx operation, and letting an expression overwrite
+it would make a successful read indistinguishable from a failed one.
+
+Like `--field`, it reads the **failure** envelope just the same, and the exit
+code stays the failure's:
+
+```console
+$ ./bin/ngx --query '.diagnostics[] | "\(.code)\t\(.message)"' inspect -c /does/not/exist.conf
+NGX-0001	while parsing /does/not/exist.conf: open /does/not/exist.conf: no such file or directory
+$ echo $?
+1
+```
+
+`--query` is refused together with `--field` (two projections of the same
+output, no coherent answer) and with `--json`, `--human` or `--quiet`, for the
+same reasons `--field` is.
 
 The remote access flags (`--host`, `--user`, `--port`, `--key`,
 `--known-hosts`, `--insecure-host-key`, `--sudo`) are documented in

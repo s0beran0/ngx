@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	aead.dev/minisign v0.3.0
 	github.com/Microsoft/go-winio v0.6.2
+	github.com/itchyny/gojq v0.12.19
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/knadh/koanf/parsers/yaml v1.1.1
 	github.com/knadh/koanf/providers/file v1.2.1
@@ -14,7 +15,10 @@ require (
 	golang.org/x/crypto v0.55.0
 )
 
-require github.com/rogpeppe/go-internal v1.9.0 // indirect
+require (
+	github.com/itchyny/timefmt-go v0.1.8 // indirect
+	github.com/rogpeppe/go-internal v1.9.0 // indirect
+)
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect

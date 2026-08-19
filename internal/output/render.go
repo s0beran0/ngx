@@ -65,6 +65,21 @@ type Renderer struct {
 	// V=$(ngx --field x.y status) and the script would carry on believing
 	// it worked.
 	Field string
+
+	// Query is the jq expression of --query. When it is not empty, Render
+	// applies it to the envelope and writes one line per result instead of
+	// the envelope itself.
+	//
+	// It exists because jq was NOT installed on the production host this
+	// project was validated against, and a tool that operates a remote
+	// server should not require installing a second one to read its
+	// answer. Everything --field cannot do -- projecting over a list,
+	// filtering, counting -- lands here.
+	//
+	// It lives beside Field, at the same layer and after redaction, for
+	// the same reason: the expression must read the envelope that WOULD
+	// have gone out, never the tree in memory.
+	Query string
 }
 
 // Render writes the envelope in the resolved format. It does not mutate the
@@ -82,7 +97,7 @@ func (r *Renderer) Render(env *Envelope) error {
 	// and swallowing it would turn the escape silent, which is exactly what
 	// DR1 forbids. Whoever asks for --quiet wants less noise, not fewer
 	// alerts.
-	if r.Quiet && r.Field == "" && env.OK && !hasWarningOrWorse(env.Diagnostics) {
+	if r.Quiet && r.Field == "" && r.Query == "" && env.OK && !hasWarningOrWorse(env.Diagnostics) {
 		return nil
 	}
 
@@ -98,8 +113,16 @@ func (r *Renderer) Render(env *Envelope) error {
 	out := *env
 	out.Data = data
 
-	// Selection comes after redaction: --field reads the envelope that
-	// would have been printed, so it is not a way around the protection.
+	// Selection comes after redaction: --field and --query read the
+	// envelope that would have been printed, so neither is a way around the
+	// protection.
+	//
+	// The two are mutually exclusive at the flag layer; the order here only
+	// decides what happens to a Renderer assembled by hand with both filled
+	// in, and --query is the more expressive of the two.
+	if r.Query != "" {
+		return r.renderQuery(&out)
+	}
 	if r.Field != "" {
 		return r.renderField(&out)
 	}
@@ -232,19 +255,9 @@ func (r *Renderer) renderField(env *Envelope) error {
 // omitted from the JSON does not exist for --field either, which is coherent
 // with "an unavailable field is omitted, never estimated".
 func selectField(env *Envelope, path string) (any, error) {
-	raw, err := json.Marshal(env)
+	doc, err := envelopeDocument(env)
 	if err != nil {
-		return nil, Internal(err, "failed to serialize the output")
-	}
-
-	// UseNumber keeps the literal from the JSON: without it every number
-	// would go through float64 and a duration of 30000 ms would reach the
-	// shell as 3e+04.
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var doc any
-	if err := dec.Decode(&doc); err != nil {
-		return nil, Internal(err, "failed to serialize the output")
+		return nil, err
 	}
 
 	current := doc
@@ -268,6 +281,31 @@ func selectField(env *Envelope, path string) (any, error) {
 		}
 	}
 	return current, nil
+}
+
+// envelopeDocument turns the envelope into the generic JSON document that
+// --field navigates and --query runs against. Both work over the JSON shape,
+// not over the Go structs by reflection, because the JSON is the contract:
+// the path or expression that is typed is the same one read in the output of
+// --json, json tags and omitempty included.
+//
+// UseNumber keeps the literal from the JSON: without it every number would go
+// through float64 and a duration of 30000 ms would reach the shell as 3e+04.
+// gojq understands json.Number natively (see its encoder and operators), so
+// the same document serves both flags.
+func envelopeDocument(env *Envelope) (any, error) {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return nil, Internal(err, "failed to serialize the output")
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return nil, Internal(err, "failed to serialize the output")
+	}
+	return doc, nil
 }
 
 func errNoSuchField(path string) *Error {

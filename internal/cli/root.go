@@ -43,6 +43,12 @@ type GlobalFlags struct {
 	// envelope, raw, instead of the envelope itself.
 	Field string
 
+	// Query is the jq expression of --query: it applies the expression to
+	// the envelope and prints one line per result. jq is not a dependency
+	// -- the evaluator is embedded -- because jq was not installed on the
+	// host this project was validated against.
+	Query string
+
 	// Remote access flags. Without Host none of them is used and the target
 	// is the local machine — the usual behavior.
 	Host            string
@@ -222,6 +228,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 	p.StringVar(&f.Profile, "profile", "", "profile from ngx's configuration file")
 	p.BoolVar(&f.NoRedact, "no-redact", false, "show sensitive values (terminal only)")
 	p.StringVar(&f.Field, "field", "", "print a single value from the envelope, by dot path (e.g. data.nginx.version)")
+	p.StringVar(&f.Query, "query", "", "apply a jq expression to the envelope, one line per result (e.g. '.data.config[].path')")
 	registerConnectionFlags(p, f)
 
 	root.AddCommand(newVersionCmd(ctx))
@@ -255,31 +262,59 @@ func prepare(ctx *Context, cmd *cobra.Command) error {
 		return output.Usage("--json and --human are mutually exclusive")
 	}
 
+	// --field and --query both take something OUT of the envelope, each in
+	// its own shape, and there is no coherent answer to being asked for two
+	// projections of the same output at once. Whichever won silently would
+	// make the other flag look broken.
+	if f.Field != "" && f.Query != "" {
+		return output.Usage("--field and --query are mutually exclusive")
+	}
+
 	// The flags that choose how the envelope is presented conflict with
-	// asking for a single value out of it: --json and --human have no
-	// coherent answer to "one field and the whole envelope", and --quiet
-	// would suppress exactly the value that was asked for. The check is
-	// here, on the flags, and not in the renderer: output.format also comes
-	// from the configuration file, where it is an ambient default that
-	// --field legitimately overrides.
-	if f.Field != "" {
+	// asking for a projection of it: --json and --human have no coherent
+	// answer to "one value and the whole envelope", and --quiet would
+	// suppress exactly what was asked for. The check is here, on the flags,
+	// and not in the renderer: output.format also comes from the
+	// configuration file, where it is an ambient default that --field and
+	// --query legitimately override.
+	for _, sel := range []struct{ flag, value string }{
+		{"--field", f.Field},
+		{"--query", f.Query},
+	} {
+		if sel.value == "" {
+			continue
+		}
 		switch {
 		case f.JSON:
-			return output.Usage("--field and --json are mutually exclusive")
+			return output.Usage("%s and --json are mutually exclusive", sel.flag)
 		case f.Human:
-			return output.Usage("--field and --human are mutually exclusive")
+			return output.Usage("%s and --human are mutually exclusive", sel.flag)
 		case f.Quiet:
-			return output.Usage("--field and --quiet are mutually exclusive")
+			return output.Usage("%s and --quiet are mutually exclusive", sel.flag)
 		}
 	}
 
-	// The renderer learns about --field before anything else can fail:
-	// whatever prepare rejects from here on is rendered through the
-	// selection too, so the flag also works when the failure happens before
-	// the command runs. The refusals above are the exception, on purpose --
-	// they are about --field itself, and filtering them through the rejected
-	// combination would hide the reason for the refusal.
+	// The expression is parsed BEFORE the renderer is told about it, and
+	// before the transport opens. Before the transport, so a typo does not
+	// cost an SSH handshake; before the renderer, so the refusal is not
+	// filtered through the very expression that is broken -- it would come
+	// out of renderQuery's error path with no envelope at all, instead of
+	// the usage envelope on stdout that every other refusal produces.
+	if f.Query != "" {
+		if err := output.ValidateQuery(f.Query); err != nil {
+			return err
+		}
+	}
+
+	// The renderer learns about --field/--query before anything else can
+	// fail: whatever prepare rejects from here on is rendered through the
+	// projection too, so the flags also work when the failure happens
+	// before the command runs. The refusals above are the exception, on
+	// purpose -- they are about the flags themselves, and filtering them
+	// through the rejected combination would hide the reason for the
+	// refusal.
 	ctx.Renderer.Field = f.Field
+	ctx.Renderer.Query = f.Query
 
 	s, err := settings.Load(ctx.GlobalSettingsPath, ctx.LocalSettingsPath)
 	if err != nil {
