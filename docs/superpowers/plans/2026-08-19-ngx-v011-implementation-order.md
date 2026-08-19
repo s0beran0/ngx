@@ -266,8 +266,14 @@ only at the documentation and the release.
 
 ### Phase 1 — Envelope contract  ‖  P1 install channel
 
-R1: schema version, redaction distinguishable from absence, truncation visible
-in `data`.
+R1: schema version, and a redacted value distinguishable from an absent one.
+
+**Truncation moved out of this phase.** The plan claimed a truncated tree looks
+complete; verified against the binary, it does not — a failed read yields
+`ok:false` with `data:null`, no partial tree at all. Partiality only becomes
+reachable when the filters of Phase 2 make it deliberate, so the marker belongs
+there, next to what creates it. Recorded rather than silently dropped: the edge
+case was real, my placement of it was not.
 
 First because it is the only work here that gets **more expensive by waiting**:
 every day, one more consumer depends on the current shape.
@@ -279,6 +285,11 @@ rather than a design question.
 
 R2: `--file` and `--server` on `inspect`, matching the whole path. `inspect`
 with no filter returns the summary.
+
+R2b: **partiality marked inside `data`**, since R2 is what creates it. A
+filtered tree is a subset by design, and an agent reading only `data` has to
+trip over that fact where it is looking — together with the scope rule for
+`config_hash` from H2.
 
 R3: `--query` with embedded `gojq`. Discharges A2 on its own.
 
