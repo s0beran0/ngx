@@ -142,14 +142,34 @@ later does not require editing the workflow.
 
 ### `WINGET_PKGS_TOKEN` — WinGet pull request
 
+**This is the one channel that cannot use a fine-grained token, and the reason
+is worth stating because the settings page will not.**
+
+A fine-grained token acts only on the repositories it is scoped to. The pull
+request is created *on* `microsoft/winget-pkgs` — the API call goes to the base
+repository, not to the fork — and no one outside Microsoft can scope a token
+there. A fine-grained token showing **Pull requests: Read and write** against
+your fork therefore looks correct, passes review, and is answered with `403`.
+Microsoft's own tooling says the same: `wingetcreate` requires a classic token,
+and fine-grained tokens are not supported.
+
 1. Fork `microsoft/winget-pkgs` into `s0beran0/winget-pkgs`. The fork is
    required: a pull request has to come from a branch of a repository you can
    push to.
-2. Fine-grained token scoped to that fork, **Contents: Read and write** and
-   **Pull requests: Read and write**.
+2. Create a **classic** token (*Settings → Developer settings → Personal access
+   tokens → Tokens (classic)*) with the single scope **`public_repo`**.
 3. Save it as `WINGET_PKGS_TOKEN`.
-4. On the first release after that, watch the PR — Microsoft's validation
-   comments on it and the merge is manual.
+4. On the first release after that, watch the PR — you have to sign Microsoft's
+   CLA on it, their validation comments on it, and the merge is manual.
+
+`public_repo` is broader than anything else here: it can write to every public
+repository the account owns, and it is the narrowest scope that does the job —
+`repo` would additionally reach the private ones. Give this token a short
+expiry and treat it as the one to rotate first.
+
+Run the `check credentials` workflow after setting it. It is the only way to
+tell the working case from the broken one, because both look identical
+everywhere else.
 
 ### `AUR_SSH_KEY` — Arch User Repository
 
