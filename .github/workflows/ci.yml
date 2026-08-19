@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual trigger. Without it there is no way to re-run CI on demand -- for
+  # instance right after flipping NGX_CI_INTEGRATION, which changes what runs
+  # without changing a single file.
+  workflow_dispatch:
 
 permissions:
   contents: read
