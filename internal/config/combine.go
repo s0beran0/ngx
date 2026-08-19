@@ -204,3 +204,79 @@ func matchesInclude(path, pattern, configDir string) bool {
 	}
 	return false
 }
+
+// IncludeAncestors maps each file of the tree to the block directives that
+// enclose it once the includes are resolved.
+//
+// It exists because the parsed tree is per FILE and nginx nesting is not: on
+// the layout every distribution ships, a server block lives in
+// sites-enabled/x.conf, and the "http" that contains it is written in
+// nginx.conf. A question asked about the nesting -- "every server inside
+// http", which is what tells an HTTP virtual host from a stream TCP proxy --
+// would come back empty against the raw tree, which is the worst kind of
+// wrong answer: an empty list that looks like a fact.
+//
+// The value is the SET of enclosing block names, not a path: `ngx get --in`
+// tests membership, and a file pulled in from two different places has two
+// chains with no reason to prefer either. The order is the one the resolution
+// reaches them in, so the result is deterministic.
+//
+// The resolution reuses the same matching as Combine (matchesInclude), rather
+// than a second reading of the include patterns that would be free to
+// disagree with it. Files that no include reaches -- the top-level one
+// included -- map to nothing, which is correct: nothing encloses them.
+func IncludeAncestors(t *Tree) map[string][]string {
+	out := map[string][]string{}
+	if len(t.Files) == 0 {
+		return out
+	}
+	c := &combiner{
+		files:     t.Files,
+		visited:   map[string]bool{},
+		configDir: filepath.Dir(t.Files[0].Path),
+	}
+	c.collectAncestors(t.Files[0], nil, out)
+	return out
+}
+
+// collectAncestors walks one file, descending into blocks and through
+// includes. A circular include stops the descent instead of failing: this is
+// a helper for a question about scope, and a configuration that does not even
+// load is a problem for Parse and for Combine to report, not for this to
+// crash on.
+func (c *combiner) collectAncestors(f *File, ancestors []string, out map[string][]string) {
+	if c.visited[f.Path] {
+		return
+	}
+	c.visited[f.Path] = true
+	defer delete(c.visited, f.Path)
+
+	var walk func(nodes []*Node, ancestors []string)
+	walk = func(nodes []*Node, ancestors []string) {
+		for _, n := range nodes {
+			if n.Directive == "include" {
+				for _, target := range c.filesForInclude(n) {
+					addAncestors(out, target.Path, ancestors)
+					c.collectAncestors(target, ancestors, out)
+				}
+				continue
+			}
+			if n.HasBlock() {
+				walk(n.Block, append(slices.Clone(ancestors), n.Directive))
+			}
+		}
+	}
+	walk(f.Nodes, ancestors)
+}
+
+func addAncestors(out map[string][]string, path string, ancestors []string) {
+	current := out[path]
+	for _, a := range ancestors {
+		if !slices.Contains(current, a) {
+			current = append(current, a)
+		}
+	}
+	// The entry is written even when empty, so that a file included at the
+	// top level is recorded as reached and not merely as absent.
+	out[path] = current
+}

@@ -253,6 +253,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 
 	root.AddCommand(newVersionCmd(ctx))
 	root.AddCommand(newInspectCmd(ctx))
+	root.AddCommand(newGetCmd(ctx))
 	root.AddCommand(newTestCmd(ctx))
 	root.AddCommand(newStatusCmd(ctx))
 	root.AddCommand(newUpdateCmd(ctx))

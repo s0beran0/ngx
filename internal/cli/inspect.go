@@ -50,18 +50,34 @@ type InspectData struct {
 // drops meta.config_hash entirely, and says here that it did, rather than
 // leaving the caller to guess why a field it relies on went missing.
 type Scope struct {
-	Partial           bool         `json:"partial"`
-	Filters           ScopeFilters `json:"filters"`
-	FilesEmitted      int          `json:"files_emitted"`
-	ConfigHashOmitted bool         `json:"config_hash_omitted"`
+	Partial bool         `json:"partial"`
+	Filters ScopeFilters `json:"filters"`
+	// FilesEmitted counts the files the answer DRAWS FROM: for inspect the
+	// files in data.config, for get the distinct files the matched nodes
+	// came from. It is the same fact in both -- how much of the read
+	// configuration is represented here -- and it is what tells a narrow
+	// answer from a small configuration when read beside summary.files.
+	FilesEmitted      int  `json:"files_emitted"`
+	ConfigHashOmitted bool `json:"config_hash_omitted"`
 }
 
 // ScopeFilters echoes the filters that produced the subset, so the caller can
 // tell a narrow answer from a small configuration without keeping the command
 // line around.
+//
+// It carries the flags of BOTH commands: inspect narrows by place (--file,
+// --server) and get narrows by what is written (--directive, --in, --value).
+// One struct rather than two because scope means the same thing in both
+// answers -- "this is a subset, and here is what defines it" -- and a
+// consumer reading data.scope should not have to branch on the command to
+// know which shape it got. Every field is omitempty, so an inspect answer
+// still shows only the two it uses.
 type ScopeFilters struct {
-	File   string `json:"file,omitempty"`
-	Server string `json:"server,omitempty"`
+	File      string `json:"file,omitempty"`
+	Server    string `json:"server,omitempty"`
+	Directive string `json:"directive,omitempty"`
+	In        string `json:"in,omitempty"`
+	Value     string `json:"value,omitempty"`
 }
 
 // Redacted returns a copy with the sensitive values replaced. The copy is deep

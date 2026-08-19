@@ -33,11 +33,15 @@ a design**: `ngx` is meant to edit and create `.conf` files, and v0.2 brings
 mutation with plan/apply and rollback.
 
 v0.1 ships without any write path on purpose. The two riskiest bets of the
-project — the selector language and the stability of node IDs — get validated
-first, so that when a code path capable of writing to a production `.conf`
-finally exists, it is built on parts that were already proven. Shipping the
-writer first would mean discovering a parser bug by corrupting somebody's
-server.
+project — how a caller addresses a node, and the stability of node IDs — get
+validated first, so that when a code path capable of writing to a production
+`.conf` finally exists, it is built on parts that were already proven.
+Shipping the writer first would mean discovering a parser bug by corrupting
+somebody's server.
+
+The first of those two was settled by *removing* something: the selector
+expression of the design became the flat flags of [`ngx get`](#ngx-get).
+`--directive listen` cannot be subtly wrong, and `http.server.listen` can.
 
 The architecture already carries what writing needs: every node holds byte
 spans (`Span` for the whole directive, `HeadSpan` for name and arguments),
@@ -301,6 +305,113 @@ optimistic locking — so a filtered answer never carries one, and
 files above, of which one came out), which is what makes it comparable between
 a filtered call and an unfiltered one. `scope.files_emitted` is how much came
 out.
+
+### `ngx get`
+
+`inspect` answers "how is this configured?". `get` answers "where is this
+directive?" — every occurrence of one directive, as a flat list, without
+reading the tree to find them by hand:
+
+```console
+$ ./bin/ngx get --directive listen -c internal/cli/testdata/filters/nginx.conf --query '.data.matches[] | "\(.file):\(.line) \(.args | join(" "))"'
+internal/cli/testdata/filters/nginx.conf:8 80
+internal/cli/testdata/filters/sites/portal.conf:2 80
+internal/cli/testdata/filters/sites/portal.conf:8 443 ssl
+internal/cli/testdata/filters/sites-extra/portal.conf:2 8080
+```
+
+The flags are **flat**: `--directive`, `--in`, `--value`. There is no selector
+language, and the absence is deliberate — `--directive listen` cannot be
+subtly wrong, because there is nothing in it to be wrong about, while
+`http.server.listen` can be: it can name a nesting this configuration writes
+differently and come back empty with no way to tell that from "there is no
+`listen`".
+
+The three narrow in that order, and each combines with the next as AND:
+
+| flag | means | matching |
+| --- | --- | --- |
+| `--directive` | the directive name (required) | exact |
+| `--in` | a block that encloses it, at **any** depth and **across includes** | exact |
+| `--value` | one of its arguments | exact |
+
+`--in` reaching across includes is what makes it usable on the layout every
+distribution ships: the `http` that contains a server block is written in
+`nginx.conf`, and the block lives in a file it includes.
+
+`--value` is exact against a single argument, never a substring over the
+joined arguments: `listen 443 ssl` has an argument `443` and an argument
+`ssl`, and a substring rule would make `--value 80` match `listen 8080`. Being
+strict is what makes the answer trustworthy; the diagnostic below is what
+keeps it usable.
+
+`--file`, `--server`, `--field`, `--query` and every `--format` mean here
+exactly what they mean on `inspect`. A flat result is what `--format table`
+was waiting for:
+
+```console
+$ ./bin/ngx get --directive server_name --value portal.example.com --format table -c internal/cli/testdata/filters/nginx.conf
+# info: partial result: data.matches holds only the nodes the flags name, and meta.config_hash is omitted because it would be a valid hash of a subset
+id	file	line	directive	args
+s0.d1	internal/cli/testdata/filters/sites/portal.conf	3	server_name	portal.example.com
+s1.d1	internal/cli/testdata/filters/sites/portal.conf	9	server_name	portal.example.com
+```
+
+A match that opens a block, or an argument that holds a space, is **refused**
+rather than flattened into a row: the first would drop what is inside the
+block, the second would turn one directive's two arguments into three columns'
+worth of meaning, and neither would say so. `--format nginx` is the answer for
+those — it cuts the bytes of the matched node out of the file it came from,
+redaction included.
+
+#### The node you get is the node `inspect` has
+
+A node returned by `get` is **byte-identical** to that same node inside
+`inspect --full-tree` — same spans, same id, same redaction:
+
+```console
+$ ./bin/ngx get --directive listen --in server -c internal/cli/testdata/example.conf | jq -c '.data.matches[0], .data.scope'
+{"directive":"listen","args":["443","ssl"],"file":"internal/cli/testdata/example.conf","line":5,"column":9,"span":{"start":39,"end":54},"head_span":{"start":39,"end":53},"arg_spans":[{"start":46,"end":49},{"start":50,"end":53}],"id":"h.s0.d0"}
+{"partial":true,"filters":{"directive":"listen","in":"server"},"files_emitted":1,"config_hash_omitted":true}
+```
+
+That is a property test, not a promise: the suite enumerates every fixture and
+every directive name in it, and compares the bytes. It is what keeps the two
+commands from drifting into two truths — without it, `get` becomes a second
+parser by accident.
+
+Every result of `get` is a subset by definition, so `data.scope` is always
+present and `meta.config_hash` is always omitted, for the reason the filtered
+`inspect` omits it.
+
+#### Nothing matched is an answer, not an error
+
+```console
+$ ./bin/ngx get --directive lsiten -c internal/cli/testdata/example.conf | jq -c '.ok, .data.matches, .diagnostics[0]'
+true
+[]
+{"severity":"info","code":"NGX-0106","message":"--directive \"lsiten\" matches no directive. In scope: events, http, server, listen, server_name, ssl_certificate_key, location, proxy_pass, access_log, upstream"}
+```
+
+Exit **0**, `ok: true`, and an empty list rather than `null`. An agent that
+treated "there is no `listen` in this file" as a failure would retry a question
+that has been answered.
+
+The diagnostic says what **was** there, because an empty result and a misspelt
+name are the same output otherwise. Which of the three flags emptied the
+result gets its own code, so the caller knows which one to change:
+`NGX-0106` for `--directive`, `NGX-0107` for `--in` (and it names the blocks
+that *do* enclose the directive), `NGX-0108` for `--value` (and it lists the
+values that were found).
+
+`--file` and `--server` are the exception, and stay exit 2 as on `inspect`:
+there the caller named a **place** that does not exist, which is a different
+failure from asking about a directive that is not there.
+
+> `get` reads the whole configuration. `--file` narrows what is **searched and
+> emitted**, not what is read — pruning the read is not implemented yet, and
+> `--directive` could not use it anyway: knowing which files hold a directive
+> means reading them.
 
 ### `ngx test`
 

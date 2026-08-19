@@ -202,3 +202,35 @@ func TestCombineDoesNotShareArgsWithOriginalTree(t *testing.T) {
 	require.Equal(t, "legacy.example.com", legacyOriginal.Args[0],
 		"mutating Args of the combined tree must not affect the original tree")
 }
+
+// The nesting of nginx does not live inside one file: on the layout every
+// distribution ships, the "http" that contains a server block is written in
+// nginx.conf and the block lives in a file it includes. IncludeAncestors is
+// what lets a question about the nesting be answered without combining the
+// tree -- combining loses the source text and the per-file spans with it.
+func TestIncludeAncestorsCrossesTheIncludes(t *testing.T) {
+	ancestors := config.IncludeAncestors(parseCombine(t))
+
+	require.Equal(t, []string{"http"},
+		ancestors[filepath.Join("testdata", "combine", "conf.d", "api.conf")])
+	// Two levels down: the snippet is included by a server that the http of
+	// the top-level file contains, so both names apply to it.
+	require.Equal(t, []string{"http", "server"},
+		ancestors[filepath.Join("testdata", "combine", "snippets", "proxy.conf")])
+}
+
+// The top-level file is enclosed by nothing, and saying otherwise would be
+// inventing a block that is not written anywhere.
+func TestIncludeAncestorsLeavesTheTopFileOut(t *testing.T) {
+	ancestors := config.IncludeAncestors(parseCombine(t))
+
+	_, present := ancestors[filepath.Join("testdata", "combine", "nginx.conf")]
+	require.False(t, present)
+}
+
+// An empty tree yields an empty map and not a nil one, for the reason every
+// list in this project serializes as []: a caller that indexes the result
+// should not have to check first.
+func TestIncludeAncestorsOfAnEmptyTree(t *testing.T) {
+	require.NotNil(t, config.IncludeAncestors(&config.Tree{}))
+}
