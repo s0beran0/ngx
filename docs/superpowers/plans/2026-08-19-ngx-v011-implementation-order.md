@@ -358,7 +358,53 @@ a defence for silence.
 
 ## What the Lua work left open
 
-### The oracle does not cover Lua
+### The oracle now exists, and it found six divergences
+
+A second bench image with OpenResty 1.27.1.2 closed the hole. It paid for
+itself immediately: **six** measured divergences, all recorded as tests rather
+than prose, because a divergence written in markdown ages in silence.
+
+The answer that was missing: `local s = 'a\'b'` is **accepted by OpenResty and
+refused by ngx**. The backslash escapes nothing in crossplane's lexer, so the
+second quote closes the string and the block's `}` falls "inside quotes". Same
+for `"a\"b"`. The upstream issue is now justified by evidence instead of by
+assumption.
+
+Four of the six are false rejections in narrow escaping forms — bad, and
+visible. One is a false rejection by OpenResty (an empty Lua body, which it
+refuses as "no runnable Lua code", a semantic check ngx does not make).
+
+**The sixth is the serious one, and it changes what v0.2 may assume.**
+
+`content_by_lua_block { -- }` — a Lua comment containing a brace. Crossplane's
+lexer closes the block early, so whatever follows lands in the wrong scope.
+ngx **accepts** the file and builds a tree; OpenResty **refuses** it. So ngx
+describes a structure the running server never had, and nothing in the output
+says so.
+
+*For v0.1.1 this is a wrong reading, and `ngx test` still gives a correct
+answer about validity because it delegates to nginx itself.*
+
+*For v0.2 it is a blocking prerequisite.* Editing is targeted by position in a
+tree; a tree that describes a structure the server never had turns a surgical
+byte substitution into a cut in the wrong place. **v0.2 must not begin until
+this divergence is closed or detected**, and the honest fix is upstream, in
+crossplane's Lua lexer, not a fork here.
+
+*Test design worth copying:* the case asserts that OpenResty still refuses AND
+that ngx still accepts. If either side changes — an upstream fix, a lexer
+update — the test fails and the note gets revisited instead of quietly
+outliving its truth.
+
+### Where the oracle itself could lie
+
+`openresty -t` does **not compile** the Lua body: `{ if end }` passes. It only
+lexes far enough to find the block's end — which happens to be exactly the
+question ngx asks, so the oracle is well matched. `smoke-lua.sh` carries a
+dedicated property proving the oracle can still say no, because an oracle that
+accepts everything is a rubber stamp that reads like a guarantee.
+
+### The old note, kept for the record
 
 The bench runs stock nginx 1.20.1, which has no `lua-nginx-module`: it refuses
 `content_by_lua_block` outright as an unknown directive. So the fixture that
