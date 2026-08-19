@@ -328,6 +328,15 @@ nfpms:
 # its own credential, supplied as a repository secret, and the exact steps to
 # create them are in docs/install-channels.md.
 #
+# A PRE-RELEASE PUBLISHES TO NONE OF THESE. `.Prerelease` is non-empty for a
+# tag like v1.2.3-rc.1, and every skip_upload below refuses on it. Without that
+# clause a release candidate reaches `brew install` and `scoop install` as if
+# it were stable, and opens a pull request against microsoft/winget-pkgs, which
+# does not accept pre-releases. The GitHub release itself is still published
+# and still marked as a pre-release (see `prerelease: auto`), which is what the
+# beta channel is for -- what stops is the self-service package managers, where
+# a user asking for `ngx` is asking for the stable one.
+#
 # A MISSING CREDENTIAL DOES NOT FAIL THE RELEASE. `skip_upload` reads the
 # environment: with no token the artifact is still built and the manifest is
 # still generated under dist/, it just is not pushed. Failing the release
@@ -355,7 +364,7 @@ homebrew_casks:
       name: homebrew-tap
       branch: main
       token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
-    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    skip_upload: '{{ if or (eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     homepage: *pkg_homepage
     # One line, no leading article, does not start with the cask name: those
     # are `brew audit` rules, and a tap that fails audit is a tap nobody can
@@ -392,7 +401,7 @@ scoops:
       name: scoop-bucket
       branch: main
       token: '{{ envOrDefault "SCOOP_BUCKET_TOKEN" "" }}'
-    skip_upload: '{{ if eq (envOrDefault "SCOOP_BUCKET_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    skip_upload: '{{ if or (eq (envOrDefault "SCOOP_BUCKET_TOKEN" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     homepage: *pkg_homepage
     description: *channel_description
     license: *pkg_license
@@ -434,7 +443,7 @@ winget:
       - cli
       - json
       - devops
-    skip_upload: '{{ if eq (envOrDefault "WINGET_PKGS_TOKEN" "") "" }}true{{ else }}false{{ end }}'
+    skip_upload: '{{ if or (eq (envOrDefault "WINGET_PKGS_TOKEN" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     commit_author: *channel_commit_author
     commit_msg_template: "New version: s0beran0.ngx version {{ .Version }}"
     repository:
@@ -472,7 +481,7 @@ aurs:
       - ngx
     private_key: '{{ envOrDefault "AUR_SSH_KEY" "" }}'
     git_url: "ssh://aur@aur.archlinux.org/ngx-bin.git"
-    skip_upload: '{{ if eq (envOrDefault "AUR_SSH_KEY" "") "" }}true{{ else }}false{{ end }}'
+    skip_upload: '{{ if or (eq (envOrDefault "AUR_SSH_KEY" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     commit_author: *channel_commit_author
     commit_msg_template: "ngx {{ .Tag }}"
     package: |-

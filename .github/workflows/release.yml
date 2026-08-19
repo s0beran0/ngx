@@ -208,8 +208,20 @@ jobs:
           WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
         run: |
+          # A pre-release tag publishes to none of these, which the
+          # skip_upload templates in .goreleaser.yaml enforce. Reporting has to
+          # apply the same rule: saying "WILL PUBLISH" for a tag that will
+          # publish nothing is worse than saying nothing, because it is the
+          # line somebody checks INSTEAD of checking the channel.
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease=yes ;;
+            *)   prerelease=no  ;;
+          esac
+
           report() {
-            if [ -n "$2" ]; then
+            if [ "$prerelease" = yes ]; then
+              echo "- $1: skipped, $GITHUB_REF_NAME is a pre-release"
+            elif [ -n "$2" ]; then
               echo "- $1: WILL PUBLISH"
             else
               echo "- $1: skipped, secret $3 is not set (docs/install-channels.md)"
