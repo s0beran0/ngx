@@ -334,8 +334,14 @@ func TestGetAnswersFieldAndQuery(t *testing.T) {
 // that only --file could ever deliver and does not deliver yet.
 func TestGetHelpShowsExamplesAndPromisesNoPruning(t *testing.T) {
 	raw := runHelp(t, "get", "--help")
-	require.Contains(t, raw, "ngx get --directive listen")
+	// The examples carry -c because the command has no default configuration
+	// path: an example copied as it stands has to work, and one that fails
+	// with "provide the configuration with -c" teaches the wrong lesson.
+	require.Contains(t, raw, "ngx get -c /etc/nginx/nginx.conf --directive listen")
 	require.Contains(t, raw, "--value api.example.com")
+	// The intent, not the syntax: an example that only shows which flags
+	// exist repeats the flag list two screens below it.
+	require.Contains(t, raw, "# which ports are listened on?")
 	require.NotContains(t, raw, "reads only")
 }
 

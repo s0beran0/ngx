@@ -224,8 +224,65 @@ func renderError(ctx *Context, stderr io.Writer, err error) {
 // NewRoot builds the root command with the global flags.
 func NewRoot(ctx *Context) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "ngx",
-		Short:         "Operate nginx with structured output and transactional changes",
+		Use:   "ngx",
+		Short: "Operate nginx with structured output and transactional changes",
+		// Long and Example are the documentation an agent reads before its
+		// first call, and in practice the ONLY documentation it reads: it has
+		// the binary, and asking for the specification costs a round trip it
+		// will not make. So the envelope's shape, the exit codes and the
+		// omission rule are here, in the help, and not only in the README.
+		Long: `ngx makes an nginx installation readable by a program.
+
+Every command answers with one JSON envelope on stdout when stdout is a pipe,
+and with a short summary when it is a terminal. --json and --human force one
+of the two; the human form is a view, the JSON is the contract.
+
+The envelope always has the same shape, and it is what --field and --query
+address:
+
+  ok              false when something failed; the exit code says what
+  command         which command produced it
+  schema_version  the version of this SHAPE; an integer, compare it with >=
+  ngx_version     the version of the binary
+  data            the answer, one shape per command
+  diagnostics     located findings: severity, code, message, file, line
+  meta            duration_ms, target, nginx_version, config_hash
+
+Two rules worth knowing before reading any output:
+
+  A value that could not be determined is OMITTED, never estimated. An absent
+  key means "unknown"; it does not mean zero, empty or stopped.
+
+  A sensitive value is replaced by "***" and the node lists which argument
+  positions in redacted_args, so a censored value never looks absent. Turn it
+  off with --no-redact, which is only accepted when stdout is a terminal.
+
+Exit codes: 0 ok, 1 internal failure, 2 usage, 3 the nginx configuration is
+invalid, 7 drift, 9 the configuration changed since it was read.
+
+Commands that read the configuration need to be told where it is, with -c or
+with nginx.config in the settings file. "ngx --field data.nginx.main_config
+status" asks the nginx binary itself.`,
+		Example: `  # is the configuration valid? (exit 3 if it is not)
+  ngx test
+
+  # where is the main configuration file?
+  ngx --field data.nginx.main_config status
+
+  # which ports are listened on?
+  ngx get -c /etc/nginx/nginx.conf --directive listen --format table
+
+  # how is one site configured? (nginx text, not the JSON tree)
+  ngx inspect -c /etc/nginx/nginx.conf --file example.com --format nginx
+
+  # one value out of the envelope, with no JSON parser on the box
+  ngx --field data.nginx.version status
+
+  # anything more than one value: jq syntax, evaluator embedded
+  ngx get -c /etc/nginx/nginx.conf --directive listen --query '.data.matches[].args[0]'
+
+  # the same questions against a server, reading its root-only files
+  ngx --host web1 --sudo test`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -440,10 +497,19 @@ func newVersionCmd(ctx *Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Show the ngx version",
-		Args:  cobra.NoArgs,
+		Long: "Reports the version of ngx itself -- not of nginx, which `ngx status` " +
+			"answers -- together with how this binary was installed. The install " +
+			"channel is what says whether `ngx update` will work: a binary owned by " +
+			"apt or brew refuses to replace itself and names the right command instead.",
+		Example: `  # which ngx is this?
+  ngx version
+
+  # can this binary update itself?
+  ngx --field data.install_channel version`,
+		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			env := ctx.NewEnvelope("version")
-			data := map[string]string{
+			data := VersionData{
 				"version": output.Version,
 				// Always present, never omitted: "I do not know how I was
 				// installed" is not a state that can exist, because the

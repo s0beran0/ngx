@@ -32,7 +32,22 @@ func newUpdateCmd(ctx *Context) *cobra.Command {
 		Short: "Update ngx itself from the signed releases",
 		Long: "Downloads the newest release of the channel, checks the minisign signature " +
 			"and the checksum, and only then swaps the binary. A failed verification " +
-			"leaves the current ngx intact.",
+			"leaves the current ngx intact.\n\n" +
+			"It updates ngx on the machine where ngx runs, so --host is ignored: nothing " +
+			"is installed on the remote target. A binary owned by a package manager refuses " +
+			"to replace itself and names the command to use instead; " +
+			"`ngx --field data.install_channel version` says which case this is.",
+		Example: `  # is there a newer ngx? (downloads and replaces nothing)
+  ngx update --check
+
+  # update
+  ngx update
+
+  # follow the pre-releases instead
+  ngx update --channel beta
+
+  # go back to a known version
+  ngx update --version 0.1.0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			execCtx, cancel := ctx.executionContext(cmd.Context())

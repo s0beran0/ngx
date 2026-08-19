@@ -154,14 +154,46 @@ func newGetCmd(ctx *Context) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get",
 		Short: "Every occurrence of a directive, optionally narrowed by block or by value",
+		Long: `Finds every occurrence of one directive, wherever it is written.
+
+The flags are flat and combine as AND, each narrowing what the last left:
+--directive names it, --in keeps only the occurrences enclosed by a block at
+ANY depth (a listen inside a location inside a server IS inside a server), and
+--value keeps only the ones with an argument exactly equal to a value. There
+is no selector language to get subtly wrong.
+
+--file and --server mean the same as on ` + "`ngx inspect`" + `: they say WHERE to look.
+
+An empty answer is an answer, not a failure: exit stays 0, data.matches is [],
+and a diagnostic names what WAS there -- the directives in scope, the blocks
+that enclose them, the values that exist -- because an empty list and a
+misspelt name look identical otherwise.
+
+Every match is the whole node, block included, byte-identical to the same node
+in ` + "`ngx inspect --full-tree`" + `. A flat result is what --format table is for.`,
 		// The examples are the documentation an agent reads before its
 		// first call (A4): flat flags, no selector language to get subtly
 		// wrong, and one line per question it is likely to have.
-		Example: `  ngx get --directive listen
-  ngx get --directive server_name --value api.example.com
-  ngx get --directive listen --in server
-  ngx get --directive listen --format table
-  ngx get --directive server --in http --format nginx`,
+		Example: `  # which ports are listened on?
+  ngx get -c /etc/nginx/nginx.conf --directive listen --format table
+
+  # which sites does this nginx serve?
+  ngx get -c /etc/nginx/nginx.conf --directive server_name --format table
+
+  # where is one hostname declared?
+  ngx get -c /etc/nginx/nginx.conf --directive server_name --value api.example.com
+
+  # the listen directives inside server blocks only
+  ngx get -c /etc/nginx/nginx.conf --directive listen --in server
+
+  # one site's whole server block, as nginx text
+  ngx get -c /etc/nginx/nginx.conf --directive server --in http --format nginx
+
+  # just the values, one per line, no JSON parser
+  ngx get -c /etc/nginx/nginx.conf --directive listen --query '.data.matches[].args[0]'
+
+  # search a single file
+  ngx get -c /etc/nginx/nginx.conf --file sites-enabled/example.com --directive proxy_pass`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := configPathOf(ctx)

@@ -48,6 +48,15 @@ func (d StatusData) RenderHuman(w io.Writer) error {
 		if _, err := fmt.Fprintf(w, "%s %s at %s\n", product, version, d.Nginx.Binary); err != nil {
 			return err
 		}
+		// The path is what the next command needs for -c, so it belongs in
+		// the two lines a person reads. Omitted, never guessed, when the
+		// build does not declare it: sending an operator to a path ngx
+		// invented is worse than saying nothing.
+		if d.Nginx.MainConfig != "" {
+			if _, err := fmt.Fprintf(w, "config %s\n", d.Nginx.MainConfig); err != nil {
+				return err
+			}
+		}
 	}
 
 	switch {
@@ -73,7 +82,32 @@ func newStatusCmd(ctx *Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show the target's nginx and the state of the process",
-		Args:  cobra.NoArgs,
+		Long: `Asks the nginx binary about itself (` + "`nginx -V`" + `) and looks at the process.
+
+data.nginx carries the version, the flavor (openresty and friends), the paths
+the build was configured with -- prefix, main_config, pid_path -- and the
+modules compiled in. data.nginx.main_config is the answer to "what do I pass
+to -c".
+
+data.process.running is ABSENT when there was no way to tell, which is not the
+same as false: a pidfile that the build never declared, or that this user
+cannot read, produces no field and a diagnostic saying so. Do not read a
+missing key as "stopped".`,
+		Example: `  # what nginx is this, and is it running?
+  ngx status
+
+  # where is the configuration this nginx actually loads?
+  ngx --field data.nginx.main_config status
+
+  # just the version, for a shell variable
+  ngx --field data.nginx.version status
+
+  # was it built with the ssl module?
+  ngx status --query '.data.nginx.modules[] | select(. == "http_ssl_module")'
+
+  # a remote server, reading a root-only pidfile
+  ngx --host web1 --sudo status`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			execCtx, cancel := ctx.executionContext(cmd.Context())
 			defer cancel()

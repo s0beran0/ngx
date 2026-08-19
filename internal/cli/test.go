@@ -49,7 +49,28 @@ func newTestCmd(ctx *Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "test",
 		Short: "Run `nginx -t` and return structured diagnostics",
-		Args:  cobra.NoArgs,
+		Long: `Runs ` + "`nginx -t`" + ` on the target and turns its output into located findings.
+
+The verdict comes from nginx's exit code, never from the text: data.ok is what
+nginx decided. A rejected configuration is a RESULT, not a failure of the
+command -- the envelope goes out complete, with one diagnostic per problem
+carrying file and line, and the process exits 3. Exit 1 means nginx never got
+to answer at all: no binary, no privilege, no connection.
+
+This runs the nginx binary, so it tests the configuration nginx itself loads.
+-c is not consulted here; ` + "`ngx inspect`" + ` is what reads a file you name.`,
+		Example: `  # is the configuration valid?
+  ngx test
+
+  # yes or no, for a shell
+  ngx --field data.ok test
+
+  # where the problems are
+  ngx test --query '.diagnostics[] | "\(.severity) \(.file):\(.line) \(.message)"'
+
+  # a remote server, where nginx -t needs privilege
+  ngx --host web1 --sudo test`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			execCtx, cancel := ctx.executionContext(cmd.Context())
 			defer cancel()

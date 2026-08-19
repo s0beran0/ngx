@@ -66,16 +66,19 @@ So: today nothing here changes the nginx configuration.
   `/usr/local/bin` and tells you the exact command to re-run with privilege if
   the directory needs it — it never calls `sudo` on its own. Point it somewhere
   else with `NGX_INSTALL_DIR`.
-- **There are five commands:** `version`, `inspect`, `test`, `status` and
-  `update`. Commands foreseen in the design (`get`, `tree`, `fmt`, `diff`,
+- **There are six commands:** `version`, `inspect`, `get`, `test`, `status`
+  and `update`. Commands foreseen in the design (`tree`, `fmt`, `diff`,
   `apply`) do not exist yet. `status` does not detect drift yet, so it never
   exits with the code 7 the design reserves for it.
 - **Remote access over SSH exists and has been exercised against a real
   production nginx** (Oracle Linux 9, nginx 1.20.1, 132 configuration files),
   besides the containerized test bench. See [`docs/remote.md`](docs/remote.md).
-- **The "human" output is still raw:** today it is the JSON of the data
-  formatted with indentation, and the error as a line of text. Improving this
-  is pending work, not a deliberate style.
+- **The "human" output is written for a terminal**, not merely indented JSON:
+  `status`, `test`, `get`, `version` and `inspect` each print the few lines
+  that matter first. Two exceptions, both deliberate: `inspect --full-tree`
+  keeps the indented JSON, because whoever asks for the whole tree asked for
+  the whole tree; and a command whose data has no terminal form yet
+  (`update`) still falls back to it.
 
 ## Building from source
 

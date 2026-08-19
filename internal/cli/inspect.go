@@ -146,7 +146,43 @@ func newInspectCmd(ctx *Context) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inspect",
 		Short: "Summary of the configuration; the tree with --file, --server or --full-tree",
-		Args:  cobra.NoArgs,
+		Long: `Reads the configuration from -c, follows every include, and answers with the
+summary: how many files, servers, locations and upstreams there are.
+
+The TREE is not the default. On a production nginx of 132 files it is 1.6 MB
+of JSON, which is a context budget spent to answer a question about one file.
+Ask for a part of it with --file or --server, or for all of it with
+--full-tree, whose name says what it costs.
+
+--file and --server combine as AND. A fragment matches anywhere in the path; a
+value starting with / matches the path exactly. A fragment matching several
+files is refused with the list of candidates, never resolved by guessing.
+
+Any filtered answer is a SUBSET, and says so in data.scope. meta.config_hash
+is dropped there on purpose: a hash computed over a subset is a valid hash of
+that subset and indistinguishable from the hash of the whole configuration.
+
+--format nginx emits the configuration TEXT instead of the tree. Measured on
+this project's fixture the same file is 351 bytes that way against 2,635 as
+JSON, in the syntax every model already reads.`,
+		Example: `  # how big is this configuration?
+  ngx inspect -c /etc/nginx/nginx.conf
+
+  # how is one site configured? (the cheapest form of the answer)
+  ngx inspect -c /etc/nginx/nginx.conf --file example.com --format nginx
+
+  # only the server blocks answering one name
+  ngx inspect -c /etc/nginx/nginx.conf --server api.example.com --format nginx
+
+  # which files does this configuration actually read?
+  ngx inspect -c /etc/nginx/nginx.conf --full-tree --query '.data.config[].path'
+
+  # how many servers are there, as one number
+  ngx --field data.summary.servers inspect -c /etc/nginx/nginx.conf
+
+  # everything, as JSON; on a real nginx this is megabytes
+  ngx inspect -c /etc/nginx/nginx.conf --full-tree`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path := configPathOf(ctx)
 			if path == "" {
