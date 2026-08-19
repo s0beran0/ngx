@@ -19,26 +19,54 @@ that.
 The roadmap agrees from the other side: **v0.2 is reserved for mutation**.
 Someone reading "v0.2" in this project should understand "it writes now".
 
-## What the ergonomics research changed
+## Three independent axes, none of which replaces another
 
-The first version of this plan had `ngx get <selector>` as its centrepiece,
-carrying the §5 expression language. That was the wrong centre.
+This plan was re-centred twice, each time on whatever had just been discussed,
+and each time that was wrong. The costs below are distinct, they have distinct
+answers, and shipping one does not discharge the others.
 
-Embedding a query engine removes the dependency on `jq` and leaves the
-**onboarding** untouched, and onboarding is the larger cost: an agent needs the
-language, plus the envelope shape, plus the selector grammar — three
-specifications before one question. So the shape of `get` changes: **flat
-flags, no grammar**. `--directive listen` cannot be subtly wrong the way
-`http.server.listen` can, because there is nothing to get wrong.
+### Axis 1 — Production cost: do not read or emit what was not asked for
 
-The expression language is not cancelled; it is demoted. Nothing common may
-require it, and when it does arrive it should be `jq` syntax through an
-embedded engine rather than a grammar of ours — a language the agent already
-knows beats one we designed.
+`inspect` reads 132 files over SSH and emits 1.6 MB to answer a question about
+one file. Filtering downstream does not undo any of that.
 
-Two other conclusions promoted themselves to the front of the queue, and the
-reason is timing rather than importance: they change the **envelope contract**,
-and every day they wait, one more consumer depends on the current shape.
+*Answer:* filters that reach the reading layer. The vocabulary is the domain's,
+not the tool's: `--file sesc-portal` and `--server portal.example.com` are
+things the caller already knows the name of. Substring matching, no globbing
+rules to learn, and an unambiguous error listing the candidates when a pattern
+matches several.
+
+This is what replaces `grep`, and it is **additional** — it does not answer
+either of the axes below.
+
+### Axis 2 — Parse cost and external dependency
+
+Even a 2.8 KB `status` needs a JSON parser to answer "is it running", and today
+that parser is `jq`, which was **not installed** on the production host that
+this project was validated against — exactly as `minisign` was not.
+
+*Answer:* `--field` for a single value, already shipped, and `--query` with an
+embedded `gojq` for anything more. Verified viable: pure Go, MIT, one indirect
+dependency, cross-builds on all six platforms without cgo.
+
+An LLM already knows `jq` — that syntax costs it nothing to learn, and I was
+wrong to count it as onboarding. What `jq` does require is knowing the shape of
+our envelope, which is Axis 3, not this one.
+
+### Axis 3 — Onboarding: usable without reading a specification
+
+An agent should answer its first question having read only `ngx --help`.
+
+*Answer:* help text carrying copy-pasteable examples of intent; a schema
+version in the envelope so a consumer can notice the contract moved instead of
+discovering it through a `null`; a redacted value distinguishable from an
+absent one, because an agent that cannot tell censorship from absence either
+retries in a loop or reports an empty key; and truncation visible inside
+`data`, where an agent that skipped the diagnostics still trips over it.
+
+The `get` command keeps flat flags for the same reason — no grammar to be
+subtly wrong about — but flat flags are an Axis 1 and 3 answer, not a
+replacement for `jq`.
 
 ## Order, and why this one
 
@@ -59,13 +87,21 @@ rather than merely later.
   already false and the diagnostic says so — but an agent reading only `data`
   sees a complete-looking tree. It must trip over the gap where it is looking.
 
-### Phase 2 — The default stops being a dump (E1) ‖ install channel (C1)
+### Phase 2 — Filters and `--query` (axes 1 and 2) ‖ install channel (C1)
 
-`inspect` without a filter returns the summary and says how to ask for more.
-The full tree needs an explicit flag whose name states its cost. 1.6 MB is not
-a default; it is a decision the caller has to make on purpose.
+Two deliverables, both small, both independent of each other:
 
-C1 runs alongside — different files, and it is what turns every packaging task
+**`--file` and `--server` on `inspect`.** Substring match against the domain's
+own vocabulary. `inspect` without any filter returns the summary and says how
+to ask for more: 1.6 MB is not a default, it is a decision the caller makes on
+purpose, and the flag that asks for everything says so in its name.
+
+**`--query` with an embedded `gojq`.** Delivered here and not later, because it
+discharges the "no external dependency" goal on its own and costs an LLM
+nothing to learn. It filters what was produced; it does not reduce what is
+read, which is why it does not replace the filters above.
+
+C1 runs alongside — different files, and it turns every packaging task
 afterwards into configuration instead of a design question.
 
 ### Phase 3 — `ngx get` with flat flags (E3) ‖ packages (C2, C3, C4)
@@ -80,16 +116,12 @@ truths.
 Reading fewer files is an optimisation, and an optimisation on top of an
 unproven evaluator produces a wrong answer faster.
 
-### Phase 4 — `--help` that teaches (E2), and the escape hatch
+### Phase 4 — `--help` that teaches (E2)
 
 Help text is the documentation surface an agent actually reads, so it carries
 copy-pasteable examples showing intent rather than syntax. A first successful
-use of `ngx` should require reading nothing else.
-
-Only here, if it is still needed after Phases 2 and 3: `--query` with an
-embedded `gojq`. Verified as viable — pure Go, MIT, one indirect dependency,
-cross-builds on the six platforms without cgo. It is an escape hatch for the
-rare question, not the way the tool is meant to be used.
+use of `ngx` should require reading nothing else — including the examples for
+the filters and for `--query` shipped in Phase 2.
 
 ### Phase 5 — Human rendering, documentation, release
 
