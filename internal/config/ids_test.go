@@ -178,3 +178,76 @@ func TestFindByIDRefusesAnIDThatSeveralFilesShare(t *testing.T) {
 	require.NotNil(t, config.FindByID(combined, "h.s1"))
 	require.NotNil(t, config.FindByID(combined, "h.s2"))
 }
+
+// Ref is what names a node, and this is the case that motivated it: three
+// files, three servers, one ID between them.
+func TestRefNamesOneNodeWhereIDNamesThree(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "nginx.conf"),
+		[]byte("events { worker_connections 16; }\nhttp { include conf.d/*.conf; }\n"), 0o644))
+	for _, name := range []string{"a", "b", "c"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "conf.d", name+".conf"),
+			[]byte("server { listen 8080; server_name "+name+".test; }\n"), 0o644))
+	}
+
+	tree, err := config.Parse(config.ParseOptions{Path: filepath.Join(dir, "nginx.conf")})
+	require.NoError(t, err)
+
+	// Every Ref in the configuration is distinct, which is the property ID
+	// does not have.
+	refs := map[string]int{}
+	total := 0
+	tree.Walk(func(n *config.Node) bool {
+		if n.Ref != "" {
+			refs[n.Ref]++
+			total++
+		}
+		return true
+	})
+	require.NotZero(t, total)
+	require.Len(t, refs, total, "two nodes share a Ref, so it does not name a node")
+
+	// And each one resolves to the node it describes, not to the first of
+	// several.
+	for _, name := range []string{"a", "b", "c"} {
+		ref := filepath.Join(dir, "conf.d", name+".conf") + "#s0"
+		node := config.FindByRef(tree, ref)
+		require.NotNilf(t, node, "%s resolved to nothing", ref)
+		require.Equal(t, "server", node.Directive)
+		require.Equal(t, []string{name + ".test"}, node.Block[1].Args,
+			"the ref resolved to the wrong file's server")
+	}
+}
+
+// Combine renumbers ID for its own view and must leave Ref alone: a node does
+// not change identity because the caller asked for the includes resolved.
+func TestCombineRenumbersIDAndPreservesRef(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "nginx.conf"),
+		[]byte("events { worker_connections 16; }\nhttp { include conf.d/*.conf; }\n"), 0o644))
+	for _, name := range []string{"a", "b"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "conf.d", name+".conf"),
+			[]byte("server { listen 8080; server_name "+name+".test; }\n"), 0o644))
+	}
+
+	tree, err := config.Parse(config.ParseOptions{Path: filepath.Join(dir, "nginx.conf")})
+	require.NoError(t, err)
+	combined, err := config.Combine(tree)
+	require.NoError(t, err)
+
+	// In the combined view the IDs separate on their own.
+	require.NotNil(t, config.FindByID(combined, "h.s0"))
+	require.NotNil(t, config.FindByID(combined, "h.s1"))
+
+	// And the same nodes are still reachable by the reference they were born
+	// with, which is what lets a caller read through one view and act through
+	// another.
+	for _, name := range []string{"a", "b"} {
+		ref := filepath.Join(dir, "conf.d", name+".conf") + "#s0"
+		node := config.FindByRef(combined, ref)
+		require.NotNilf(t, node, "%s did not survive Combine", ref)
+		require.Equal(t, []string{name + ".test"}, node.Block[1].Args)
+	}
+}

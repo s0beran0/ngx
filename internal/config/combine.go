@@ -54,6 +54,11 @@ func Combine(t *Tree) (*Tree, error) {
 			Nodes:  nodes,
 		}},
 	}
+	// IDs are reassigned over the assembled tree, which is what makes "h.s0"
+	// read sensibly here rather than the "s0" the node had inside its own
+	// file. Ref is deliberately NOT reassigned: it is identity, and a node
+	// does not change identity because the caller asked for a different view.
+	// See Node.Ref.
 	AssignIDs(combined.Files[0].Nodes, "")
 	combined.Hash = Hash(combined)
 	return combined, nil

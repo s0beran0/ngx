@@ -88,7 +88,35 @@ type Node struct {
 	// nothing was redacted, which is the overwhelming majority of nodes.
 	RedactedArgs []int `json:"redacted_args,omitempty"`
 
-	ID      string  `json:"id,omitempty"`
+	ID string `json:"id,omitempty"`
+
+	// Ref is the reference that names THIS node in the whole configuration,
+	// as "<file>#<id>".
+	//
+	// ID alone does not name a node, and that is not a rough edge -- it is
+	// arithmetic. IDs count siblings from the root of the file they live in,
+	// so on the conf.d/*.conf layout every distribution ships, the first
+	// server of every file is "s0" and its first directive "s0.d0". Measured
+	// against the test bench: 112 listen directives, one distinct ID.
+	//
+	// Ref is what v0.2 targets, and the pair was chosen over the two
+	// alternatives for a reason each of them fails:
+	//
+	//   - Numbering across the whole configuration would make IDs unique and
+	//     destroy the stability D3 promises: dropping one new file into
+	//     conf.d/*.conf would renumber servers in files nobody touched.
+	//   - Addressing through --combine is unique and stable, but its IDs
+	//     belong to a VIEW the caller has to ask for, so a reference would
+	//     mean nothing without the flag that produced it.
+	//
+	// The file is the natural scope, and scoping by it costs nothing: adding,
+	// removing or renaming a file cannot renumber another one.
+	//
+	// It is assigned once, at parse time, and never reassigned. Combine
+	// renumbers ID over the assembled tree -- that is what makes "h.s0" read
+	// sensibly there -- and leaves Ref alone, so identity survives a change
+	// of view while ID describes the view.
+	Ref     string  `json:"ref,omitempty"`
 	Comment *string `json:"comment,omitempty"`
 	Block   []*Node `json:"block,omitempty"`
 	Origin  *Origin `json:"origin,omitempty"`

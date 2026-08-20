@@ -82,6 +82,50 @@ func abbreviate(directive string) string {
 	return directive
 }
 
+// AssignRefs fills in Ref on every node of a file, as "<file>#<id>".
+//
+// It runs after AssignIDs and reads the ID that call produced. Separating the
+// two is deliberate: Combine reassigns IDs over the assembled tree and must
+// NOT reassign Ref, because Ref is identity and ID is position in the current
+// view. Keeping them in one function would make that impossible to express.
+//
+// The file recorded is the node's own Origin -- the file the bytes are in, not
+// the top-level file that included it -- because that is the file an edit will
+// open.
+func AssignRefs(nodes []*Node) {
+	for _, n := range nodes {
+		if n.ID != "" {
+			n.Ref = n.File + "#" + n.ID
+		}
+		if len(n.Block) > 0 {
+			AssignRefs(n.Block)
+		}
+	}
+}
+
+// FindByRef locates the node a reference names. Returns nil when there is
+// none.
+//
+// Unlike FindByID this cannot be ambiguous, which is the whole point: a Ref
+// carries the file that scopes the ID, so it names one node in the
+// configuration or no node at all.
+func FindByRef(t *Tree, ref string) *Node {
+	ref = strings.TrimPrefix(ref, "#")
+
+	var found *Node
+	t.Walk(func(n *Node) bool {
+		if found != nil {
+			return false
+		}
+		if n.Ref == ref {
+			found = n
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // FindByID locates a node by its ID. Returns nil when there is none, and also
 // when there is more than one.
 //
@@ -97,9 +141,10 @@ func abbreviate(directive string) string {
 // today has the file that scopes it, because every output that carries an ID
 // carries its file alongside.
 //
-// What the reference for a node across the whole configuration should be is a
-// v0.2 decision and is recorded as a blocker in the implementation plan; it is
-// not settled here.
+// The reference for a node across the whole configuration is Ref, and
+// FindByRef resolves it. This function stays because an ID is what a human
+// reads off a table, and refusing the ambiguous case is what keeps that
+// convenience from becoming a wrong edit.
 func FindByID(t *Tree, id string) *Node {
 	id = strings.TrimPrefix(id, "#")
 

@@ -110,15 +110,25 @@ func (d GetData) Table() (output.Table, error) {
 			}
 		}
 		rows = append(rows, []string{
-			n.ID,
-			n.File,
+			n.Ref,
 			strconv.Itoa(n.Line),
 			n.Directive,
 			strings.Join(n.Args, " "),
 		})
 	}
+	// One "ref" column where there used to be "id" and "file".
+	//
+	// It is not a rename. "id" alone did not name a node -- on the
+	// conf.d/*.conf layout the first directive of every file is "s0.d0", and
+	// this bench answered a `--directive listen` query with 112 matches
+	// carrying one distinct ID -- so a caller that read the column as an
+	// address had no way to know it was reading a duplicate. Ref carries the
+	// file that scopes it, so it addresses one node.
+	//
+	// And it is cheaper than what it replaced: ref IS "<file>#<id>", so
+	// emitting both columns printed the file twice per row.
 	return output.Table{
-		Header: []string{"id", "file", "line", "directive", "args"},
+		Header: []string{"ref", "line", "directive", "args"},
 		Rows:   rows,
 	}, nil
 }

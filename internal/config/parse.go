@@ -119,6 +119,8 @@ func Parse(opts ParseOptions) (*Tree, error) {
 			return nil, err
 		}
 		AssignIDs(file.Nodes, "")
+		// Identity, assigned once and never reassigned. See Node.Ref.
+		AssignRefs(file.Nodes)
 		tree.Files = append(tree.Files, file)
 	}
 	tree.Hash = Hash(tree)

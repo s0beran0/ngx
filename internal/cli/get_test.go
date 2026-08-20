@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/s0beran0/ngx/internal/cli"
+	"github.com/s0beran0/ngx/internal/config"
 	"github.com/s0beran0/ngx/internal/output"
 	"github.com/stretchr/testify/require"
 )
@@ -265,9 +266,33 @@ func TestGetTableEmitsOneRowPerMatch(t *testing.T) {
 
 	require.Equal(t, output.ExitOK, code)
 	lines := nonCommentLines(raw)
-	require.Equal(t, "id\tfile\tline\tdirective\targs", lines[0])
+	require.Equal(t, "ref\tline\tdirective\targs", lines[0])
 	require.Len(t, lines, 5, "header plus four listens: %s", raw)
 	require.Contains(t, lines[3], "\tlisten\t443 ssl")
+}
+
+// The first column has to be addressable, which is the whole reason it stopped
+// being "id". Every row names a different node, and the ref resolves to the
+// node the row describes -- not to the first of several sharing an ID.
+func TestGetTableRefsAreDistinctAndResolve(t *testing.T) {
+	path := filterFixture(t)
+	_, raw := runRaw(t, "get", "--directive", "listen", "--format", "table", "-c", path)
+
+	tree, err := config.Parse(config.ParseOptions{Path: path})
+	require.NoError(t, err)
+
+	rows := nonCommentLines(raw)[1:]
+	seen := map[string]bool{}
+	for _, row := range rows {
+		ref := strings.Split(row, "\t")[0]
+		require.Falsef(t, seen[ref], "two rows carry the same ref: %s", ref)
+		seen[ref] = true
+
+		node := config.FindByRef(tree, ref)
+		require.NotNilf(t, node, "the ref in the table resolves to nothing: %s", ref)
+		require.Equal(t, "listen", node.Directive)
+	}
+	require.Len(t, seen, len(rows))
 }
 
 // The table refuses what it cannot hold, instead of flattening it: a row that
