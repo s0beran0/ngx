@@ -228,20 +228,45 @@ func TestUnterminatedLuaBlockIsTypedRefusal(t *testing.T) {
 	}
 }
 
-// A limitation inherited from the dependency, recorded by running it: the Lua
-// lexer of crossplane treats a backslash as an ordinary character
-// (lua.go:148-155), so `'a\'b'` closes the string at the escaped quote and
-// the block never finds its closing brace. nginx accepts that body; crossplane
-// does not, and there is no answer available to us -- it hands back a stream
-// with no body token at all, and its own parse fails.
+// This used to be a limitation, and the test that recorded it asserted a
+// REFUSAL: crossplane's Lua lexer treats a backslash as an ordinary character
+// (lua.go:148-155), so `'a\'b'` closed the string at the escaped quote and the
+// block never found its brace. nginx accepts that body, and we did not.
 //
-// The test exists so the boundary is a decision on record and not a surprise:
-// the refusal comes out typed, with the directive named, instead of a raw
-// "premature end of file" pointing at the last line of the file.
-func TestLuaBodyWithEscapedQuoteIsRefusedByTheDependency(t *testing.T) {
-	pe := refusal(t, "log_by_lua_block { ngx.log(ngx.ERR, 'a\\'b') }\n")
-	require.Equal(t, config.RefusalInvalidLuaBlock, pe.Class)
-	require.Equal(t, "log_by_lua_block", pe.Token)
+// It is now accepted, because the delimitation is ours (luascan.go) instead of
+// the dependency's. The test is kept, inverted, for the reason the old one
+// existed: the boundary is a decision on record. If a future change hands the
+// Lua body back to crossplane's lexer, this goes red rather than quietly
+// reintroducing a refusal of valid OpenResty configuration.
+func TestALuaBodyWithAnEscapedQuoteIsAccepted(t *testing.T) {
+	src := "http { server { location / {\n" +
+		"log_by_lua_block { ngx.log(ngx.ERR, 'a\\'b') }\n" +
+		"access_log off;\n} } }\n"
+
+	tree, err := config.Parse(config.ParseOptions{Path: writeConf(t, src)})
+	require.NoError(t, err, "a body nginx accepts must not be refused")
+
+	var lua *config.Node
+	tree.Walk(func(n *config.Node) bool {
+		if n.Directive == "log_by_lua_block" {
+			lua = n
+		}
+		return true
+	})
+	require.NotNil(t, lua)
+	require.Equal(t, []string{` ngx.log(ngx.ERR, 'a\'b') `}, lua.Args,
+		"the escaped quote is inside the string, so the body runs to the real brace")
+
+	// And the directive AFTER the block is still a directive: an escaped quote
+	// that had moved the delimiter would have swallowed this one.
+	var after bool
+	tree.Walk(func(n *config.Node) bool {
+		if n.Directive == "access_log" {
+			after = true
+		}
+		return true
+	})
+	require.True(t, after, "the directive after the block was swallowed")
 }
 
 // --- helpers ---------------------------------------------------------------

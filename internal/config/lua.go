@@ -16,8 +16,21 @@ import (
 // a parser reading a different language. Sharing the value is what keeps the
 // oracle from drifting away from production.
 func LuaLexOptions() crossplane.LexOptions {
-	lua := &crossplane.Lua{}
-	return crossplane.LexOptions{Lexers: []crossplane.RegisterLexer{lua.RegisterLexer()}}
+	// OUR lexer, not crossplane.Lua's. The one it ships counts braces outside
+	// `'` and `"` and knows nothing else, which makes it disagree with
+	// OpenResty on escaped quotes, long brackets and comments -- and in the
+	// comment case it accepts a file the server refuses. See luascan.go for
+	// the measurements and lualexer.go for the replacement.
+	//
+	// The registration point is the public one (crossplane/lex.go:85-90), so
+	// this is the extension mechanism working as intended rather than a way
+	// around it.
+	var lexer luaLexer
+	return crossplane.LexOptions{
+		Lexers: []crossplane.RegisterLexer{
+			crossplane.LexWithLexer(lexer, lexer.directiveNames()...),
+		},
+	}
 }
 
 // Support for the *_by_lua_block directives of lua-nginx-module (OpenResty).
@@ -220,16 +233,16 @@ func (t *tokenizer) readLuaFirstArg(name string) error {
 	return nil
 }
 
-// readLuaBody replicates the two loops of crossplane/lua.go:92-172: skip
-// whitespace up to the "{" that opens the block, then take everything up to
-// the matching "}" as one token.
+// readLuaBody skips whitespace up to the "{" that opens the block and then
+// takes everything up to the matching "}" as one token.
 //
-// The nesting count only looks at braces OUTSIDE quotes, and the quoting it
-// knows is Lua's simple one -- a `"` or a `'` opens, the same character
-// closes, and a backslash escapes nothing. That is not the whole Lua grammar
-// (a long bracket [[ ]] or a `--` comment holding an unbalanced brace fools
-// it), but it is what the dependency does, and the dependency is what decides
-// where the block ends.
+// Where that "}" is comes from luaScanner (luascan.go), which applies Lua's
+// own lexical rules: braces are counted in code and not inside a short string,
+// a long bracket, or either kind of comment. It used to replicate crossplane's
+// simpler rule instead, because the dependency decided where the block ended
+// and disagreeing would have desynchronised the two token streams. It no
+// longer decides: LuaLexOptions registers OUR lexer, so the same luaScanner
+// answers for the tree and for these spans, and neither one is wrong.
 func (t *tokenizer) readLuaBody(name string) error {
 	for t.pos < len(t.src) && t.spaceHere() {
 		t.advance()
@@ -243,21 +256,18 @@ func (t *tokenizer) readLuaBody(name string) error {
 
 	start, line, col := t.pos, t.line, t.col
 	t.advance() // the "{" that opens the block: delimiter, out of the value
-	depth := 1
-	inQuotes := false
-	var quoteType byte
+	scan := newLuaScanner()
 
 	var value []byte
 	for t.pos < len(t.src) {
-		c := t.src[t.pos]
+		// One byte to the scanner, one RUNE to the value. That is not a
+		// mismatch: every byte the scanner branches on is ASCII, and no
+		// continuation byte of a multi-byte rune is, so the lead byte of such a
+		// rune reaches it as an ordinary character -- which is what it is.
+		closed := scan.feed(t.src[t.pos])
 		switch {
-		case c == '{' && !inQuotes:
-			depth++
-			value = append(value, t.consumeIntoValue()...)
-
-		case c == '}' && !inQuotes:
-			depth--
-			if depth == 0 {
+		case closed:
+			{
 				t.advance() // the "}" that closes the block, also a delimiter
 				t.emitVerbatim(TokenWord, string(value), start, line, col, true)
 				// The implied terminator. It has no bytes of its own, so its
@@ -268,15 +278,6 @@ func (t *tokenizer) readLuaBody(name string) error {
 				t.emit(TokenSemicolon, ";", t.pos, t.line, t.col, false)
 				return nil
 			}
-			value = append(value, t.consumeIntoValue()...)
-
-		case c == '"' || c == '\'':
-			if !inQuotes {
-				inQuotes, quoteType = true, c
-			} else if c == quoteType {
-				inQuotes = false
-			}
-			value = append(value, t.consumeIntoValue()...)
 
 		default:
 			value = append(value, t.consumeIntoValue()...)

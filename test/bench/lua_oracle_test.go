@@ -188,17 +188,20 @@ func TestNgxReadsTheLuaSurfaceWithTheSameValues(t *testing.T) {
 	}
 }
 
-// The DIVERGENCES between the oracle and ngx, measured rather than assumed.
+// Where ngx and the real binary AGREE on block delimitation.
 //
-// They are recorded as a test and not only as prose for one reason: if
-// crossplane one day fixes its Lua lexer upstream, or lua-nginx-module changes
-// its mind, this test goes red and somebody revisits the note. A divergence
-// documented in markdown ages in silence.
+// This table used to be called divergences, and every row in it recorded a
+// shape ngx refused and OpenResty accepted. All four came from the same cause:
+// crossplane's Lua lexer counts braces outside `'` and `"` and knows nothing
+// about escapes, long brackets or comments.
 //
-// Fixing any of them is OUT of scope for whoever wrote this file: the defect,
-// where there is one, belongs to the dependency's lexer, and this codebase has
-// already once refused the option of forking crossplane.
-func TestDivergencesBetweenTheOracleAndNgx(t *testing.T) {
+// They are agreements now because ngx stopped depending on that lexer and
+// registers its own (internal/config/luascan.go). The rows are kept, inverted,
+// for the reason the old ones existed: each is a shape that was measured
+// against a real binary rather than reasoned about, and if a future change
+// hands delimitation back to the dependency, these go red instead of quietly
+// reintroducing the refusal of valid OpenResty configuration.
+func TestNgxAgreesWithOpenRestyOnBlockDelimitation(t *testing.T) {
 	requireOracle(t)
 
 	const template = "events { worker_connections 16; }\n" +
@@ -208,53 +211,33 @@ func TestDivergencesBetweenTheOracleAndNgx(t *testing.T) {
 		"} } }\n"
 
 	cases := []struct {
-		name      string
-		body      string
-		openresty bool // does the binary accept it?
-		ngx       bool // does ngx accept it?
-		why       string
+		name string
+		body string
+		why  string
 	}{
 		{
-			name:      "aspas simples escapadas",
-			body:      ` local s = 'a\'b' `,
-			openresty: true,
-			ngx:       false,
-			why: "DIVERGENCIA. Lua aceita \\' dentro de string simples; o lexer do " +
-				"crossplane (lua.go) trata a barra invertida como um caractere qualquer, " +
-				"entao a segunda aspa FECHA a string e a chave que fecha o bloco cai " +
-				"'dentro de aspas'. O bloco nunca termina e o arquivo e recusado.",
+			name: "escaped single quote",
+			body: ` local s = 'a\'b' `,
+			why: "Lua accepts \\' inside a single-quoted string. crossplane's lexer " +
+				"treated the backslash as any other character, so the second quote " +
+				"closed the string, the closing brace fell 'inside quotes', and the " +
+				"block never ended.",
 		},
 		{
-			name:      "aspas duplas escapadas",
-			body:      ` local s = "a\"b" `,
-			openresty: true,
-			ngx:       false,
-			why:       "Mesma causa da anterior: a barra invertida nao escapa nada no lexer da dependencia.",
+			name: "escaped double quote",
+			body: ` local s = "a\"b" `,
+			why:  "Same cause, other quote.",
 		},
 		{
-			name:      "body vazio",
-			body:      "",
-			openresty: false,
-			ngx:       true,
-			why: "DIVERGENCIA NA OUTRA DIRECAO, e semantica, nao sintatica: o " +
-				"lua-nginx-module recusa com 'no runnable Lua code'. Nao e um defeito " +
-				"do ngx -- delimitar um bloco vazio esta certo --, mas e a razao de a " +
-				"fixture nao ter um.",
+			name: "long bracket with an unbalanced brace",
+			body: ` local s = [[ } ]] `,
+			why: "A Lua long bracket is a string. To crossplane's lexer it was not, so " +
+				"the brace inside it counted and the block closed early.",
 		},
 		{
-			name:      "colchete longo com chave desbalanceada",
-			body:      ` local s = [[ } ]] `,
-			openresty: true,
-			ngx:       false,
-			why: "O colchete longo do Lua nao e string para o lexer do crossplane: a " +
-				"chave de dentro dele conta, e o bloco fecha cedo demais.",
-		},
-		{
-			name:      "comentario Lua com chave desbalanceada",
-			body:      " -- }\n ngx.say(1) ",
-			openresty: true,
-			ngx:       false,
-			why:       "Mesma causa: o lexer da dependencia nao conhece comentario Lua.",
+			name: "Lua comment with an unbalanced brace",
+			body: " -- }\n ngx.say(1) ",
+			why:  "Same cause: the dependency's lexer did not know Lua comments.",
 		},
 	}
 
@@ -263,34 +246,73 @@ func TestDivergencesBetweenTheOracleAndNgx(t *testing.T) {
 			src := strings.Replace(template, "%s", c.body, 1)
 
 			output, accepted := openrestyTest(t, src)
-			require.Equalf(t, c.openresty, accepted,
-				"o OpenResty mudou de comportamento para %q.\n%s\n%s", c.name, c.why, output)
+			require.Truef(t, accepted,
+				"OpenResty refused %q, so this row no longer describes valid "+
+					"configuration.\n%s\n%s", c.name, c.why, output)
 
-			_, err := ngxParse(t, src)
-			if c.ngx {
-				require.NoErrorf(t, err, "o ngx mudou de comportamento para %q.\n%s", c.name, c.why)
-				return
-			}
-			require.Errorf(t, err,
-				"o ngx passou a aceitar %q -- se foi upstream, a nota abaixo envelheceu.\n%s",
-				c.name, c.why)
+			file, err := ngxParse(t, src)
+			require.NoErrorf(t, err,
+				"ngx refused what OpenResty accepts for %q -- delimitation "+
+					"regressed.\n%s", c.name, c.why)
+
+			// Accepting is not enough. A delimiter placed one byte off can
+			// still produce a tree, with the directive after the block eaten
+			// into the Lua body, so the proof is that the directive survived.
+			tree := &config.Tree{Files: []*config.File{file}}
+			var found bool
+			tree.Walk(func(n *config.Node) bool {
+				if n.Directive == "access_log" {
+					found = true
+				}
+				return true
+			})
+			require.Truef(t, found,
+				"the directive after the block was swallowed for %q, so the body "+
+					"ended in the wrong place even though the file parsed", c.name)
 		})
 	}
 }
 
-// The most serious of the measured divergences, and the only one that does not
-// fit the template above, because it depends on the text that comes AFTER the
-// block.
+// The one divergence still standing, and it is semantic rather than a matter of
+// delimitation: lua-nginx-module refuses an empty body with "no runnable Lua
+// code", a judgement about what the code DOES. ngx delimits the block
+// correctly and says nothing about its contents, which is the same thing
+// `openresty -t` does for every non-empty body.
 //
-// A Lua comment holding an unbalanced brace makes crossplane's lexer close the
-// block EARLY. In the table cases above that becomes an error, which is bad but
-// visible. Not here: ngx ACCEPTS the file and builds a tree, while OpenResty
-// REFUSES it. That is, ngx describes a structure the real server never had --
-// with no signal at all to whoever consumes the output.
+// It stays open on purpose. Closing it would mean ngx deciding whether Lua is
+// runnable, which is a different tool.
+func TestTheRemainingDivergenceIsSemanticAndNotDelimitation(t *testing.T) {
+	requireOracle(t)
+
+	src := "events { worker_connections 16; }\n" +
+		"http { server { listen 8080; location / {\n" +
+		"content_by_lua_block {}\n" +
+		"access_log off;\n" +
+		"} } }\n"
+
+	output, accepted := openrestyTest(t, src)
+	require.Falsef(t, accepted,
+		"OpenResty now accepts an empty Lua body; this note has aged:\n%s", output)
+	require.Contains(t, output, "no runnable Lua code",
+		"OpenResty still refuses it, but for a different reason than recorded")
+
+	_, err := ngxParse(t, src)
+	require.NoError(t, err,
+		"ngx started refusing an empty body -- delimiting an empty block is "+
+			"correct, and refusing it would be a semantic judgement ngx does not make")
+}
+
+// The divergence that used to block v0.2, asserted from the other side.
 //
-// Fixing it stays out of scope: the delimitation comes from the dependency's
-// lexer. It is recorded here so the note does not age in silence.
-func TestALuaCommentWithABraceMakesNgxAcceptWhatOpenRestyRefuses(t *testing.T) {
+// `content_by_lua_block { -- }` is a comment that swallows the closing brace,
+// so the block never ends and the file is truncated. OpenResty refuses it.
+// crossplane's lexer closed the block at that brace, which made ngx ACCEPT the
+// file and build a tree describing a structure the running server never had --
+// with nothing in the output saying so. An edit targeted at that tree would
+// have cut in the wrong place, which is why v0.2 could not start.
+//
+// Both refuse it now, and this test is what keeps that true.
+func TestNgxRefusesTheCommentedOutBraceJustAsOpenRestyDoes(t *testing.T) {
 	requireOracle(t)
 
 	src := "events { worker_connections 16; }\n" +
@@ -300,10 +322,11 @@ func TestALuaCommentWithABraceMakesNgxAcceptWhatOpenRestyRefuses(t *testing.T) {
 		"} }\n"
 
 	output, accepted := openrestyTest(t, src)
-	require.Falsef(t, accepted, "o OpenResty passou a aceitar isto; a nota envelheceu:\n%s", output)
+	require.Falsef(t, accepted,
+		"OpenResty now accepts this; the note has aged:\n%s", output)
 
 	_, err := ngxParse(t, src)
-	require.NoError(t, err,
-		"o ngx passou a recusar isto -- se foi upstream, a divergencia fechou e "+
-			"esta nota pode sair")
+	require.Error(t, err,
+		"ngx accepts a file OpenResty refuses, which is the v0.2 blocker "+
+			"reopening: the tree would describe a structure the server never had")
 }
