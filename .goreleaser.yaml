@@ -537,39 +537,46 @@ release:
   # other way to find out. "It was in the schema version" is not a defence for
   # silence.
   header: |
-    ## Breaking changes for anyone reading the JSON
+    ## What changed for anyone reading the output
 
-    This release introduces `schema_version` in the envelope, with value `1`.
-    v0.1.0 declared no schema version at all, so anything without the field is
-    pre-contract. Two shapes changed:
+    `schema_version` is still `1`: nothing in the envelope's SHAPE was removed
+    or renamed. Two behaviours changed, and one column did.
 
-    - **`inspect` no longer returns the tree by default.** `data.config` is
-      absent unless `--full-tree` is given. On a 132-file production
-      configuration this is the difference between 1.6 MB and a few hundred
-      bytes — the point of the release — but code that read `data.config`
-      unconditionally now gets nothing.
-    - **A redacted directive keeps its other arguments.** `args` used to
-      collapse to `["***"]`; it is now `["Authorization", "***"]`, with the
-      censored positions listed in the new `redacted_args`. That is what makes
-      a censored value distinguishable from a literal `***` in the
-      configuration, and it breaks anyone reading `args[0]`.
+    - **A node now carries `ref`, and `ref` is what names it.** An `id` is
+      unique within its FILE, not within the configuration: IDs count siblings
+      from the root of the file they live in, so on the `conf.d/*.conf` layout
+      every distribution ships, the first directive of every file is `s0.d0`.
+      Measured against a 133-file production configuration: `--directive
+      listen` returned **324 matches carrying 23 distinct ids** — an average of
+      fourteen nodes answering to the same name. The same query now returns 324
+      distinct `ref`s. `ref` is `"<file>#<id>"`, it is assigned once and never
+      reassigned, and it is what v0.2 will target.
 
-    Nothing that writes to an nginx configuration exists yet: v0.1.1 is still
-    read-only, and mutation is v0.2.
+    - **`get --format table` has one `ref` column where it had `id` and
+      `file`.** This is the one break: a script reading those two columns has
+      to read one. It is also cheaper, since `ref` already contains the file,
+      so printing both meant printing the file twice per row. JSON is additive
+      — `id`, `file` and `ref` are all present.
 
-    ## One limit worth knowing before you build on `id`
+    - **Lua blocks are delimited by Lua's rules.** ngx no longer uses the
+      dependency's Lua lexer, which counted braces outside `'` and `"` and
+      knew nothing else. Verified against OpenResty 1.27.1.2: four
+      configurations that ngx used to REFUSE and the server accepts now parse
+      (an escaped quote `'a\'b'`, an escaped `"a\"b"`, a long bracket
+      `[[ } ]]`, a comment `-- }`), and one that ngx used to ACCEPT and the
+      server refuses is now refused — `content_by_lua_block { -- }`, where the
+      comment swallows the closing brace. That last one is why this release
+      exists: ngx was describing a structure the running server never had, with
+      nothing in the output saying so.
 
-    The `id` on a node is unique within its FILE, not within the configuration.
-    IDs count siblings from the root of the file they live in, so on the
-    `conf.d/*.conf` layout that every distribution ships, the first `server` of
-    every file is `s0` and its first directive is `s0.d0`. Measured against the
-    test bench: 112 `listen` directives, one distinct ID.
+      Reported upstream as nginxinc/nginx-go-crossplane#179, with reproductions
+      and an offer to patch. The workaround is not waiting on it.
 
-    This is why every output that carries an `id` carries its `file` next to
-    it. Treat the pair as the reference; an `id` on its own does not name a
-    node. No v0.1.1 command takes an `id` as input, so nothing resolves one
-    today — and settling what the reference should be is a prerequisite for
-    v0.2, not something to infer from this output.
+    - **A comment's text no longer carries carriage returns.** `# a\rb` used to
+      come out as `" a\rb"`; a CR there is noise in what a reader consumes.
+
+    Still read-only. Mutation is v0.2, and both prerequisites that were blocking
+    it are closed: this is the last release before that work starts.
 
   footer: |
     ---
