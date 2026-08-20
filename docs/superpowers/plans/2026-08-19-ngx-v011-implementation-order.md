@@ -385,11 +385,25 @@ says so.
 *For v0.1.1 this is a wrong reading, and `ngx test` still gives a correct
 answer about validity because it delegates to nginx itself.*
 
-*For v0.2 it is a blocking prerequisite.* Editing is targeted by position in a
-tree; a tree that describes a structure the server never had turns a surgical
-byte substitution into a cut in the wrong place. **v0.2 must not begin until
-this divergence is closed or detected**, and the honest fix is upstream, in
-crossplane's Lua lexer, not a fork here.
+*It was a blocking prerequisite for v0.2, and it is now CLOSED.* Not upstream,
+and not by a fork: crossplane exposes `Lexer` as a public interface
+(`lex.go:48-53`) and `LexWithLexer` as the way to register one, so ngx
+registers its own (`internal/config/luascan.go`, `lualexer.go`). The
+delimitation follows Lua's rules — braces counted in code, and not inside a
+short string with escapes, a long bracket, or either kind of comment — and it
+lives in one state machine because two readers need it and must not disagree by
+a byte: the tree crossplane builds and the byte spans our tokenizer produces.
+
+Until then the tokenizer *deliberately replicated* the dependency's wrong rule,
+because being right alone would have desynchronised the two streams and pointed
+spans at the wrong text. That constraint is what made "wait for upstream" look
+inevitable, and it dissolved the moment the lexer became ours.
+
+Verified against OpenResty 1.27.1.2: the four rows that were divergences are
+agreements, and the case that made ngx accept a file the server refuses now
+makes ngx refuse it too. One divergence stays open on purpose — an empty body,
+which lua-nginx-module rejects as "no runnable Lua code", a judgement about what
+the code DOES rather than where it ends.
 
 *Test design worth copying:* the case asserts that OpenResty still refuses AND
 that ngx still accepts. If either side changes — an upstream fix, a lexer
@@ -415,27 +429,35 @@ command: `get` never combines and `inspect` only does with `--combine`.
 node. IDs are output-only, and every output that carries one carries its `file`
 next to it, which is what actually scopes it.
 
-*For v0.2 it is a blocking prerequisite*, and of the same family as the Lua one
-above: both let a caller act on a node it never read. `FindByID` used to return
-the first match, which would have made `ngx set --id s0.d0` edit one of 112
-nodes at random. It now refuses the ambiguous case (`ids.go`), so the failure is
-a refusal rather than a wrong edit — but a refusal is not a reference, and v0.2
-needs one.
+*It was a blocking prerequisite for v0.2, and it is now CLOSED.* The reference
+is `Node.Ref`, `"<file>#<id>"`. The query that returned 112 matches with one
+distinct ID returns 112 matches with 112 distinct refs.
 
-**The decision is deliberately not taken here**, because it is the kind that
-looks obvious and is not:
+The three candidates, and why the middle one won:
 
 - *Assign IDs over the whole configuration.* Makes them unique, and destroys
   the stability D3 promises: dropping a new file into `conf.d/*.conf` would
   renumber servers in files nobody touched.
-- *Make the reference `(file, id)`.* Keeps stability and matches what the output
-  already shows, at the cost of a compound reference.
+- *Make the reference `(file, id)`.* **Chosen.** The file is the natural scope
+  and scoping by it costs nothing — adding, removing or renaming a file cannot
+  renumber another one — and it is what the output already showed side by side.
 - *Make `--combine` the addressing tree.* Unique and stable against sibling
-  files, but the IDs then belong to a view the caller has to ask for.
+  files, but the IDs belong to a view the caller has to ask for, so a reference
+  would mean nothing without the flag that produced it.
 
-Whichever wins has to answer the same question D3 asks: what happens to a
-reference when the configuration changes underneath it. That belongs in the
-structured v0.2 plan.
+So **Ref is identity and ID is position in the current view.** That split is why
+`AssignRefs` is separate from `AssignIDs`: `Combine` renumbers ID over the
+assembled tree, which is what makes `h.s0` read sensibly there, and leaves Ref
+alone — a caller can read through one view and act through the reference it saw.
+`FindByRef` cannot be ambiguous; `FindByID` stays, still refusing the ambiguous
+case, because an ID is what a human reads off a table.
+
+It answers D3's question the same way D3 does: a reference is anchored in SPACE
+by the file and in TIME by `config_hash`. Neither substitutes for the other.
+
+*Contract note:* the `get` table now carries one `ref` column where it carried
+`id` and `file`. JSON is additive — `id`, `file` and `ref` are all present — so
+nothing reading the envelope breaks.
 
 ### Where the oracle itself could lie
 

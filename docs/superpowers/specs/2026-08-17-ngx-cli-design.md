@@ -83,12 +83,17 @@ previous sibling is inserted or removed. The hash anchor turns a silent error
 "ambiguity is error, don't guess" applied to time rather than to space, and it
 reuses the optimistic locking the spec already defines for patches.
 
-*What this does NOT say, and was measured in the v0.1.1 gate:* the ID is unique
-within its file, not within the configuration. IDs are assigned per file, so on
-the `conf.d/*.conf` layout the first server of every file is `s0`. The hash
-anchors an ID in TIME; nothing here anchors it in SPACE. Choosing that
-reference is a v0.2 prerequisite, recorded in
-`plans/2026-08-19-ngx-v011-implementation-order.md`.
+*What this does not say on its own, and was measured in the v0.1.1 gate:* the
+ID is unique within its FILE, not within the configuration. IDs are assigned per
+file, so on the `conf.d/*.conf` layout the first server of every file is `s0` --
+112 `listen` directives on the bench carried one distinct ID.
+
+The hash anchors a reference in TIME. What anchors it in SPACE is the file, and
+the reference that carries both is **`Ref`, `"<file>#<id>"`**. Ref is identity
+and survives a change of view; `ID` is position in the view being looked at, so
+`--combine` renumbers ID and leaves Ref alone. `FindByRef` resolves one node or
+none; `FindByID` refuses the ambiguous case rather than returning the first of
+several.
 
 ### D4 — Drift by evidence, not by master hash
 
