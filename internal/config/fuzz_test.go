@@ -347,6 +347,27 @@ func checkDifferentialAgainstCrossplane(t *testing.T, s string, toks []config.To
 		reference = append(reference, tok)
 	}
 
+	// Comments come out of both lexers and are dropped from both sides,
+	// because the two carry different text for the same comment: ours holds
+	// " comment" and crossplane's holds "# comment". This test compares count
+	// and kind -- values only as a bonus, on tokens that are not comments --
+	// so normalising that text would be work in service of nothing.
+	//
+	// Their side is identified by "unquoted and starts with #", which is what
+	// a comment looks like coming out of crossplane's lexer. That rule has
+	// exactly ONE false positive, and it is enumerable rather than a matter of
+	// degree: the first argument of `set_by_lua_block` is read as a run of
+	// non-space characters with no notion of quoting or comments
+	// (crossplane/lua.go:68-90, replicated in readLuaFirstArg), so
+	// `set_by_lua_block # {}` has "#" as the VARIABLE NAME. Both lexers emit
+	// it identically, as an argument; the unqualified rule deleted it from the
+	// oracle's side alone and the fuzz reported a divergence where the two
+	// agreed exactly.
+	//
+	// So the exception is stated, and stated narrowly -- the token immediately
+	// after a `set_by_lua_block` name is never a comment -- instead of
+	// loosening the rule until nothing fails. A broader filter here does not
+	// make the test pass; it makes it stop looking.
 	var ours []config.Token
 	for _, tok := range toks {
 		if tok.Kind == config.TokenComment {
@@ -356,8 +377,12 @@ func checkDifferentialAgainstCrossplane(t *testing.T, s string, toks []config.To
 	}
 
 	var theirs []crossplane.NgxToken
+	luaVariableNext := false
 	for _, tok := range reference {
-		if !tok.IsQuoted && strings.HasPrefix(tok.Value, "#") {
+		isLuaVariable := luaVariableNext
+		luaVariableNext = !tok.IsQuoted && tok.Value == "set_by_lua_block"
+
+		if !isLuaVariable && !tok.IsQuoted && strings.HasPrefix(tok.Value, "#") {
 			continue
 		}
 		theirs = append(theirs, tok)

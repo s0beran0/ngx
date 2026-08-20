@@ -203,22 +203,49 @@ func (t *tokenizer) next() error {
 	}
 }
 
-// readComment consumes a comment up to the end of the line. The CR of a
-// CRLF terminator stays out of the token span: it belongs to the whitespace
-// that follows, not to the comment. That way v0.2, when rewriting that
-// comment, never converts the line break from CRLF to LF -- an off-target
-// change the project promises never to make.
+// readComment consumes a comment up to the end of the line.
+//
+// A terminating CR stays out of the token span -- whether it precedes an LF or
+// ends the file -- because it belongs to the whitespace that follows, not to
+// the comment. That way v0.2, when rewriting the comment, never converts the
+// line break from CRLF to LF: an off-target change the project promises never
+// to make.
+//
+// A CR anywhere INSIDE the comment stays in the span, since the span has to be
+// contiguous, and out of the Value, because a stray CR is invisible to
+// crossplane everywhere (lex.go:173-175) and readQuoted already says so for
+// quoted tokens. The comment was the one place that disagreed, and it was not
+// on purpose: `# a\rb` came out as " a\rb" here and "# ab" there. Nothing
+// compared the two -- the aligner matches by count and kind, never by value --
+// so the only thing this leaked into was the text an agent reads, where a
+// carriage return is noise.
 func (t *tokenizer) readComment(start, line, col int) {
+	// The "#" is consumed here and kept out of Value, which is what the old
+	// slice of src[start+1:] did implicitly.
+	t.advance()
+
+	var value []byte
 	for t.pos < len(t.src) {
-		if t.src[t.pos] == '\n' {
+		c := t.src[t.pos]
+		if c == '\n' {
 			break
 		}
-		if t.src[t.pos] == '\r' && t.pos+1 < len(t.src) && t.src[t.pos+1] == '\n' {
+		if c == '\r' && (t.pos+1 == len(t.src) || t.src[t.pos+1] == '\n') {
 			break
 		}
-		t.advance()
+		if c == '\r' {
+			t.advance()
+			continue
+		}
+		// consumeIntoValue and not a byte slice, because it is the primitive
+		// every other token uses: it advances by a RUNE, so a multi-byte
+		// character is not cut in half, and it replaces an invalid byte with
+		// U+FFFD, which is what crossplane's rune scanner produces. Both cases
+		// were found by the fuzz corpus rather than reasoned about -- "ç" for
+		// the first, "\xe3" for the second.
+		value = append(value, t.consumeIntoValue()...)
 	}
-	t.emit(TokenComment, string(t.src[start+1:t.pos]), start, line, col, false)
+	t.emit(TokenComment, string(value), start, line, col, false)
 }
 
 // readQuoted consumes a string between single or double quotes. A backslash is

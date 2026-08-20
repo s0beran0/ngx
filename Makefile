@@ -138,7 +138,12 @@ test-race:
 	go test ./... -race
 
 FUZZTIME ?= 60s
+# Both targets, because CI runs both and a local `make fuzz` that ran one was
+# a check that looked like the CI check and was not. FuzzTokenizeSpans is the
+# differential against crossplane's lexer; FuzzAlignment is the token-to-tree
+# matching. They fail on different defects.
 fuzz:
+	go test ./internal/config/ -run '^$$' -fuzz FuzzTokenizeSpans -fuzztime $(FUZZTIME)
 	go test ./internal/config/ -run '^$$' -fuzz FuzzAlignment -fuzztime $(FUZZTIME)
 
 cover:
