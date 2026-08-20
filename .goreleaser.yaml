@@ -374,7 +374,17 @@ homebrew_casks:
       owner: s0beran0
       name: homebrew-tap
       branch: main
-      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+      # `.Env.X` and not envOrDefault: the credential fields are evaluated
+      # with a RESTRICTED template engine that does not carry the general
+      # function set, and `envOrDefault` there fails with "function not
+      # defined". It only surfaced when the tokens were finally set, because
+      # until then skip_upload was true and this field was never evaluated --
+      # the absent credential was standing in for a correct expression.
+      #
+      # Safe because release.yml passes all four through `env:`, so each one is
+      # present in the environment even when the secret is unset: GitHub sets it
+      # to the empty string rather than leaving it out.
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
     skip_upload: '{{ if or (eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     homepage: *pkg_homepage
     # One line, no leading article, does not start with the cask name: those
@@ -411,7 +421,7 @@ scoops:
       owner: s0beran0
       name: scoop-bucket
       branch: main
-      token: '{{ envOrDefault "SCOOP_BUCKET_TOKEN" "" }}'
+      token: '{{ .Env.SCOOP_BUCKET_TOKEN }}'
     skip_upload: '{{ if or (eq (envOrDefault "SCOOP_BUCKET_TOKEN" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     homepage: *pkg_homepage
     description: *channel_description
@@ -461,7 +471,7 @@ winget:
       owner: s0beran0
       name: winget-pkgs
       branch: "ngx-{{ .Version }}"
-      token: '{{ envOrDefault "WINGET_PKGS_TOKEN" "" }}'
+      token: '{{ .Env.WINGET_PKGS_TOKEN }}'
       pull_request:
         enabled: true
         draft: false
@@ -490,7 +500,7 @@ aurs:
       - ngx
     conflicts:
       - ngx
-    private_key: '{{ envOrDefault "AUR_SSH_KEY" "" }}'
+    private_key: '{{ .Env.AUR_SSH_KEY }}'
     git_url: "ssh://aur@aur.archlinux.org/ngx-bin.git"
     skip_upload: '{{ if or (eq (envOrDefault "AUR_SSH_KEY" "") "") (ne .Prerelease "") }}true{{ else }}false{{ end }}'
     commit_author: *channel_commit_author
