@@ -29,6 +29,12 @@ package config
 // interface crossplane exposes is public (crossplane/lex.go:48-53), and
 // registering our own is what turns "their bug" into "our rule".
 //
+// It is reported anyway, with the reproductions above and the offer of a patch:
+// nginxinc/nginx-go-crossplane#179. Keeping the workaround and filing the bug
+// are not alternatives -- the workaround is what makes ngx correct today, and
+// the report is what eventually makes this file unnecessary. If it lands, the
+// oracle in test/bench is what will say so.
+//
 // What is deliberately NOT here: running Lua, or checking that the body is
 // valid Lua. `openresty -t` does not do that either -- it only finds where the
 // block ends -- so this file answers exactly the question the server asks and

@@ -399,6 +399,11 @@ because being right alone would have desynchronised the two streams and pointed
 spans at the wrong text. That constraint is what made "wait for upstream" look
 inevitable, and it dissolved the moment the lexer became ours.
 
+Reported upstream regardless, with the reproductions and an offer to patch
+`lua.go`: nginxinc/nginx-go-crossplane#179. The workaround and the report are
+not alternatives — one makes ngx correct today, the other is what eventually
+makes our lexer unnecessary.
+
 Verified against OpenResty 1.27.1.2: the four rows that were divergences are
 agreements, and the case that made ngx accept a file the server refuses now
 makes ngx refuse it too. One divergence stays open on purpose — an empty body,
