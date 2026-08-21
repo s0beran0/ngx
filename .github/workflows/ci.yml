@@ -81,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzAlignment, FuzzTokenizeSpans]
+        target: [FuzzAlignment, FuzzTokenizeSpans, FuzzReconstitution]
     steps:
       - uses: actions/checkout@v6
 

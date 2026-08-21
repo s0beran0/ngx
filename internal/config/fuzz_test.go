@@ -347,45 +347,66 @@ func checkDifferentialAgainstCrossplane(t *testing.T, s string, toks []config.To
 		reference = append(reference, tok)
 	}
 
-	// Comments come out of both lexers and are dropped from both sides,
-	// because the two carry different text for the same comment: ours holds
-	// " comment" and crossplane's holds "# comment". This test compares count
-	// and kind -- values only as a bonus, on tokens that are not comments --
-	// so normalising that text would be work in service of nothing.
+	// Comments come out of both lexers and are dropped from both sides, because
+	// the two carry different text for the same comment: ours holds " comment"
+	// and crossplane's holds "# comment". This test compares count and kind, so
+	// normalising that text would be work in service of nothing.
 	//
-	// Their side is identified by "unquoted and starts with #", which is what
-	// a comment looks like coming out of crossplane's lexer. That rule has
-	// exactly ONE false positive, and it is enumerable rather than a matter of
-	// degree: the first argument of `set_by_lua_block` is read as a run of
-	// non-space characters with no notion of quoting or comments
-	// (crossplane/lua.go:68-90, replicated in readLuaFirstArg), so
-	// `set_by_lua_block # {}` has "#" as the VARIABLE NAME. Both lexers emit
-	// it identically, as an argument; the unqualified rule deleted it from the
-	// oracle's side alone and the fuzz reported a divergence where the two
-	// agreed exactly.
+	// A "#" token is treated as a comment only when BOTH sides say so. That is
+	// the rule, and it replaced two attempts that were wrong in the same way --
+	// they tried to decide, on the oracle's stream alone, whether a "#" was a
+	// comment or data.
 	//
-	// So the exception is stated, and stated narrowly -- the token immediately
-	// after a `set_by_lua_block` name is never a comment -- instead of
-	// loosening the rule until nothing fails. A broader filter here does not
-	// make the test pass; it makes it stop looking.
+	// It cannot be decided there. The first argument of `set_by_lua_block` is
+	// read as a run of non-space characters with no notion of quoting or
+	// comments (crossplane/lua.go:68-90), so in `set_by_lua_block # {}` the "#"
+	// is a VARIABLE NAME, emitted identically to a comment. Filtering by
+	// "unquoted and starts with #" deleted it from the oracle's side alone.
+	// Qualifying that with "unless the previous token was set_by_lua_block"
+	// broke on `0 set_by_lua_block #`, where the name is an argument. Adding
+	// nginx's directive-position rule broke on `''set_by_lua_block # {}`, where
+	// the two lexers disagree about position after an empty quoted token.
+	//
+	// Each fix was a further step into re-implementing the lexer on the oracle
+	// side, which is the thing this project's rules say not to do: derive, do
+	// not guess. Walking the two streams together needs no such decision. When
+	// they agree it is a comment, both drop it; when they disagree, both keep it
+	// and the comparison below says so -- which is the failure this test exists
+	// to report, rather than one the filter hides.
 	var ours []config.Token
-	for _, tok := range toks {
-		if tok.Kind == config.TokenComment {
-			continue
-		}
-		ours = append(ours, tok)
-	}
-
 	var theirs []crossplane.NgxToken
-	luaVariableNext := false
-	for _, tok := range reference {
-		isLuaVariable := luaVariableNext
-		luaVariableNext = !tok.IsQuoted && tok.Value == "set_by_lua_block"
+	i, j := 0, 0
+	for i < len(toks) && j < len(reference) {
+		ourComment := toks[i].Kind == config.TokenComment
+		theirComment := !reference[j].IsQuoted && strings.HasPrefix(reference[j].Value, "#")
 
-		if !isLuaVariable && !tok.IsQuoted && strings.HasPrefix(tok.Value, "#") {
-			continue
+		switch {
+		case ourComment && theirComment:
+			i++
+			j++
+		case ourComment:
+			// Ours calls it a comment and theirs does not. Dropping only ours
+			// leaves the counts unequal on purpose: that asymmetry IS the
+			// divergence, and hiding it is how the earlier filters failed.
+			i++
+		default:
+			ours = append(ours, toks[i])
+			theirs = append(theirs, reference[j])
+			i++
+			j++
 		}
-		theirs = append(theirs, tok)
+	}
+	// Whatever is left over stays in, so a length divergence is reported rather
+	// than trimmed away.
+	for ; i < len(toks); i++ {
+		if toks[i].Kind != config.TokenComment {
+			ours = append(ours, toks[i])
+		}
+	}
+	for ; j < len(reference); j++ {
+		if reference[j].IsQuoted || !strings.HasPrefix(reference[j].Value, "#") {
+			theirs = append(theirs, reference[j])
+		}
 	}
 
 	if len(ours) != len(theirs) {

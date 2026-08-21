@@ -139,12 +139,18 @@ test-race:
 
 FUZZTIME ?= 60s
 # Both targets, because CI runs both and a local `make fuzz` that ran one was
-# a check that looked like the CI check and was not. FuzzTokenizeSpans is the
-# differential against crossplane's lexer; FuzzAlignment is the token-to-tree
-# matching. They fail on different defects.
+# a check that looked like the CI check and was not. The three ask different
+# questions and fail on different defects: FuzzTokenizeSpans is the differential
+# against crossplane's lexer, FuzzAlignment is the token-to-tree matching, and
+# FuzzReconstitution is whether the spans TILE the file with nothing meaningful
+# left over -- the property every byte substitution in v0.2 depends on.
+#
+# Adding a target here without adding it to the matrix in ci.yml leaves it
+# running locally and nowhere else.
 fuzz:
 	go test ./internal/config/ -run '^$$' -fuzz FuzzTokenizeSpans -fuzztime $(FUZZTIME)
 	go test ./internal/config/ -run '^$$' -fuzz FuzzAlignment -fuzztime $(FUZZTIME)
+	go test ./internal/config/ -run '^$$' -fuzz FuzzReconstitution -fuzztime $(FUZZTIME)
 
 cover:
 	go test ./... -coverprofile=cover.out
