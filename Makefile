@@ -145,12 +145,17 @@ FUZZTIME ?= 60s
 # FuzzReconstitution is whether the spans TILE the file with nothing meaningful
 # left over -- the property every byte substitution in v0.2 depends on.
 #
+# FuzzPlanValidation lives in another package, which is why the CI matrix now
+# carries a package field per target: a target added in one place and not the
+# other runs locally and nowhere else, or in CI and never on a laptop.
+#
 # Adding a target here without adding it to the matrix in ci.yml leaves it
 # running locally and nowhere else.
 fuzz:
 	go test ./internal/config/ -run '^$$' -fuzz FuzzTokenizeSpans -fuzztime $(FUZZTIME)
 	go test ./internal/config/ -run '^$$' -fuzz FuzzAlignment -fuzztime $(FUZZTIME)
 	go test ./internal/config/ -run '^$$' -fuzz FuzzReconstitution -fuzztime $(FUZZTIME)
+	go test ./internal/plan/ -run '^$$' -fuzz FuzzPlanValidation -fuzztime $(FUZZTIME)
 
 cover:
 	go test ./... -coverprofile=cover.out

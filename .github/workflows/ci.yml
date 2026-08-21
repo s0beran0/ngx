@@ -81,7 +81,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzAlignment, FuzzTokenizeSpans, FuzzReconstitution]
+        # Two fields, because the targets no longer all live in one package.
+        # A target added to the Makefile and not here runs locally and nowhere
+        # else -- which is how `make fuzz` came to cover a subset of CI once.
+        include:
+          - pkg: ./internal/config
+            target: FuzzAlignment
+          - pkg: ./internal/config
+            target: FuzzTokenizeSpans
+          - pkg: ./internal/config
+            target: FuzzReconstitution
+          - pkg: ./internal/plan
+            target: FuzzPlanValidation
     steps:
       - uses: actions/checkout@v6
 
@@ -95,7 +106,7 @@ jobs:
       # regression; a long campaign is run by hand.
       - name: fuzz ${{ matrix.target }} for 60s
         run: >
-          go test ./internal/config
+          go test ${{ matrix.pkg }}
           -run '^$'
           -fuzz '^${{ matrix.target }}$'
           -fuzztime=60s
@@ -107,7 +118,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: fuzz-corpus-${{ matrix.target }}
-          path: internal/config/testdata/fuzz/
+          path: ${{ matrix.pkg }}/testdata/fuzz/
           if-no-files-found: ignore
 
   cross:
