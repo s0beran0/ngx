@@ -205,7 +205,16 @@ func TestTheRepositoryIsWrittenInEnglish(t *testing.T) {
 func trackedFiles(t *testing.T, root string) []string {
 	t.Helper()
 
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z")
+	// --cached AND --others, so a file that has not been `git add`ed yet is
+	// checked too. Without --others this passed on a laptop and failed in CI on
+	// the very commit that added internal/plan: the file was untracked when the
+	// test ran locally, so it was invisible to the check that exists to catch
+	// exactly that. A check that only sees committed files is a check that runs
+	// after the mistake.
+	//
+	// --exclude-standard keeps .gitignore honoured, which is what stops
+	// .superpowers/ and dist/ from coming back.
+	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	out, err := cmd.Output()
 	require.NoError(t, err, "git ls-files failed; this test needs a git checkout")
 

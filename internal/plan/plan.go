@@ -265,10 +265,10 @@ func short(hash string) string {
 }
 
 // CodeOf returns the refusal code of an error, and whether it was a refusal at
-// all. Callers branch on this rather than on the message, which is the rule the
-// project paid for once: a --sudo hint that only appeared when a message
-// happened to contain the word "permissao", and vanished the day the repository
-// was translated.
+// all. Callers branch on this rather than on the message, which is the rule
+// CLAUDE.md records with the defect that bought it: a --sudo hint that keyed off
+// a word in the message text, and vanished the day the repository was
+// translated.
 func CodeOf(err error) (RefusalCode, bool) {
 	var r *Refusal
 	if errors.As(err, &r) {
