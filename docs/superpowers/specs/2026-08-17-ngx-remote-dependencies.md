@@ -179,13 +179,16 @@ Therefore:
 | **Key changed** | `errors.As(err, &ke)` e `len(ke.Want) > 0` | **possible attack**: say this in all letters, and show `ke.Want[i]` |
 | Key revoked | `errors.As(err, &re)` with `*knownhosts.RevokedError` (`knownhosts.go:333-339`) | refuses, informing the file and line |
 
-`**KeyError` — that is, a `var ke *knownhosts.KeyError` variable.The error is always returned by pointer (`&KeyError{}` in `knownhosts.go:375` and
-`&RevokedError{...}` in `knownhosts.go:345`), then `errors.As` needs
+The error is always returned by pointer (`&KeyError{}` in `knownhosts.go:375`
+and `&RevokedError{...}` in `knownhosts.go:345`), so `errors.As` needs a
+`**KeyError` -- that is, a `var ke *knownhosts.KeyError` variable.
 
-`ssh.ParseAuthorizedKey`. `"knownhosts: key is unknown"` with empty `Want` for missing host.This is exactly how the three cases above were
 How to test, without networking: set up `known_hosts` in `t.TempDir()`, call
-confirmed; `knownhosts.New`, and invoke the returned `ssh.HostKeyCallback` directly,
-the observed output was `"knownhosts: key mismatch"` with
+`knownhosts.New`, and invoke the returned `ssh.HostKeyCallback` directly with a
+key parsed by `ssh.ParseAuthorizedKey`. This is exactly how the three cases
+above were confirmed; the observed output was `"knownhosts: key mismatch"` with
+a populated `Want` for a changed key, and `"knownhosts: key is unknown"` with an
+empty `Want` for a missing host.
 passing a `*net.TCPAddr` as `remote` and a `ssh.PublicKey` obtained from
 `Want[0] = "<file>:1: ssh-ed25519 AAAA..."` for exchanged key, and
 

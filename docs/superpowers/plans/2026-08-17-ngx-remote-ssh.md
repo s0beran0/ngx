@@ -21,7 +21,9 @@ That's what the spec means
   which keeps unlocked SSH keys in memory and signs challenges on behalf of
   
 
-is just an "agent", it is the consumer of the output.In this document, `ssh-agent` is always written like this, with the prefix. Where
+In this document, `ssh-agent` is always written like this, with the prefix.
+Where the text says "agent" alone, it is the consumer of the output, not
+`ssh-agent`.
 
 **Spec:** `docs/superpowers/specs/2026-08-17-ngx-cli-design.md`. This plan fulfills part of the "multi-host via SSH" item that the spec puts in v1.0 (§16), anticipated by request.
 

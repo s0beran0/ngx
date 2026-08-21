@@ -32,7 +32,8 @@ production.
 
 ## 2. Decisions
 
-premises for everything that comes after.Decisions made during brainstorming, with the reason for each one. They are
+Decisions made during brainstorming, with the reason for each one. They are
+premises for everything that comes after.
 
 ### D1 — Surgical preservation of formatting
 
@@ -266,7 +267,8 @@ The spec examples mix the two cases. The rule:
 | `[arg0=/api]`, `[arg1=ssl]` | argument of the node itself, explicit |
 | `[server_name=api.com]` | **child** directive `server_name` with some arg matching |
 
-directive name.There is no ambiguity because `argN` is reserved; any other key can only be
+There is no ambiguity because `argN` is reserved: any other key can only be a
+directive name.
 
 ### R4 — Quantification over multiple arguments
 
@@ -357,7 +359,8 @@ documented as supported until they are issueable. Exit code
 documented but never issued is worse than absent: an agent writes treatment
 for a case that never occurs and fails to deal with what happens.
 
-single dot in `main.go` translates.Commands do not choose exit code. Each error is a type that carries its own, and a
+Commands do not choose an exit code. Each error is a type that carries its own,
+and a single point in `main.go` translates it.
 
 ### 6.3 Redaction
 
@@ -400,7 +403,8 @@ Behavior:
 
 ## 7. Runtime
 
-string is interpolated in shell.All nginx invocations use `exec.Command` with explicit argv. None
+All nginx invocations use `exec.Command` with explicit argv. No string is ever
+interpolated into a shell.
 
 ### 7.1 Detection
 

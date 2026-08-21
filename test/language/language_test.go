@@ -91,6 +91,69 @@ var allowed = map[string][]string{
 	"test/language/language_test.go": {"permissao"},
 }
 
+// A sentence that ends and restarts with no space between -- "noted.These" --
+// is what a machine translator leaves behind when it merges two columns of text
+// into one. It is not a language problem, so the marker list above cannot see
+// it, and it is worth its own check because of how it was found: by reading
+// writing-plans.md and hitting a paragraph that no longer parsed.
+//
+// The scan that first declared the docs clean was worthless, and the way it
+// failed is the reason this is a test rather than a shell one-liner. It was
+// `grep -rn ... | grep -v "\.md\|..."`, and `grep -rn` prefixes every line with
+// the file name -- every one of which ends in ".md". The exclusion deleted
+// 100% of the output by construction. A check that cannot fail and a check that
+// does not exist are the same thing, which this repository has now recorded
+// four times.
+func TestNoSentenceRunsIntoTheNext(t *testing.T) {
+	root := repoRoot(t)
+	// Lowercase or digit, a period, then an uppercase letter, with nothing
+	// between. Inside prose that is always damage.
+	pattern := regexp.MustCompile(`[a-z0-9]\.[A-Z]`)
+
+	var found []string
+	for _, rel := range trackedFiles(t, root) {
+		if filepath.Ext(rel) != ".md" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		require.NoError(t, err)
+
+		fenced := false
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "```") {
+				fenced = !fenced
+				continue
+			}
+			// Fenced and indented blocks are code, where "output.PublicKey"
+			// and ".Env.NGX_PUBLIC_KEY" are the point rather than a defect.
+			if fenced || strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t") {
+				continue
+			}
+			// Inline code spans are code for the same reason.
+			prose := inlineCode.ReplaceAllString(line, "")
+			if !pattern.MatchString(prose) {
+				continue
+			}
+			// "e.g.", "i.e." and a version like "v0.2" are not damage.
+			if abbreviations.MatchString(prose) {
+				continue
+			}
+			found = append(found, rel+":"+itoa(i+1)+": "+strings.TrimSpace(line))
+		}
+	}
+
+	if len(found) > 0 {
+		t.Errorf("%d line(s) run one sentence into the next, which is what a "+
+			"machine translation leaves when it merges columns:\n%s",
+			len(found), strings.Join(found, "\n"))
+	}
+}
+
+var (
+	inlineCode    = regexp.MustCompile("`[^`]*`")
+	abbreviations = regexp.MustCompile(`e\.g|i\.e|v[0-9]+\.`)
+)
+
 func TestTheRepositoryIsWrittenInEnglish(t *testing.T) {
 	root := repoRoot(t)
 	pattern := regexp.MustCompile(`(?i)\b(` + strings.Join(markers, "|") + `)\b`)

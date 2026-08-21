@@ -15,9 +15,15 @@
 - MIT License in the name of Eduardo Benck. Every external invocation uses `exec.Command` with explicit argv.
 Without any mention, branding or copyright of SEA Tecnologia.
 - Every JSON list field serializes as `[]`, never `null` — an agent that does `.length` on a null list breaks it.
-- Go module: `github.com/s0beran0/ngx`. - Unknown or unavailable field is **omitted**, never estimated or filled in with a false value.
-- **Commit messages never mention Claude or IA.** No `Co-Authored-By` trailer, no "Generated with". Go 1.25 (`.tool-versions` already fixes `golang 1.25.9`).
-- Code comments in Portuguese, like the rest of the project.Exclusive authorship by Eduardo.
+- Go module: `github.com/s0beran0/ngx`, Go 1.25 (`.tool-versions` already
+  fixes `golang 1.25.9`).
+- An unknown or unavailable field is **omitted**, never estimated or filled in
+  with a false value.
+- **Commit messages never mention Claude or AI.** No `Co-Authored-By` trailer,
+  no "Generated with". Authorship is Eduardo's alone.
+- Code comments in Portuguese, like the rest of the project at the time. *(No
+  longer true: the repository was translated to English on 2026-08-18, and
+  `test/language` now enforces it.)*
 - **Zero CGO.** No dependencies that require cgo.
 - No shell `exec`. 
 
