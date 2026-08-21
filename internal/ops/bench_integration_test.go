@@ -253,3 +253,106 @@ func TestBenchRemovingABlockIsAcceptedByRealNginx(t *testing.T) {
 		"the block's body survived its own removal")
 	require.Contains(t, string(got), "listen 8080;", "the removal took more than the block")
 }
+
+// benchWithIncludes is the layout every distribution ships: a root that
+// includes conf.d/*.conf. File operations only mean anything against it.
+func benchWithIncludes(t *testing.T) (*config.Tree, string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755))
+	root := filepath.Join(dir, "nginx.conf")
+	require.NoError(t, os.WriteFile(root, []byte(
+		"events { worker_connections 16; }\nhttp {\n  include conf.d/*.conf;\n}\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "conf.d", "a.conf"), []byte(
+		"server {\n  listen 8080;\n  server_name a.test;\n}\n"), 0o644))
+
+	tree, err := config.Parse(config.ParseOptions{Path: root})
+	require.NoError(t, err)
+	require.NoError(t, nginxCheck(t, dir)(), "the fixture is not valid nginx configuration")
+	return tree, root, dir
+}
+
+// create: real nginx loads the new file, which is the only proof that the
+// include check meant anything.
+func TestBenchCreateFileIsLoadedByRealNginx(t *testing.T) {
+	requireBench(t)
+	tree, root, dir := benchWithIncludes(t)
+	path := filepath.Join(dir, "conf.d", "b.conf")
+
+	p, err := ops.CreateFile(tree, root, path,
+		"server {\n  listen 8081;\n  server_name b.test;\n}\n", 0o644)
+	require.NoError(t, err)
+
+	res, err := apply.Run(apply.Options{Plan: p, Tree: tree, Root: root, Validate: nginxCheck(t, dir)})
+	require.NoError(t, err, "real nginx refused a file ngx created")
+	require.Equal(t, []string{path}, res.Created)
+	require.FileExists(t, path)
+}
+
+// create: content nginx refuses in that context is undone, and the file is
+// gone afterwards. `listen` at the top of an included file is valid syntax in
+// the wrong place -- the class only the binary knows about.
+func TestBenchCreateFileRollsBackWhenRealNginxRefuses(t *testing.T) {
+	requireBench(t)
+	tree, root, dir := benchWithIncludes(t)
+	path := filepath.Join(dir, "conf.d", "b.conf")
+
+	p, err := ops.CreateFile(tree, root, path, "listen 8081;\n", 0o644)
+	require.NoError(t, err, "ops accepted it, which is correct: context is nginx's judgement")
+
+	_, err = apply.Run(apply.Options{Plan: p, Tree: tree, Root: root, Validate: nginxCheck(t, dir)})
+	require.Error(t, err, "nginx accepted a bare listen inside http, so this proves nothing")
+
+	code, _ := apply.CodeOf(err)
+	require.Equal(t, apply.CodeValidateFailed, code)
+	require.NoFileExists(t, path, "a refused create left its file on disk")
+
+	// And the configuration still loads, which is the point of the rollback.
+	require.NoError(t, nginxCheck(t, dir)())
+}
+
+// delete: real nginx still accepts the configuration after a file is removed,
+// and a refusal puts it back with content and mode.
+func TestBenchDeleteFileAndItsRollback(t *testing.T) {
+	requireBench(t)
+
+	t.Run("accepted", func(t *testing.T) {
+		tree, root, dir := benchWithIncludes(t)
+		path := filepath.Join(dir, "conf.d", "a.conf")
+
+		p, err := ops.DeleteFile(tree, root, path)
+		require.NoError(t, err)
+
+		res, err := apply.Run(apply.Options{Plan: p, Tree: tree, Root: root, Validate: nginxCheck(t, dir)})
+		require.NoError(t, err, "real nginx refused the configuration after a delete")
+		require.Equal(t, []string{path}, res.Deleted)
+		require.NoFileExists(t, path)
+	})
+
+	t.Run("refused and put back", func(t *testing.T) {
+		tree, root, dir := benchWithIncludes(t)
+		path := filepath.Join(dir, "conf.d", "a.conf")
+		before, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		// Break the root so nginx refuses whatever happens next, which makes
+		// the delete's rollback the thing under test rather than the delete.
+		p, err := ops.DeleteFile(tree, root, path)
+		require.NoError(t, err)
+
+		res, err := apply.Run(apply.Options{Plan: p, Tree: tree, Root: root,
+			Validate: func() error { return &refusedByNginx{out: "pretend nginx refused"} }})
+		require.Error(t, err)
+		require.Equal(t, []string{path}, res.RolledBack)
+
+		require.FileExists(t, path)
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+
+		// And the restored configuration is one real nginx accepts.
+		require.NoError(t, nginxCheck(t, dir)())
+	})
+}

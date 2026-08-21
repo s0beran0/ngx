@@ -16,7 +16,9 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/s0beran0/ngx/internal/config"
@@ -85,6 +87,51 @@ type Plan struct {
 	// when writing -- it goes from the highest offset down, so earlier offsets
 	// stay valid -- but the order here is what a reviewer reads.
 	Edits []Edit `json:"edits"`
+
+	// Creates are whole files that do not exist yet, and Deletes are whole
+	// files that should stop existing.
+	//
+	// They are separate fields rather than a kind of Edit, and the reason is the
+	// invariant that makes an Edit safe: Before must be exactly the bytes at its
+	// span, which is what stops a plan from carrying a rendered file. A new file
+	// IS its content -- there is nothing to substitute into -- so calling it an
+	// edit would mean either breaking that invariant or lying about a span.
+	//
+	// Keeping them apart also keeps the difference visible to whoever reviews a
+	// plan. "This changes 12 bytes of an existing file" and "this creates a file
+	// nginx will start loading" are not the same risk, and a format that made
+	// them look alike would be hiding the more dangerous one.
+	Creates []Create `json:"creates,omitempty"`
+	Deletes []Delete `json:"deletes,omitempty"`
+}
+
+// Create is a file that does not exist yet.
+type Create struct {
+	// File is the absolute path to create.
+	File string `json:"file"`
+
+	// Content is the whole file. This is the one place a plan carries file
+	// content, and it is unavoidable: the file has no previous bytes to
+	// substitute into.
+	Content string `json:"content"`
+
+	// Mode is the permission bits, as an octal string ("0644"), because a JSON
+	// number would read as decimal to anyone inspecting the plan by eye and
+	// 420 is not a recognisable file mode.
+	Mode string `json:"mode"`
+
+	Reason string `json:"reason,omitempty"`
+}
+
+// Delete is a file that should stop existing.
+//
+// The content is NOT carried here. Apply reads it before removing, so a
+// rollback can put it back, and a plan that carried it would be a plan whose
+// size grew with the file it deletes -- for no gain, since the bytes on disk are
+// the only ones that can be restored anyway.
+type Delete struct {
+	File   string `json:"file"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Refusal is why a plan cannot be applied. It carries a Code so a caller
@@ -134,8 +181,12 @@ func (p *Plan) Validate() error {
 	if p.ConfigHash == "" {
 		return &Refusal{RefusalMalformed, "the plan carries no config_hash, so it is anchored to nothing"}
 	}
-	if len(p.Edits) == 0 {
-		return &Refusal{RefusalMalformed, "the plan has no edits"}
+	if len(p.Edits) == 0 && len(p.Creates) == 0 && len(p.Deletes) == 0 {
+		return &Refusal{RefusalMalformed, "the plan does nothing"}
+	}
+
+	if err := p.validateFileOps(); err != nil {
+		return err
 	}
 
 	for i, e := range p.Edits {
@@ -159,6 +210,78 @@ func (p *Plan) Validate() error {
 	}
 
 	return p.validateNoOverlap()
+}
+
+// validateFileOps checks the whole-file operations against each other and
+// against the edits.
+//
+// The combinations refused here are the ones with no defined meaning, rather
+// than the ones that merely look odd: creating and deleting the same path, and
+// editing a file the same plan deletes. Each would leave the result depending on
+// the order apply happened to pick.
+func (p *Plan) validateFileOps() error {
+	creating := map[string]bool{}
+	for i, c := range p.Creates {
+		switch {
+		case c.File == "":
+			return &Refusal{RefusalMalformed, fmt.Sprintf("create %d names no file", i)}
+		case c.Mode == "":
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"create %d for %s carries no mode. A configuration written with the wrong "+
+					"permissions is a defect even when every byte is right", i, c.File)}
+		case creating[c.File]:
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"the plan creates %s twice", c.File)}
+		}
+		if _, err := ParseMode(c.Mode); err != nil {
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"create %d for %s has an unreadable mode %q: %v", i, c.File, c.Mode, err)}
+		}
+		creating[c.File] = true
+	}
+
+	deleting := map[string]bool{}
+	for i, d := range p.Deletes {
+		switch {
+		case d.File == "":
+			return &Refusal{RefusalMalformed, fmt.Sprintf("delete %d names no file", i)}
+		case deleting[d.File]:
+			return &Refusal{RefusalMalformed, fmt.Sprintf("the plan deletes %s twice", d.File)}
+		case creating[d.File]:
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"the plan both creates and deletes %s, and which one wins would depend on "+
+					"the order they were applied in", d.File)}
+		}
+		deleting[d.File] = true
+	}
+
+	for i, e := range p.Edits {
+		if deleting[e.File] {
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"edit %d changes %s, which the same plan deletes", i, e.File)}
+		}
+		if creating[e.File] {
+			return &Refusal{RefusalMalformed, fmt.Sprintf(
+				"edit %d changes %s, which the same plan creates -- put the content in the "+
+					"create instead of editing it into place", i, e.File)}
+		}
+	}
+	return nil
+}
+
+// ParseMode reads an octal file mode as written in a plan ("0644").
+//
+// A string and not a number, because a JSON number reads as decimal: 420 is
+// 0644 and nobody inspecting a plan by eye would recognise it.
+func ParseMode(s string) (os.FileMode, error) {
+	n, err := strconv.ParseUint(s, 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("a file mode is octal, like \"0644\": %w", err)
+	}
+	if n > 0o7777 {
+		return 0, fmt.Errorf("%q is not a file mode", s)
+	}
+	return os.FileMode(n), nil
 }
 
 // validateNoOverlap refuses two edits over the same bytes of the same file.
@@ -213,9 +336,36 @@ func (p *Plan) Verify(tree *config.Tree, root string) error {
 			short(p.ConfigHash), short(tree.Hash))}
 	}
 
+	// A file the plan creates must NOT be there yet. Between building the plan
+	// and applying it, somebody may have created it by hand -- and overwriting
+	// a file whose contents nobody read is the one thing a create must never
+	// do.
+	for _, c := range p.Creates {
+		if _, err := os.Stat(c.File); err == nil {
+			return &Refusal{RefusalBytesMoved, fmt.Sprintf(
+				"%s already exists, and this plan was built to create it. Something wrote "+
+					"it since the plan was made; ngx will not overwrite a file it never read",
+				c.File)}
+		} else if !os.IsNotExist(err) {
+			return &Refusal{RefusalBytesMoved, fmt.Sprintf(
+				"cannot tell whether %s exists: %v", c.File, err)}
+		}
+	}
+
+	// A file the plan deletes must still be part of the configuration that was
+	// read. Deleting a path that is no longer included would remove a file
+	// nobody is loading, on the strength of a plan that no longer describes the
+	// world.
 	sources := map[string][]byte{}
 	for _, f := range tree.Files {
 		sources[f.Path] = f.Source
+	}
+	for _, d := range p.Deletes {
+		if _, ok := sources[d.File]; !ok {
+			return &Refusal{RefusalBytesMoved, fmt.Sprintf(
+				"%s is not part of the configuration that was read, so this plan no longer "+
+					"describes it", d.File)}
+		}
 	}
 
 	for i, e := range p.Edits {
@@ -245,6 +395,30 @@ func (p *Plan) Verify(tree *config.Tree, root string) error {
 // Files returns the files the plan touches, sorted, so a caller can report
 // them or take locks in a deterministic order.
 func (p *Plan) Files() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(path string) {
+		if !seen[path] {
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	for _, e := range p.Edits {
+		add(e.File)
+	}
+	for _, c := range p.Creates {
+		add(c.File)
+	}
+	for _, d := range p.Deletes {
+		add(d.File)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// EditedFiles returns only the files with byte substitutions, which is what
+// apply's edit pass iterates. Files() is the whole footprint, for reporting.
+func (p *Plan) EditedFiles() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, e := range p.Edits {
@@ -282,7 +456,14 @@ func CodeOf(err error) (RefusalCode, bool) {
 // because the shortening rules are a property of the data.
 func (p *Plan) Describe() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d edit(s) against %s\n", len(p.Edits), p.Root)
+	fmt.Fprintf(&b, "%d edit(s), %d file(s) created, %d deleted, against %s\n",
+		len(p.Edits), len(p.Creates), len(p.Deletes), p.Root)
+	for _, c := range p.Creates {
+		fmt.Fprintf(&b, "  create %s (%s, %d bytes)\n", c.File, c.Mode, len(c.Content))
+	}
+	for _, d := range p.Deletes {
+		fmt.Fprintf(&b, "  delete %s\n", d.File)
+	}
 	for _, e := range p.Edits {
 		fmt.Fprintf(&b, "  %s\n    - %s\n    + %s\n", e.Ref, oneLine(e.Before), oneLine(e.After))
 	}

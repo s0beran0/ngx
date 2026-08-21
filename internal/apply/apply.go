@@ -64,6 +64,10 @@ type Result struct {
 	// Validate refused the result.
 	RolledBack []string `json:"rolled_back,omitempty"`
 
+	// Created and Deleted are the whole-file operations that stayed.
+	Created []string `json:"created,omitempty"`
+	Deleted []string `json:"deleted,omitempty"`
+
 	// NotRestored is the state nobody wants and everybody needs to be told
 	// about: files that were written, then failed to be restored. The
 	// configuration on disk is neither the old one nor a validated new one, and
@@ -152,11 +156,34 @@ func Run(opts Options) (*Result, error) {
 			Message: err.Error(), Cause: err}
 	}
 
-	files := opts.Plan.Files()
+	files := opts.Plan.EditedFiles()
 	originals := map[string][]byte{}
 	for _, f := range files {
 		originals[f] = sourceOf(opts.Tree, f)
 	}
+
+	// The content of every file being deleted, read BEFORE anything is
+	// touched. Without it a rollback could not put the file back, and a delete
+	// that cannot be undone is not part of a transaction.
+	deleted := map[string][]byte{}
+	deletedMode := map[string]os.FileMode{}
+	for _, d := range opts.Plan.Deletes {
+		info, statErr := os.Stat(d.File)
+		if statErr != nil {
+			return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: statErr,
+				Message: fmt.Sprintf("cannot read %s before deleting it, so the delete could "+
+					"not be undone: %v", d.File, statErr)}
+		}
+		body, readErr := os.ReadFile(d.File)
+		if readErr != nil {
+			return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: readErr,
+				Message: fmt.Sprintf("cannot read %s before deleting it: %v", d.File, readErr)}
+		}
+		deleted[d.File] = body
+		deletedMode[d.File] = info.Mode().Perm()
+	}
+
+	undo := &undoLog{deleted: deleted, deletedMode: deletedMode, originals: originals}
 
 	var written []string
 	for _, path := range files {
@@ -165,7 +192,7 @@ func Run(opts Options) (*Result, error) {
 			// is not restored: it was never changed, and writing to it again
 			// to "restore" it would be the one write this package has no
 			// reason to make.
-			res := rollback(written, originals)
+			res := undo.run(written, nil, nil)
 			res.Written = nil
 			if len(res.NotRestored) > 0 {
 				return res, &Failure{Code: CodeRollbackFailed, Result: res, Cause: err,
@@ -180,8 +207,40 @@ func Run(opts Options) (*Result, error) {
 		written = append(written, path)
 	}
 
+	// Creates and deletes come after the edits, so a plan that both changes an
+	// include and drops the file it pointed at leaves the configuration
+	// loadable at every step a reader could catch it in.
+	var created, removed []string
+	for _, c := range opts.Plan.Creates {
+		mode, modeErr := plan.ParseMode(c.Mode)
+		if modeErr != nil {
+			res := undo.run(written, created, removed)
+			res.Written = nil
+			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: modeErr,
+				Message: fmt.Sprintf("the mode for %s is unreadable: %v", c.File, modeErr)}
+		}
+		if err := createFile(c.File, []byte(c.Content), mode); err != nil {
+			res := undo.run(written, created, removed)
+			res.Written = nil
+			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: err,
+				Message: fmt.Sprintf("creating %s failed; everything before it was undone: %v",
+					c.File, err)}
+		}
+		created = append(created, c.File)
+	}
+	for _, d := range opts.Plan.Deletes {
+		if err := os.Remove(d.File); err != nil {
+			res := undo.run(written, created, removed)
+			res.Written = nil
+			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: err,
+				Message: fmt.Sprintf("deleting %s failed; everything before it was undone: %v",
+					d.File, err)}
+		}
+		removed = append(removed, d.File)
+	}
+
 	if err := opts.Validate(); err != nil {
-		res := rollback(written, originals)
+		res := undo.run(written, created, removed)
 		if len(res.NotRestored) > 0 {
 			return res, &Failure{Code: CodeRollbackFailed, Result: res, Cause: err,
 				Message: fmt.Sprintf(
@@ -193,7 +252,86 @@ func Run(opts Options) (*Result, error) {
 			Message: "the configuration was refused, and every file was put back: " + err.Error()}
 	}
 
-	return &Result{Written: written}, nil
+	return &Result{Written: written, Created: created, Deleted: removed}, nil
+}
+
+// undoLog knows how to put everything back, and it is a type rather than a
+// function because there are now three kinds of change to undo and each needs
+// different material: an edited file needs its old bytes, a created file needs
+// removing, a deleted file needs its bytes AND its mode.
+type undoLog struct {
+	originals   map[string][]byte
+	deleted     map[string][]byte
+	deletedMode map[string]os.FileMode
+}
+
+// run undoes exactly what happened, and reports honestly what it could not.
+//
+// It only ever touches paths it is given, which are the ones this apply really
+// changed. A file that was never touched is a file this package has no business
+// writing to, even in the name of restoring it.
+func (u *undoLog) run(written, created, removed []string) *Result {
+	res := &Result{}
+
+	for _, path := range written {
+		if err := writeAtomically(path, u.originals[path]); err != nil {
+			res.NotRestored = append(res.NotRestored, path)
+			continue
+		}
+		res.RolledBack = append(res.RolledBack, path)
+	}
+
+	// A created file is undone by removing it. "Already gone" counts as
+	// undone: the state asked for is reached either way.
+	for _, path := range created {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			res.NotRestored = append(res.NotRestored, path)
+			continue
+		}
+		res.RolledBack = append(res.RolledBack, path)
+	}
+
+	// A deleted file is undone by writing it back with the mode it had.
+	for _, path := range removed {
+		if err := createFile(path, u.deleted[path], u.deletedMode[path]); err != nil {
+			res.NotRestored = append(res.NotRestored, path)
+			continue
+		}
+		res.RolledBack = append(res.RolledBack, path)
+	}
+
+	return res
+}
+
+// createFile writes a file that does not exist, through the same temporary file
+// and rename as every other write here.
+//
+// O_EXCL is deliberate on the temporary file only: the target is created by the
+// rename, and checking the target's absence is plan.Verify's job, done before
+// anything was written. Repeating it here would be a second answer to the same
+// question, and the two could disagree.
+func createFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("cannot create the directory for %s: %w", path, err)
+	}
+
+	tmp, err := os.CreateTemp(dir, ".ngx-apply-*")
+	if err != nil {
+		return fmt.Errorf("cannot create a temporary file next to %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+
+	if err := writeAndSync(tmpName, data, mode); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("cannot put %s in place: %w", path, err)
+	}
+	return nil
 }
 
 // contents computes the new bytes of every file the plan touches.
@@ -236,22 +374,6 @@ func contents(p *plan.Plan, tree *config.Tree) (map[string][]byte, error) {
 		out[path] = buf
 	}
 	return out, nil
-}
-
-// rollback puts the original bytes back, and reports honestly when it cannot.
-//
-// It only ever touches files in written: a file this apply never changed is a
-// file it has no business writing to, even in the name of restoring it.
-func rollback(written []string, originals map[string][]byte) *Result {
-	res := &Result{}
-	for _, path := range written {
-		if err := writeAtomically(path, originals[path]); err != nil {
-			res.NotRestored = append(res.NotRestored, path)
-			continue
-		}
-		res.RolledBack = append(res.RolledBack, path)
-	}
-	return res
 }
 
 // writeAtomically replaces the contents of path, preserving what the file was.
