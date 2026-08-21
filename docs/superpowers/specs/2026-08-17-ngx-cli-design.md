@@ -504,11 +504,14 @@ full spec works today.
 
 Test-driven development, from the first commit.
 
-If this property holds, the token↔tree marriage of D2 is
-justifies choosing the D2 approach instead of the fork.correct and the surgical edition of v0.2 is safe. **Property test that supports the architecture.** For any `.conf` in the corpus:
-If it breaks, it breaks loud and early,
-the spans of all nodes, plus the gaps between them, reconstitute the file
-before there was any writeable code in production. **byte by byte**. It is the test that
+**Property test that supports the architecture.** For any `.conf` in the
+corpus: the spans of all nodes, plus the gaps between them, reconstitute the
+file **byte by byte**.
+
+If this property holds, the token-to-tree marriage of D2 is correct and the
+surgical edit of v0.2 is safe. If it breaks, it breaks loud and early, before
+there is any code in production that can write. It is the test that justifies
+choosing the D2 approach instead of forking crossplane.
 
 **Fuzzing.** In the lexer and selector parser, and in the token↔tree alignment.
 

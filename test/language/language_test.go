@@ -97,6 +97,12 @@ var allowed = map[string][]string{
 // it, and it is worth its own check because of how it was found: by reading
 // writing-plans.md and hitting a paragraph that no longer parsed.
 //
+// What it catches is the uppercase form. The same damage also appears as
+// "fork.correct" -- lowercase after the period -- and that pattern cannot be
+// automated here: it collides with file names, hosts and version numbers often
+// enough that a test would cry wolf and get deleted. Two instances of it were
+// found by reading, and reading is the only tool for that half.
+//
 // The scan that first declared the docs clean was worthless, and the way it
 // failed is the reason this is a test rather than a shell one-liner. It was
 // `grep -rn ... | grep -v "\.md\|..."`, and `grep -rn` prefixes every line with

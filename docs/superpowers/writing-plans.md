@@ -236,8 +236,10 @@ So the rule is about scope, not number:
 - **The only real barrier is who coordinates.** If an agent goes beyond what was expected,
   kill and redispatch with smaller scope; do not extend for convenience.
 
-probe, 30-40. Calibration observed in this project, already with a unitary scope: transcription of
-Above 60 the cost per shift has already doubled compared to the beginning.brief code, 20-30; implementation with research, 40-50; review com
+Calibration observed in this project, with an already unitary scope:
+transcription of brief code, 20-30 turns; implementation with research, 40-50;
+review with probing, 30-40. Above 60 the cost per turn has already doubled
+compared to the beginning.
 
 #### 2. External note-taking to break the quadratic
 
