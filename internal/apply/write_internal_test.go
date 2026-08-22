@@ -25,7 +25,7 @@ func TestAFailedRenameLeavesNoTemporaryFile(t *testing.T) {
 	target := filepath.Join(dir, "nginx.conf")
 	require.NoError(t, os.Mkdir(target, 0o755))
 
-	err := writeAtomically(target, []byte("events {}\n"))
+	err := writeAtomically(target, []byte("events {}\n"), nil)
 	require.Error(t, err, "renaming a file over a directory has to fail")
 
 	entries, err := os.ReadDir(dir)

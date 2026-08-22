@@ -44,3 +44,14 @@ func preserveOwner(tmpName string, want os.FileInfo) error {
 	}
 	return nil
 }
+
+// ownerOf returns the uid and gid of a file, or -1 for each when the
+// filesystem does not report them. -1 is what chown treats as "leave alone",
+// so an unknown owner becomes "do not change it" rather than "set it to root".
+func ownerOf(info os.FileInfo) (uid, gid int) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return -1, -1
+	}
+	return int(stat.Uid), int(stat.Gid)
+}

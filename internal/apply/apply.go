@@ -22,6 +22,7 @@
 package apply
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -53,6 +54,25 @@ type Options struct {
 	// Validate runs after every file has been written and decides whether the
 	// result stays.
 	Validate Validate
+
+	// Privileged, when set, is used for any file this process cannot write
+	// itself. Nil means no escalation: a permission error stays a permission
+	// error, which is the right default -- writing to somebody's configuration
+	// as root is not something to do because it happened to be possible.
+	//
+	// It is consulted only AFTER an unprivileged write is refused, never
+	// speculatively. A file the invoking user owns is written as that user, so
+	// the common case involves no sudo at all and the file keeps its owner
+	// without anybody having to preserve it.
+	Privileged PrivilegedWriter
+}
+
+// PrivilegedWriter is the escalation apply uses when it cannot write a file
+// itself. internal/transport provides the implementation; the interface lives
+// here so this package does not depend on how privilege is obtained.
+type PrivilegedWriter interface {
+	WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode, uid, gid int) error
+	Remove(ctx context.Context, path string) error
 }
 
 // Result says what happened, per file, in enough detail for an operator to act.
@@ -183,11 +203,12 @@ func Run(opts Options) (*Result, error) {
 		deletedMode[d.File] = info.Mode().Perm()
 	}
 
-	undo := &undoLog{deleted: deleted, deletedMode: deletedMode, originals: originals}
+	undo := &undoLog{deleted: deleted, deletedMode: deletedMode, originals: originals,
+		elevate: opts.Privileged}
 
 	var written []string
 	for _, path := range files {
-		if err := writeAtomically(path, pending[path]); err != nil {
+		if err := writeAtomically(path, pending[path], opts.Privileged); err != nil {
 			// Undo what landed. The file that failed is NOT in written, so it
 			// is not restored: it was never changed, and writing to it again
 			// to "restore" it would be the one write this package has no
@@ -219,7 +240,7 @@ func Run(opts Options) (*Result, error) {
 			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: modeErr,
 				Message: fmt.Sprintf("the mode for %s is unreadable: %v", c.File, modeErr)}
 		}
-		if err := createFile(c.File, []byte(c.Content), mode); err != nil {
+		if err := createFile(c.File, []byte(c.Content), mode, opts.Privileged); err != nil {
 			res := undo.run(written, created, removed)
 			res.Written = nil
 			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: err,
@@ -229,7 +250,7 @@ func Run(opts Options) (*Result, error) {
 		created = append(created, c.File)
 	}
 	for _, d := range opts.Plan.Deletes {
-		if err := os.Remove(d.File); err != nil {
+		if err := removeFile(d.File, opts.Privileged); err != nil {
 			res := undo.run(written, created, removed)
 			res.Written = nil
 			return res, &Failure{Code: CodeWriteFailed, Result: res, Cause: err,
@@ -263,6 +284,11 @@ type undoLog struct {
 	originals   map[string][]byte
 	deleted     map[string][]byte
 	deletedMode map[string]os.FileMode
+
+	// The same escalation the writes used. A file that needed privilege to be
+	// written needs it to be put back, and a rollback that could not undo what
+	// the write did would be the worst kind of half-transaction.
+	elevate PrivilegedWriter
 }
 
 // run undoes exactly what happened, and reports honestly what it could not.
@@ -274,7 +300,7 @@ func (u *undoLog) run(written, created, removed []string) *Result {
 	res := &Result{}
 
 	for _, path := range written {
-		if err := writeAtomically(path, u.originals[path]); err != nil {
+		if err := writeAtomically(path, u.originals[path], u.elevate); err != nil {
 			res.NotRestored = append(res.NotRestored, path)
 			continue
 		}
@@ -284,7 +310,7 @@ func (u *undoLog) run(written, created, removed []string) *Result {
 	// A created file is undone by removing it. "Already gone" counts as
 	// undone: the state asked for is reached either way.
 	for _, path := range created {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := removeFile(path, u.elevate); err != nil && !os.IsNotExist(err) {
 			res.NotRestored = append(res.NotRestored, path)
 			continue
 		}
@@ -293,7 +319,7 @@ func (u *undoLog) run(written, created, removed []string) *Result {
 
 	// A deleted file is undone by writing it back with the mode it had.
 	for _, path := range removed {
-		if err := createFile(path, u.deleted[path], u.deletedMode[path]); err != nil {
+		if err := createFile(path, u.deleted[path], u.deletedMode[path], u.elevate); err != nil {
 			res.NotRestored = append(res.NotRestored, path)
 			continue
 		}
@@ -310,14 +336,20 @@ func (u *undoLog) run(written, created, removed []string) *Result {
 // rename, and checking the target's absence is plan.Verify's job, done before
 // anything was written. Repeating it here would be a second answer to the same
 // question, and the two could disagree.
-func createFile(path string, data []byte, mode os.FileMode) error {
+func createFile(path string, data []byte, mode os.FileMode, elevate PrivilegedWriter) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil && !isPermission(err) {
 		return fmt.Errorf("cannot create the directory for %s: %w", path, err)
 	}
 
 	tmp, err := os.CreateTemp(dir, ".ngx-apply-*")
 	if err != nil {
+		if isPermission(err) && elevate != nil {
+			// A new file has no previous owner to preserve, so it is created
+			// as root:root -- which is what every .conf in /etc/nginx is, and
+			// inventing a different owner would be a guess.
+			return elevate.WriteFile(context.Background(), path, data, mode, 0, 0)
+		}
 		return fmt.Errorf("cannot create a temporary file next to %s: %w", path, err)
 	}
 	tmpName := tmp.Name()
@@ -329,9 +361,25 @@ func createFile(path string, data []byte, mode os.FileMode) error {
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
+		if isPermission(err) && elevate != nil {
+			return elevate.WriteFile(context.Background(), path, data, mode, 0, 0)
+		}
 		return fmt.Errorf("cannot put %s in place: %w", path, err)
 	}
 	return nil
+}
+
+// removeFile deletes a file, escalating only if the unprivileged attempt is
+// refused for permissions.
+func removeFile(path string, elevate PrivilegedWriter) error {
+	err := os.Remove(path)
+	if err == nil || os.IsNotExist(err) {
+		return err
+	}
+	if isPermission(err) && elevate != nil {
+		return elevate.Remove(context.Background(), path)
+	}
+	return err
 }
 
 // contents computes the new bytes of every file the plan touches.
@@ -383,13 +431,40 @@ func contents(p *plan.Plan, tree *config.Tree) (map[string][]byte, error) {
 // the file exists with the wrong ones -- and for an nginx configuration that
 // window is enough for a reload to read a file it should not have been able to,
 // or to fail reading one it should.
-func writeAtomically(path string, data []byte) error {
+func writeAtomically(path string, data []byte, elevate PrivilegedWriter) error {
 	dir := filepath.Dir(path)
 
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("cannot read the current state of %s: %w", path, err)
 	}
+
+	// The unprivileged path is tried FIRST, always, and escalation happens only
+	// after it is refused. Asking for privilege because it is available would
+	// mean writing somebody's configuration as root for no reason -- and a file
+	// the invoking user owns keeps its owner without anybody preserving it.
+	if err := writeUnprivileged(dir, path, data, info); err == nil {
+		return nil
+	} else if !isPermission(err) || elevate == nil {
+		return err
+	}
+
+	uid, gid := ownerOf(info)
+	if err := elevate.WriteFile(context.Background(), path, data, info.Mode().Perm(), uid, gid); err != nil {
+		return fmt.Errorf("cannot write %s, with or without privilege: %w", path, err)
+	}
+	return nil
+}
+
+// isPermission asks whether the failure was about permissions, through
+// errors.Is rather than by reading a message: the string differs between
+// platforms and locales, and branching on it is the defect this project already
+// paid for once.
+func isPermission(err error) bool {
+	return errors.Is(err, os.ErrPermission)
+}
+
+func writeUnprivileged(dir, path string, data []byte, info os.FileInfo) error {
 
 	tmp, err := os.CreateTemp(dir, ".ngx-apply-*")
 	if err != nil {

@@ -1,6 +1,7 @@
 package apply_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -441,4 +442,91 @@ func TestTheResultIsNeverNil(t *testing.T) {
 		require.Error(t, err)
 		require.NotNil(t, res)
 	})
+}
+
+// recordingElevator records whether privilege was used at all, which is the
+// property that matters: escalating when it was not needed means writing
+// somebody's configuration as root for no reason.
+type recordingElevator struct {
+	writes  []string
+	removes []string
+}
+
+func (r *recordingElevator) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode, uid, gid int) error {
+	r.writes = append(r.writes, path)
+	return os.WriteFile(path, data, mode)
+}
+
+func (r *recordingElevator) Remove(_ context.Context, path string) error {
+	r.removes = append(r.removes, path)
+	return os.Remove(path)
+}
+
+// A file the user can write is written WITHOUT privilege, even when privilege
+// is available. This is the assertion that keeps "we have sudo" from becoming
+// "we use sudo".
+func TestPrivilegeIsNotUsedWhenItIsNotNeeded(t *testing.T) {
+	w := setup(t)
+	elevator := &recordingElevator{}
+
+	_, err := apply.Run(apply.Options{
+		Plan: &w.plan, Tree: w.tree, Root: w.root,
+		Validate:   ok,
+		Privileged: elevator,
+	})
+	require.NoError(t, err)
+	require.Empty(t, elevator.writes,
+		"privilege was used on a file the invoking user can write perfectly well")
+}
+
+// And when the write really is refused, privilege is used and the apply
+// succeeds. Provoked by a read-only directory, which is what a root-owned
+// /etc/nginx/conf.d looks like to an ordinary user.
+func TestPrivilegeIsUsedWhenTheWriteIsRefused(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not stop root from writing")
+	}
+
+	w := setup(t)
+
+	// The elevator here can still write because the TEST is not really
+	// unprivileged -- it restores the mode first. What is being checked is the
+	// DECISION to escalate, not sudo itself, which the transport tests cover
+	// against a real one.
+	require.NoError(t, os.Chmod(w.dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(w.dir, 0o700) })
+
+	restoring := &restoringElevator{dir: w.dir}
+	_, err := apply.Run(apply.Options{
+		Plan: &w.plan, Tree: w.tree, Root: w.root,
+		Validate:   ok,
+		Privileged: restoring,
+	})
+	require.NoError(t, err, "the write was refused and privilege did not rescue it")
+	require.Equal(t, []string{w.root}, restoring.writes)
+}
+
+// restoringElevator stands in for sudo: it makes the directory writable, does
+// the write, and puts the mode back -- which is what elevating actually
+// achieves, without needing a real sudo in a unit test.
+type restoringElevator struct {
+	dir    string
+	writes []string
+}
+
+func (r *restoringElevator) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode, uid, gid int) error {
+	if err := os.Chmod(r.dir, 0o700); err != nil {
+		return err
+	}
+	defer os.Chmod(r.dir, 0o500)
+	r.writes = append(r.writes, path)
+	return os.WriteFile(path, data, mode)
+}
+
+func (r *restoringElevator) Remove(_ context.Context, path string) error {
+	if err := os.Chmod(r.dir, 0o700); err != nil {
+		return err
+	}
+	defer os.Chmod(r.dir, 0o500)
+	return os.Remove(path)
 }

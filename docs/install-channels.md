@@ -197,6 +197,74 @@ private key rather than a token.
 The package is `ngx-bin` and not `ngx` because it ships a compiled binary
 instead of building from source. That is an AUR naming rule.
 
+## Writing with privilege, and what it costs
+
+From v0.2, `ngx` can change an nginx configuration. Most of the time it does so
+as you: a file you own is written without any escalation, and `ngx` never asks
+for privilege it does not need — the unprivileged write is always attempted
+first, and `sudo` is reached for only after it is refused.
+
+When the files are root-owned, which is the default on every distribution, there
+are two ways forward and they are not equivalent.
+
+### Owning the files (recommended)
+
+Give your user ownership of the configuration:
+
+```sh
+sudo chown -R "$USER" /etc/nginx
+```
+
+`ngx` then needs no privilege at all, for reading or for writing. This is the
+same recommendation this document already makes for reading, and it is the one
+with the smaller blast radius: the authority you grant is over nginx's
+configuration and nothing else.
+
+### Granting sudo, and why it is broader than it looks
+
+The alternative is a sudoers rule permitting the commands a privileged write
+uses:
+
+```
+you ALL=(root) NOPASSWD: /usr/bin/install, /usr/bin/dd, /usr/bin/mv, /usr/bin/rm
+```
+
+**Read that as granting full root, because it is.** `sudo dd` writes any file on
+the system; `sudo mv` and `sudo rm` move and delete any file. There is no way to
+scope them to `/etc/nginx` from sudoers — the restriction sudoers can express is
+*which program runs*, not *which files it touches*, and these programs take the
+path as an argument.
+
+That is not a limitation of `ngx`. Any tool that edits root-owned files through
+`sudo` faces it, and a tool that told you otherwise would be wrong.
+
+If you grant it anyway, know that you have granted root to whatever can invoke
+that user — including an AI agent running as them. Owning the files is the
+option that does not.
+
+### What a privileged write actually does
+
+Three commands, no shell, each with explicit arguments:
+
+```
+sudo -n install -m MODE -o UID -g GID /dev/null TMP
+sudo -n dd of=TMP conv=fsync status=none        (content on stdin)
+sudo -n mv -f TMP TARGET
+```
+
+The order is the guarantee. The temporary file is created with its final mode
+and owner **before** it has content, so a `0600` configuration is never briefly
+readable. `dd` fsyncs, so a crash between the write and the rename cannot leave
+a file of the right size and null content. And `mv` within one directory is a
+rename, which is atomic: the target never holds half a configuration.
+
+`sudo -n` throughout, so it never waits for a password. A prompt nobody can
+answer would hang an agent indefinitely.
+
+**Remote privileged writing is not available in v0.2.** Writing over SSH is
+v0.2.1, and until then the SSH transport simply does not offer the capability —
+so the refusal names the reason instead of failing somewhere deeper.
+
 ## Verifying a channel by hand
 
 The check that matters is not "did it install" but "does it know what it is":

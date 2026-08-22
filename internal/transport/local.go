@@ -67,6 +67,36 @@ func (t *localTransport) Run(ctx context.Context, argv []string) ([]byte, []byte
 	return stdout.Bytes(), stderr.Bytes(), 0, nil
 }
 
+// RunWithInput is Run with data on the command's standard input.
+//
+// It exists for one caller: writing a file with privilege, where the content
+// reaches `sudo -n tee` this way because there is no shell to redirect with.
+//
+// The pipe is closed by exec once the command exits, and the data is handed
+// over as a reader rather than written by hand, so a command that ignores its
+// input cannot deadlock this.
+func (t *localTransport) RunWithInput(ctx context.Context, argv []string, stdin []byte) ([]byte, []byte, int, error) {
+	if len(argv) == 0 {
+		return nil, nil, 0, errors.New("transport: empty argv")
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return stdout.Bytes(), stderr.Bytes(), ee.ExitCode(), nil
+	}
+	if err != nil {
+		return stdout.Bytes(), stderr.Bytes(), 0, err
+	}
+	return stdout.Bytes(), stderr.Bytes(), 0, nil
+}
+
 func (t *localTransport) Close() error {
 	return nil
 }

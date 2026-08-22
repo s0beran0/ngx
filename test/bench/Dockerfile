@@ -31,8 +31,18 @@ RUN dnf -y module disable nginx \
 # The test user is an ordinary user: never root, no password, key only.
 # Passwordless sudo is restricted to nginx on purpose -- it is the trap from
 # DR5: the privilege exists, but only whoever asks for it explicitly uses it.
+#
+# The second rule is what PRIVILEGED WRITING requires, and it is in a separate
+# file so the difference is visible: `install`, `dd`, `mv` and `rm` under sudo
+# are, together, equivalent to full root. There is no way to scope `sudo dd` to
+# /etc/nginx -- it writes anywhere. The bench carries the rule because the
+# feature has to be tested against a real sudo, and docs/install-channels.md
+# says plainly that granting it is granting root, and that owning the files is
+# the alternative that is not.
 RUN useradd --create-home --shell /bin/bash ngxtest \
     && printf 'ngxtest ALL=(root) NOPASSWD: /usr/sbin/nginx\n' > /etc/sudoers.d/ngxtest \
+    && printf 'ngxtest ALL=(root) NOPASSWD: /usr/bin/install, /usr/bin/dd, /usr/bin/mv, /usr/bin/rm, /usr/bin/true\n' > /etc/sudoers.d/ngxtest-write \
+    && chmod 0440 /etc/sudoers.d/ngxtest-write \
     && chmod 0440 /etc/sudoers.d/ngxtest \
     && passwd -l root \
     && usermod -p '*' ngxtest

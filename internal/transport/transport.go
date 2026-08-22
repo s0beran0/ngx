@@ -45,3 +45,27 @@ type Transport interface {
 	// "ssh://user@host:port" for a remote host.
 	Describe() string
 }
+
+// InputRunner is a Transport that can feed a command's standard input.
+//
+// It is a SEPARATE interface rather than a method on Transport, and that is the
+// point: adding it to Transport would force every implementation and every test
+// fake to grow a method most of them have no use for, and a transport that
+// cannot do this should say so by NOT implementing it rather than by returning
+// an error at the bottom of a call stack.
+//
+// Only one thing needs it: writing a file with privilege. `sudo` cannot be
+// given a file to write, so the content has to arrive on stdin -- `sudo -n tee`
+// -- and there is no shell to redirect with, because this project does not use
+// one.
+//
+// A caller type-asserts and refuses clearly when the assertion fails. That is
+// how "remote privileged writing is not in v0.2" is expressed: the SSH
+// transport does not implement this, so the refusal names the reason instead of
+// failing somewhere deeper.
+type InputRunner interface {
+	Transport
+
+	// RunWithInput executes argv with data on its standard input.
+	RunWithInput(ctx context.Context, argv []string, stdin []byte) (stdout, stderr []byte, exitCode int, err error)
+}
