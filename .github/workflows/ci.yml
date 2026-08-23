@@ -93,6 +93,8 @@ jobs:
             target: FuzzReconstitution
           - pkg: ./internal/plan
             target: FuzzPlanValidation
+          - pkg: ./internal/apply
+            target: FuzzWrite
     steps:
       - uses: actions/checkout@v6
 

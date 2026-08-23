@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,7 +26,7 @@ type ApplyData struct {
 }
 
 func newApplyCmd(ctx *Context) *cobra.Command {
-	var dryRun bool
+	var dryRun, check bool
 
 	cmd := &cobra.Command{
 		Use:   "apply [plan.json]",
@@ -89,13 +90,34 @@ for what granting that sudo actually costs.`,
 			execCtx, cancel := ctx.executionContext(cmd.Context())
 			defer cancel()
 
+			validate := nginxValidator(ctx, execCtx, root)
+			if check {
+				// --check asks nginx the question and then undoes the change
+				// whatever the answer, by making the validator always refuse
+				// AFTER recording what nginx really said. The rollback path is
+				// the one apply already has, so there is no second way to put
+				// a file back -- and a second way is how the two would drift.
+				//
+				// It touches the file. There is no sound way not to: nginx
+				// validates paths, not text, and a copy of the tree in another
+				// directory does NOT test the change when an include is
+				// absolute -- measured, it reports "syntax is ok" while reading
+				// the original files. A pre-flight that lies is worse than one
+				// that does not exist.
+				validate = checkOnly(validate)
+			}
+
 			res, applyErr := apply.Run(apply.Options{
 				Plan:       p,
 				Tree:       tree,
 				Root:       root,
-				Validate:   nginxValidator(ctx, execCtx, root),
+				Validate:   validate,
 				Privileged: elevatorFor(ctx),
 			})
+
+			if check {
+				return renderCheck(ctx, res, applyErr)
+			}
 
 			env := ctx.NewEnvelope("apply")
 			env.Data = ApplyData{Result: res}
@@ -128,7 +150,83 @@ for what granting that sudo actually costs.`,
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"check that the plan still describes this configuration, and write nothing")
+	cmd.Flags().BoolVar(&check, "check", false,
+		"ask nginx whether it would accept the change, then undo it either way")
 	return cmd
+}
+
+// checkVerdict is what nginx said during a --check, carried out through the
+// rollback as an error so apply undoes the change.
+type checkVerdict struct {
+	accepted bool
+	reason   error
+}
+
+func (c *checkVerdict) Error() string {
+	if c.accepted {
+		return "the change was undone because --check was given"
+	}
+	return c.reason.Error()
+}
+
+func (c *checkVerdict) Unwrap() error { return c.reason }
+
+// checkOnly wraps a validator so the change is always undone, while remembering
+// whether nginx would have accepted it.
+func checkOnly(validate apply.Validate) apply.Validate {
+	return func() error {
+		if err := validate(); err != nil {
+			return &checkVerdict{accepted: false, reason: err}
+		}
+		return &checkVerdict{accepted: true}
+	}
+}
+
+// renderCheck reports the verdict of a --check.
+//
+// An accepted change is ok=true and exit 0 even though the apply "failed": the
+// failure was this command asking for it. A refused one is exit 3, the same as
+// any other configuration nginx will not take.
+func renderCheck(ctx *Context, res *apply.Result, applyErr error) error {
+	var verdict *checkVerdict
+	accepted := errors.As(applyErr, &verdict) && verdict.accepted
+
+	env := ctx.NewEnvelope("apply")
+	env.Data = ApplyData{Result: res}
+	env.OK = accepted
+
+	for _, path := range res.NotRestored {
+		env.AddDiagnostic(output.Diagnostic{
+			Severity: output.SeverityError,
+			Code:     "NGX-0321",
+			File:     path,
+			Message: "this file was written during the check and could not be put back. " +
+				"It needs a human",
+		})
+	}
+
+	if accepted {
+		env.AddDiagnostic(output.Diagnostic{
+			Severity: output.SeverityInfo,
+			Code:     "NGX-0326",
+			Message: "nginx would accept this change. It was written, tested and undone, " +
+				"so nothing on disk changed -- run apply without --check to keep it",
+		})
+	} else {
+		env.AddDiagnostic(output.Diagnostic{
+			Severity: output.SeverityError,
+			Code:     "NGX-0327",
+			Message:  "nginx would refuse this change, and it was undone: " + applyErr.Error(),
+		})
+	}
+
+	if err := ctx.Renderer.Render(env); err != nil {
+		return err
+	}
+	if accepted {
+		return nil
+	}
+	return withoutRerender(output.InvalidConfig("nginx would refuse this change"))
 }
 
 // readPlan takes the plan from a file or from stdin.

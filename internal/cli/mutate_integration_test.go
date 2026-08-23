@@ -257,3 +257,73 @@ printf 'server {\n  location / {\n    if ($request_method = POST) { return 405; 
 	require.Equal(t, 2, code, "setting an `if` was not refused:\n%s", out)
 	require.Equal(t, before, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"))
 }
+
+// --check answers "would nginx accept this" and leaves the file as it was,
+// whichever way the answer goes.
+//
+// It touches the file, and there is no sound way not to. A copy of the tree in
+// another directory does NOT test the change when an include is absolute --
+// measured against this bench, nginx reported "syntax is ok" while reading the
+// ORIGINAL files, so a pre-flight built that way would pass a change it never
+// looked at. That is the one thing worse than no pre-flight.
+func TestCLICheckAsksNginxAndUndoesEitherWay(t *testing.T) {
+	requireCLIBench(t)
+
+	t.Run("a change nginx refuses", func(t *testing.T) {
+		setupSite(t)
+		plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
+			"--ref", refOf(t, "listen"), "--value", "8443", "--value", "ssl")
+		benchScript(t, "cat > /tmp/plan.json <<'EOF'\n"+plan+"\nEOF")
+
+		out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
+			"--check", "/tmp/plan.json")
+		require.Equal(t, 3, code, "a refused change did not exit 3:\n%s", out)
+		require.Contains(t, out, "NGX-0327")
+		require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"),
+			"--check left the refused change on disk")
+	})
+
+	t.Run("a change nginx accepts", func(t *testing.T) {
+		setupSite(t)
+		plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
+			"--ref", refOf(t, "listen"), "--value", "8081")
+		benchScript(t, "cat > /tmp/plan.json <<'EOF'\n"+plan+"\nEOF")
+
+		out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
+			"--check", "/tmp/plan.json")
+		require.Zerof(t, code, "an acceptable change did not exit 0:\n%s", out)
+		require.Contains(t, out, "NGX-0326")
+
+		// The point of --check: it says yes and keeps nothing.
+		require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"),
+			"--check kept the change it was asked only to test")
+	})
+}
+
+// The measurement behind the paragraph above, kept as a test so the claim is
+// not folklore: with an absolute include, validating a COPY of the tree reads
+// the original files.
+//
+// If nginx ever changes this, the test fails and the design note gets revisited
+// instead of quietly outliving its truth.
+func TestValidatingACopyOfTheTreeDoesNotSeeTheChange(t *testing.T) {
+	requireCLIBench(t)
+
+	benchScript(t, `rm -rf /etc/shadowtest /tmp/shadowcopy
+mkdir -p /etc/shadowtest/conf.d
+printf 'events { worker_connections 16; }\nhttp {\n  include /etc/shadowtest/conf.d/*.conf;\n}\n' > /etc/shadowtest/nginx.conf
+printf 'server { listen 8080; }\n' > /etc/shadowtest/conf.d/a.conf
+mkdir -p /tmp/shadowcopy/conf.d
+cp -r /etc/shadowtest/. /tmp/shadowcopy/
+printf 'server { listen 8443 ssl; }\n' > /tmp/shadowcopy/conf.d/a.conf`)
+
+	out, _ := bench(t, "openresty", "-t", "-c", "/tmp/shadowcopy/nginx.conf")
+
+	require.Contains(t, out, "syntax is ok",
+		"nginx no longer reads the original files through an absolute include in a "+
+			"copied tree -- shadow validation may now be sound, and the note in "+
+			"apply.go should be revisited")
+	require.NotContains(t, out, "ssl_certificate",
+		"the copy's broken change was seen after all, which would make shadow "+
+			"validation sound")
+}

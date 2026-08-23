@@ -156,6 +156,7 @@ fuzz:
 	go test ./internal/config/ -run '^$$' -fuzz FuzzAlignment -fuzztime $(FUZZTIME)
 	go test ./internal/config/ -run '^$$' -fuzz FuzzReconstitution -fuzztime $(FUZZTIME)
 	go test ./internal/plan/ -run '^$$' -fuzz FuzzPlanValidation -fuzztime $(FUZZTIME)
+	go test ./internal/apply/ -run '^$$' -fuzz FuzzWrite -fuzztime $(FUZZTIME)
 
 cover:
 	go test ./... -coverprofile=cover.out
