@@ -303,8 +303,8 @@ status" asks the nginx binary itself.`,
   # or without the intermediate file
   ngx set ... | ngx apply -
 
-  # would that plan still apply? (writes nothing)
-  ngx apply --dry-run plan.json
+  # would nginx accept it? asked before anything is written
+  ngx set ... | ngx apply --check -
 
   # and then, as a separate decision
   ngx reload`,

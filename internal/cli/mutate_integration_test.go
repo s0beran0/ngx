@@ -258,46 +258,57 @@ printf 'server {\n  location / {\n    if ($request_method = POST) { return 405; 
 	require.Equal(t, before, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"))
 }
 
-// --check answers "would nginx accept this" and leaves the file as it was,
-// whichever way the answer goes.
+// --check answers "would nginx accept this" WITHOUT touching a single file.
 //
-// It touches the file, and there is no sound way not to. A copy of the tree in
-// another directory does NOT test the change when an include is absolute --
-// measured against this bench, nginx reported "syntax is ok" while reading the
-// ORIGINAL files, so a pre-flight built that way would pass a change it never
-// looked at. That is the one thing worse than no pre-flight.
-func TestCLICheckAsksNginxAndUndoesEitherWay(t *testing.T) {
+// The two include styles are both here because they are the whole difficulty.
+// A shadow tree that does not rewrite absolute includes makes nginx follow them
+// back to the ORIGINAL files, so the check reports on a configuration it never
+// changed -- see TestValidatingACopyOfTheTreeDoesNotSeeTheChange, which keeps
+// that measurement honest.
+func TestCLICheckAsksNginxWithoutWriting(t *testing.T) {
 	requireCLIBench(t)
 
-	t.Run("a change nginx refuses", func(t *testing.T) {
-		setupSite(t)
-		plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
-			"--ref", refOf(t, "listen"), "--value", "8443", "--value", "ssl")
-		benchScript(t, "cat > /tmp/plan.json <<'EOF'\n"+plan+"\nEOF")
+	for _, style := range []struct{ name, include string }{
+		{"relative include", "include conf.d/*.conf;"},
+		{"absolute include", "include /tmp/clisite/conf.d/*.conf;"},
+	} {
+		t.Run(style.name, func(t *testing.T) {
+			benchScript(t, `rm -rf /tmp/clisite && mkdir -p /tmp/clisite/conf.d
+printf 'events { worker_connections 16; }\nhttp {\n  `+style.include+`\n}\n' > /tmp/clisite/nginx.conf
+printf 'server {\n    listen 8080;\n    server_name a.test;\n}\n' > /tmp/clisite/conf.d/site.conf`)
 
-		out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
-			"--check", "/tmp/plan.json")
-		require.Equal(t, 3, code, "a refused change did not exit 3:\n%s", out)
-		require.Contains(t, out, "NGX-0327")
-		require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"),
-			"--check left the refused change on disk")
-	})
+			require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"))
 
-	t.Run("a change nginx accepts", func(t *testing.T) {
-		setupSite(t)
-		plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
-			"--ref", refOf(t, "listen"), "--value", "8081")
-		benchScript(t, "cat > /tmp/plan.json <<'EOF'\n"+plan+"\nEOF")
+			// A change nginx refuses: valid syntax, invalid configuration.
+			plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
+				"--ref", refOf(t, "listen"), "--value", "8443", "--value", "ssl")
+			benchScript(t, "cat > /tmp/bad.json <<'EOF'\n"+plan+"\nEOF")
 
-		out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
-			"--check", "/tmp/plan.json")
-		require.Zerof(t, code, "an acceptable change did not exit 0:\n%s", out)
-		require.Contains(t, out, "NGX-0326")
+			out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
+				"--check", "/tmp/bad.json")
+			require.Equal(t, 3, code,
+				"the check did not catch a change nginx refuses -- with an absolute "+
+					"include that means the shadow tree was reading the originals:\n%s", out)
+			require.Contains(t, out, `"accepted":false`)
+			require.Contains(t, out, "ssl_certificate",
+				"the reason nginx gave did not reach the caller")
 
-		// The point of --check: it says yes and keeps nothing.
-		require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"),
-			"--check kept the change it was asked only to test")
-	})
+			// A change nginx accepts.
+			plan, _ = bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
+				"--ref", refOf(t, "listen"), "--value", "8081")
+			benchScript(t, "cat > /tmp/good.json <<'EOF'\n"+plan+"\nEOF")
+
+			out, code = bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
+				"--check", "/tmp/good.json")
+			require.Zerof(t, code, "the check refused a change nginx accepts:\n%s", out)
+			require.Contains(t, out, `"accepted":true`)
+
+			// The property that distinguishes this from apply: nothing was
+			// written, either way.
+			require.Equal(t, cliSite, benchScript(t, "cat /tmp/clisite/conf.d/site.conf"),
+				"--check wrote to the configuration")
+		})
+	}
 }
 
 // The measurement behind the paragraph above, kept as a test so the claim is

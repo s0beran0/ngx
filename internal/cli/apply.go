@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,6 +46,12 @@ written and could NOT be put back, which means the configuration on disk is
 neither the old one nor a validated new one. It is named rather than counted,
 because that list is what an operator has to act on.
 
+--check asks nginx the same question WITHOUT writing anything: the plan is
+applied to a copy of the whole configuration, every absolute include is
+redirected into that copy, and nginx is asked about it there. So a change that
+would be refused -- ` + "`listen 8443 ssl`" + ` with no certificate, a directive in the
+wrong context -- is caught before a single byte of the real files moves.
+
 A file this process cannot write is written with sudo, but only after the
 ordinary write is refused -- never speculatively. See docs/install-channels.md
 for what granting that sudo actually costs.`,
@@ -57,7 +62,10 @@ for what granting that sudo actually costs.`,
   # or in one line
   ngx set ... | ngx apply -
 
-  # check the plan is still valid without writing
+  # would nginx accept it? (writes nothing)
+  ngx set ... | ngx apply --check -
+
+  # is the plan still current? (does not run nginx)
   ngx apply --dry-run plan.json`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,34 +98,41 @@ for what granting that sudo actually costs.`,
 			execCtx, cancel := ctx.executionContext(cmd.Context())
 			defer cancel()
 
-			validate := nginxValidator(ctx, execCtx, root)
 			if check {
-				// --check asks nginx the question and then undoes the change
-				// whatever the answer, by making the validator always refuse
-				// AFTER recording what nginx really said. The rollback path is
-				// the one apply already has, so there is no second way to put
-				// a file back -- and a second way is how the two would drift.
+				// The pre-flight builds a shadow of the whole tree, applies the
+				// plan there, redirects every absolute include into it, and asks
+				// nginx about THAT -- so the real files are never touched.
 				//
-				// It touches the file. There is no sound way not to: nginx
-				// validates paths, not text, and a copy of the tree in another
-				// directory does NOT test the change when an include is
-				// absolute -- measured, it reports "syntax is ok" while reading
-				// the original files. A pre-flight that lies is worse than one
-				// that does not exist.
-				validate = checkOnly(validate)
+				// The naive version of this is unsound and was measured before
+				// it was built: copying the tree without rewriting the includes
+				// makes nginx follow the absolute paths back to the originals
+				// and report "syntax is ok" without reading the change.
+				res, perr := apply.Preflight(apply.PreflightOptions{
+					Plan: p, Tree: tree, Root: root,
+					ValidateAt: func(configPath string) error {
+						out, err := ctx.NewRuntime().TestConfigAt(execCtx, configPath)
+						if err != nil {
+							return err
+						}
+						if !out.OK {
+							return fmt.Errorf("%s", out.Raw)
+						}
+						return nil
+					},
+				})
+				if perr != nil {
+					return applyRefusal(perr)
+				}
+				return renderPreflight(ctx, res)
 			}
 
 			res, applyErr := apply.Run(apply.Options{
 				Plan:       p,
 				Tree:       tree,
 				Root:       root,
-				Validate:   validate,
+				Validate:   nginxValidator(ctx, execCtx, root),
 				Privileged: elevatorFor(ctx),
 			})
-
-			if check {
-				return renderCheck(ctx, res, applyErr)
-			}
 
 			env := ctx.NewEnvelope("apply")
 			env.Data = ApplyData{Result: res}
@@ -151,79 +166,35 @@ for what granting that sudo actually costs.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"check that the plan still describes this configuration, and write nothing")
 	cmd.Flags().BoolVar(&check, "check", false,
-		"ask nginx whether it would accept the change, then undo it either way")
+		"ask nginx whether it would accept the change, without writing anything")
 	return cmd
 }
 
-// checkVerdict is what nginx said during a --check, carried out through the
-// rollback as an error so apply undoes the change.
-type checkVerdict struct {
-	accepted bool
-	reason   error
-}
-
-func (c *checkVerdict) Error() string {
-	if c.accepted {
-		return "the change was undone because --check was given"
-	}
-	return c.reason.Error()
-}
-
-func (c *checkVerdict) Unwrap() error { return c.reason }
-
-// checkOnly wraps a validator so the change is always undone, while remembering
-// whether nginx would have accepted it.
-func checkOnly(validate apply.Validate) apply.Validate {
-	return func() error {
-		if err := validate(); err != nil {
-			return &checkVerdict{accepted: false, reason: err}
-		}
-		return &checkVerdict{accepted: true}
-	}
-}
-
-// renderCheck reports the verdict of a --check.
-//
-// An accepted change is ok=true and exit 0 even though the apply "failed": the
-// failure was this command asking for it. A refused one is exit 3, the same as
-// any other configuration nginx will not take.
-func renderCheck(ctx *Context, res *apply.Result, applyErr error) error {
-	var verdict *checkVerdict
-	accepted := errors.As(applyErr, &verdict) && verdict.accepted
-
+// renderPreflight reports what nginx said about a plan that was never written.
+func renderPreflight(ctx *Context, res *apply.PreflightResult) error {
 	env := ctx.NewEnvelope("apply")
-	env.Data = ApplyData{Result: res}
-	env.OK = accepted
+	env.Data = res
+	env.OK = res.Accepted
 
-	for _, path := range res.NotRestored {
-		env.AddDiagnostic(output.Diagnostic{
-			Severity: output.SeverityError,
-			Code:     "NGX-0321",
-			File:     path,
-			Message: "this file was written during the check and could not be put back. " +
-				"It needs a human",
-		})
-	}
-
-	if accepted {
+	if res.Accepted {
 		env.AddDiagnostic(output.Diagnostic{
 			Severity: output.SeverityInfo,
 			Code:     "NGX-0326",
-			Message: "nginx would accept this change. It was written, tested and undone, " +
-				"so nothing on disk changed -- run apply without --check to keep it",
+			Message: "nginx would accept this change. Nothing was written: the plan was " +
+				"applied to a copy of the configuration and tested there",
 		})
 	} else {
 		env.AddDiagnostic(output.Diagnostic{
 			Severity: output.SeverityError,
 			Code:     "NGX-0327",
-			Message:  "nginx would refuse this change, and it was undone: " + applyErr.Error(),
+			Message:  "nginx would refuse this change, and nothing was written:\n" + res.Reason,
 		})
 	}
 
 	if err := ctx.Renderer.Render(env); err != nil {
 		return err
 	}
-	if accepted {
+	if res.Accepted {
 		return nil
 	}
 	return withoutRerender(output.InvalidConfig("nginx would refuse this change"))
