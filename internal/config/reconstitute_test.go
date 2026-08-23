@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,7 +68,7 @@ func TestSpansPartitionTheFile(t *testing.T) {
 	for _, f := range fixtures() {
 		t.Run(filepath.Base(f), func(t *testing.T) {
 			file := parseFixture(t, f)
-			problems := partitionProblems(file.Source, file.Nodes, 0, len(file.Source), "")
+			problems := partitionProblems(file.Source, file.Nodes, commentSpans(file.Nodes), 0, len(file.Source), "")
 			problems = append(problems, commentAccountingProblems(file.Nodes)...)
 			require.Emptyf(t, problems, "%d problem(s):\n%s",
 				len(problems), strings.Join(problems, "\n"))
@@ -101,7 +100,7 @@ func TestSpanTextReparsesToTheSameNode(t *testing.T) {
 
 // partitionProblems checks one level and recurses. from and to bound the region
 // the nodes must live in.
-func partitionProblems(src []byte, nodes []*config.Node, from, to int, path string) []string {
+func partitionProblems(src []byte, nodes []*config.Node, comments []config.Span, from, to int, path string) []string {
 	var problems []string
 	cursor := from
 
@@ -147,13 +146,13 @@ func partitionProblems(src []byte, nodes []*config.Node, from, to int, path stri
 		cursor = n.Span.End
 
 		if len(n.Block) > 0 {
-			inner, err := blockBody(src, n)
+			inner, err := blockBody(src, n, comments)
 			if err != "" {
 				problems = append(problems, where+": "+err)
 				continue
 			}
 			problems = append(problems,
-				partitionProblems(src, n.Block, inner.Start, inner.End, where)...)
+				partitionProblems(src, n.Block, comments, inner.Start, inner.End, where)...)
 		}
 	}
 
@@ -231,23 +230,60 @@ func commentAccountingProblems(nodes []*config.Node) []string {
 // arguments" (node.go), and the "}" is the last byte of the span. Both are
 // asserted rather than assumed: an aligner that stopped producing them is a
 // finding, not a reason to guess.
-func blockBody(src []byte, n *config.Node) (config.Span, string) {
+func blockBody(src []byte, n *config.Node, comments []config.Span) (config.Span, string) {
 	if n.HeadSpan.End < n.Span.Start || n.HeadSpan.End > n.Span.End {
 		return config.Span{}, fmt.Sprintf("head span [%d,%d) is not inside the span [%d,%d)",
 			n.HeadSpan.Start, n.HeadSpan.End, n.Span.Start, n.Span.End)
 	}
 
-	open := bytes.IndexByte(src[n.HeadSpan.End:n.Span.End], '{')
+	// The first "{" after the head, SKIPPING any inside a comment. Searching
+	// naively finds the wrong one: the fuzz produced `0 #{\n{0;}`, where the
+	// comment "#{" sits between the directive name and the brace that really
+	// opens the block. The tree is right there and this helper was not, which
+	// made a correct span look like an unattributed gap.
+	open := -1
+	for i := n.HeadSpan.End; i < n.Span.End; i++ {
+		if src[i] != '{' {
+			continue
+		}
+		if insideAny(i, comments) {
+			continue
+		}
+		open = i
+		break
+	}
 	if open < 0 {
 		return config.Span{}, "the node opens a block but there is no \"{\" after its head"
 	}
-	open += n.HeadSpan.End
 
 	if n.Span.End == 0 || src[n.Span.End-1] != '}' {
 		return config.Span{}, "the node opens a block but its span does not end in \"}\""
 	}
 
 	return config.Span{Start: open + 1, End: n.Span.End - 1}, ""
+}
+
+// commentSpans collects every comment in the file, at any depth.
+//
+// They are needed to find a block's opening brace, because a comment can hold
+// one and a naive search would stop at it.
+func commentSpans(nodes []*config.Node) []config.Span {
+	var out []config.Span
+	walkNodes(nodes, func(n *config.Node) {
+		if n.IsComment() {
+			out = append(out, n.Span)
+		}
+	})
+	return out
+}
+
+func insideAny(at int, spans []config.Span) bool {
+	for _, s := range spans {
+		if at >= s.Start && at < s.End {
+			return true
+		}
+	}
+	return false
 }
 
 // inertProblems reports anything in src[from:to) that carries meaning.
@@ -391,7 +427,7 @@ func TestTheReconstitutionPropertiesCanFail(t *testing.T) {
 		target.Span.End--
 		defer func() { target.Span = original }()
 
-		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, 0, len(file.Source), ""),
+		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, commentSpans(file.Nodes), 0, len(file.Source), ""),
 			"a span one byte short went unnoticed, so the partition property is decoration")
 	})
 
@@ -419,7 +455,7 @@ func TestTheReconstitutionPropertiesCanFail(t *testing.T) {
 		roots[1].Span.Start = roots[0].Span.End - 1
 		defer func() { roots[1].Span = original }()
 
-		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, 0, len(file.Source), ""),
+		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, commentSpans(file.Nodes), 0, len(file.Source), ""),
 			"overlapping spans went unnoticed")
 	})
 
@@ -437,7 +473,7 @@ func TestTheReconstitutionPropertiesCanFail(t *testing.T) {
 		child.Span.End = parent.Span.End + 1
 		defer func() { child.Span = original }()
 
-		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, 0, len(file.Source), ""),
+		require.NotEmpty(t, partitionProblems(file.Source, file.Nodes, commentSpans(file.Nodes), 0, len(file.Source), ""),
 			"a child span reaching past its parent went unnoticed")
 	})
 }
@@ -528,7 +564,7 @@ func FuzzReconstitution(f *testing.F) {
 			return
 		}
 
-		problems := partitionProblems(file.Source, file.Nodes, 0, len(file.Source), "")
+		problems := partitionProblems(file.Source, file.Nodes, commentSpans(file.Nodes), 0, len(file.Source), "")
 		problems = append(problems, commentAccountingProblems(file.Nodes)...)
 		if len(problems) > 0 {
 			t.Fatalf("spans do not partition %q:\n%s", src, strings.Join(problems, "\n"))
