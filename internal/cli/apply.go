@@ -67,7 +67,32 @@ for what granting that sudo actually costs.`,
 
   # is the plan still current? (does not run nginx)
   ngx apply --dry-run plan.json`,
-		Args: cobra.MaximumNArgs(1),
+		// The argument validator, not RunE, because a remote --check has to be
+		// refused BEFORE anything connects -- and the connection is made in the
+		// root command's PersistentPreRunE, which runs after Args and before
+		// every RunE.
+		//
+		// The refusal itself: the shadow is built on the machine running ngx
+		// and nginx runs on the other one, so a remote pre-flight would ask a
+		// remote nginx about a local path. That does not fail obviously. nginx
+		// answers "no such file or directory", the pre-flight reads it as a
+		// refusal, and the caller is told their change would be rejected when
+		// nothing was checked at all. Found against a real production host,
+		// which is the only place the two machines were ever different.
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+				return err
+			}
+			if check && ctx.Flags != nil && ctx.Flags.Host != "" {
+				return output.Usage(
+					"--check cannot run against %s: it applies the plan to a copy of the "+
+						"configuration and asks nginx about the copy, and the copy would be "+
+						"on this machine while nginx is on that one. Run ngx on the target, "+
+						"or use apply without --check, which writes and rolls back if nginx "+
+						"refuses", ctx.Flags.Host)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := readPlan(cmd, args)
 			if err != nil {

@@ -338,3 +338,33 @@ printf 'server { listen 8443 ssl; }\n' > /tmp/shadowcopy/conf.d/a.conf`)
 		"the copy's broken change was seen after all, which would make shadow "+
 			"validation sound")
 }
+
+// --check refuses a remote target instead of answering wrongly.
+//
+// The shadow is built on the machine running ngx and nginx runs on the other
+// one, so a remote pre-flight would ask a remote nginx about a local path. It
+// does not fail obviously: nginx answers "no such file or directory", the
+// pre-flight reads that as a refusal, and the caller is told their change would
+// be rejected when nothing was checked at all.
+//
+// Found against a real production host, which is the only place the two
+// machines were actually different.
+func TestCLICheckRefusesARemoteTargetRatherThanAnsweringWrongly(t *testing.T) {
+	requireCLIBench(t)
+	setupSite(t)
+
+	plan, _ := bench(t, "ngx", "set", "-c", "/tmp/clisite/nginx.conf",
+		"--ref", refOf(t, "listen"), "--value", "8081")
+	benchScript(t, "cat > /tmp/plan.json <<'EOF'\n"+plan+"\nEOF")
+
+	// A host that does not resolve is enough: the refusal has to come before
+	// any connection is attempted, since it is about where the shadow lives.
+	out, code := bench(t, "ngx", "apply", "-c", "/tmp/clisite/nginx.conf",
+		"--host", "somewhere.invalid", "--check", "/tmp/plan.json")
+
+	require.Equal(t, 2, code, "a remote --check was not refused as a usage error:\n%s", out)
+	require.NotContains(t, out, `"accepted":false`,
+		"a remote --check reported a verdict it could not have reached")
+	require.Contains(t, out, "on this machine while nginx is on that one",
+		"the refusal does not say why")
+}
