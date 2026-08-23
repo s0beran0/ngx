@@ -75,6 +75,20 @@ func HashMismatch(expected, current string) *Error {
 		"the configuration changed since the read: expected %s, current %s", expected, current)
 }
 
+// ConfigChanged is HashMismatch with the caller's own explanation.
+//
+// It exists because v0.2 has three distinct ways for a plan to stop describing
+// the world -- the hash moved, the bytes under one edit moved, a file appeared
+// -- and each one sends the operator somewhere different. Flattening them into
+// "expected X, current Y" would keep the exit code and throw away the reason,
+// which is the half that says what to do next.
+//
+// Same exit code and same diagnostic code as HashMismatch: a consumer branching
+// on either sees no difference, which is the point.
+func ConfigChanged(format string, args ...any) *Error {
+	return newError(ExitHashMismatch, "NGX-0009", format, args...)
+}
+
 // Internal wraps an IO failure or a defect of ngx itself. The original cause
 // (err) is kept in the Err field and is only reachable via
 // errors.Unwrap/errors.Is/errors.As: Error() and Diag.Message return only the

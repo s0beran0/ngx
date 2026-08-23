@@ -82,11 +82,11 @@ type Result struct {
 
 	// RolledBack are the files that were written and then restored, because
 	// Validate refused the result.
-	RolledBack []string `json:"rolled_back,omitempty"`
+	RolledBack []string `json:"rolled_back"`
 
 	// Created and Deleted are the whole-file operations that stayed.
-	Created []string `json:"created,omitempty"`
-	Deleted []string `json:"deleted,omitempty"`
+	Created []string `json:"created"`
+	Deleted []string `json:"deleted"`
 
 	// NotRestored is the state nobody wants and everybody needs to be told
 	// about: files that were written, then failed to be restored. The
@@ -95,7 +95,35 @@ type Result struct {
 	//
 	// A Result with a non-empty NotRestored is never returned alongside a nil
 	// error.
-	NotRestored []string `json:"not_restored,omitempty"`
+	NotRestored []string `json:"not_restored"`
+}
+
+// newResult builds a Result whose lists are never nil.
+//
+// Every JSON list in this project serialises as [] and never as null, because a
+// consumer calling .length on null breaks. It is enforced here rather than left
+// to each construction site: the first CLI run produced "written":null, which is
+// exactly the contract this rule exists to protect.
+func newResult(written, created, deleted []string) *Result {
+	return &Result{
+		Written:     orEmpty(written),
+		Created:     orEmpty(created),
+		Deleted:     orEmpty(deleted),
+		RolledBack:  []string{},
+		NotRestored: []string{},
+	}
+}
+
+// orEmpty is what keeps this from being written out four times with one of them
+// forgotten -- which is exactly what happened: the first version of newResult
+// initialised three lists and left RolledBack nil, so a SUCCESSFUL apply
+// serialised "rolled_back": null. Found by the CLI integration test asserting
+// every list is a list.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // FailureCode enumerates how an apply fails. A caller branches on this, never
@@ -155,12 +183,12 @@ func CodeOf(err error) (FailureCode, bool) {
 // silently dropped.
 func Run(opts Options) (*Result, error) {
 	if opts.Plan == nil || opts.Tree == nil || opts.Validate == nil {
-		return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{},
+		return newResult(nil, nil, nil), &Failure{Code: CodeVerifyFailed, Result: &Result{},
 			Message: "apply was called without a plan, a tree or a validator"}
 	}
 
 	if err := opts.Plan.Verify(opts.Tree, opts.Root); err != nil {
-		return &Result{}, &Failure{
+		return newResult(nil, nil, nil), &Failure{
 			Code:    CodeVerifyFailed,
 			Message: "the plan does not describe this configuration, so nothing was written: " + err.Error(),
 			Result:  &Result{},
@@ -172,7 +200,7 @@ func Run(opts Options) (*Result, error) {
 	// substitution that fails arithmetic fails here, with the disk untouched.
 	pending, err := contents(opts.Plan, opts.Tree)
 	if err != nil {
-		return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{},
+		return newResult(nil, nil, nil), &Failure{Code: CodeVerifyFailed, Result: &Result{},
 			Message: err.Error(), Cause: err}
 	}
 
@@ -190,13 +218,13 @@ func Run(opts Options) (*Result, error) {
 	for _, d := range opts.Plan.Deletes {
 		info, statErr := os.Stat(d.File)
 		if statErr != nil {
-			return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: statErr,
+			return newResult(nil, nil, nil), &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: statErr,
 				Message: fmt.Sprintf("cannot read %s before deleting it, so the delete could "+
 					"not be undone: %v", d.File, statErr)}
 		}
 		body, readErr := os.ReadFile(d.File)
 		if readErr != nil {
-			return &Result{}, &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: readErr,
+			return newResult(nil, nil, nil), &Failure{Code: CodeVerifyFailed, Result: &Result{}, Cause: readErr,
 				Message: fmt.Sprintf("cannot read %s before deleting it: %v", d.File, readErr)}
 		}
 		deleted[d.File] = body
@@ -273,7 +301,7 @@ func Run(opts Options) (*Result, error) {
 			Message: "the configuration was refused, and every file was put back: " + err.Error()}
 	}
 
-	return &Result{Written: written, Created: created, Deleted: removed}, nil
+	return newResult(written, created, removed), nil
 }
 
 // undoLog knows how to put everything back, and it is a type rather than a
@@ -297,7 +325,7 @@ type undoLog struct {
 // changed. A file that was never touched is a file this package has no business
 // writing to, even in the name of restoring it.
 func (u *undoLog) run(written, created, removed []string) *Result {
-	res := &Result{}
+	res := newResult(nil, nil, nil)
 
 	for _, path := range written {
 		if err := writeAtomically(path, u.originals[path], u.elevate); err != nil {

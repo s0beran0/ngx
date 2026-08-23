@@ -231,7 +231,7 @@ func NewRoot(ctx *Context) *cobra.Command {
 		// the binary, and asking for the specification costs a round trip it
 		// will not make. So the envelope's shape, the exit codes and the
 		// omission rule are here, in the help, and not only in the README.
-		Long: `ngx makes an nginx installation readable by a program.
+		Long: `ngx makes an nginx installation readable AND changeable by a program.
 
 Every command answers with one JSON envelope on stdout when stdout is a pipe,
 and with a short summary when it is a terminal. --json and --human force one
@@ -256,6 +256,17 @@ Two rules worth knowing before reading any output:
   A sensitive value is replaced by "***" and the node lists which argument
   positions in redacted_args, so a censored value never looks absent. Turn it
   off with --no-redact, which is only accepted when stdout is a terminal.
+
+Changing a configuration is TWO steps, and the split is the safety design:
+
+  ngx set|add|rm|create   produce a PLAN and write nothing
+  ngx apply               check the plan still describes the world, write it,
+                          run ` + "`nginx -t`" + `, and put everything back if
+                          nginx refuses
+
+So a change can be read before it happens, and refused if anything moved in
+between. Nothing edits in one step, and ` + "`ngx reload`" + ` is separate
+again, because applying and reloading are different decisions.
 
 Exit codes: 0 ok, 1 internal failure, 2 usage, 3 the nginx configuration is
 invalid, 7 drift, 9 the configuration changed since it was read.
@@ -282,7 +293,21 @@ status" asks the nginx binary itself.`,
   ngx get -c /etc/nginx/nginx.conf --directive listen --query '.data.matches[].args[0]'
 
   # the same questions against a server, reading its root-only files
-  ngx --host web1 --sudo test`,
+  ngx --host web1 --sudo test
+
+  # change a port: find it, plan it, apply it
+  ngx get -c /etc/nginx/nginx.conf --directive listen --format table
+  ngx set -c /etc/nginx/nginx.conf --ref /etc/nginx/conf.d/site.conf#s0.d0 --value 8443 > plan.json
+  ngx apply -c /etc/nginx/nginx.conf plan.json
+
+  # or without the intermediate file
+  ngx set ... | ngx apply -
+
+  # would that plan still apply? (writes nothing)
+  ngx apply --dry-run plan.json
+
+  # and then, as a separate decision
+  ngx reload`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -314,6 +339,16 @@ status" asks the nginx binary itself.`,
 	root.AddCommand(newTestCmd(ctx))
 	root.AddCommand(newStatusCmd(ctx))
 	root.AddCommand(newUpdateCmd(ctx))
+
+	// The commands that change a configuration. They come after the reading
+	// ones in --help for the same reason they came after them in the project:
+	// a tool that can write is only trustworthy once reading it is.
+	root.AddCommand(newSetCmd(ctx))
+	root.AddCommand(newAddCmd(ctx))
+	root.AddCommand(newRmCmd(ctx))
+	root.AddCommand(newCreateCmd(ctx))
+	root.AddCommand(newApplyCmd(ctx))
+	root.AddCommand(newReloadCmd(ctx))
 	return root
 }
 

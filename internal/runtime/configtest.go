@@ -41,6 +41,26 @@ func (r *Runtime) TestConfig(ctx context.Context) (*TestResult, error) {
 	return buildTestResult(e), nil
 }
 
+// TestConfigAt runs `nginx -t -c <path>`, testing THAT file rather than the one
+// nginx would load on its own.
+//
+// The distinction is not academic and it was found by running the CLI: `ngx
+// apply` writes to the configuration named by -c, and validating with a bare
+// `nginx -t` would then ask about a different file entirely. On a server where
+// -c is /etc/nginx/nginx.conf the two coincide and nothing looks wrong; against
+// a copy, a staging tree or a test fixture, the validation would pass while the
+// file that was just written is broken.
+//
+// TestConfig stays as it is, because `ngx test` deliberately answers "is the
+// configuration nginx loads valid" -- a different question, asked on purpose.
+func (r *Runtime) TestConfigAt(ctx context.Context, path string) (*TestResult, error) {
+	e, err := r.run(ctx, "-t", "-c", path)
+	if err != nil {
+		return nil, err
+	}
+	return buildTestResult(e), nil
+}
+
 func buildTestResult(e *execution) *TestResult {
 	text := e.combinedOutput()
 	res := &TestResult{

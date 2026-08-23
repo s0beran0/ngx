@@ -2,6 +2,7 @@ package apply_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -529,4 +530,48 @@ func (r *restoringElevator) Remove(_ context.Context, path string) error {
 	}
 	defer os.Chmod(r.dir, 0o500)
 	return os.Remove(path)
+}
+
+// Every list in a Result is a list, never null, on every path. The project's
+// rule is that a consumer calling .length on null breaks, and the first version
+// of newResult initialised three of the four -- so a successful apply came out
+// with "rolled_back": null.
+func TestEveryListInAResultSerialisesAsAList(t *testing.T) {
+	check := func(t *testing.T, res *apply.Result) {
+		t.Helper()
+		raw, err := json.Marshal(res)
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), "null",
+			"a list came out as null:\n%s", raw)
+		for name, list := range map[string][]string{
+			"written": res.Written, "rolled_back": res.RolledBack,
+			"created": res.Created, "deleted": res.Deleted,
+			"not_restored": res.NotRestored,
+		} {
+			require.NotNilf(t, list, "%s is nil", name)
+		}
+	}
+
+	t.Run("after a success", func(t *testing.T) {
+		w := setup(t)
+		res, err := apply.Run(apply.Options{Plan: &w.plan, Tree: w.tree, Root: w.root, Validate: ok})
+		require.NoError(t, err)
+		check(t, res)
+	})
+
+	t.Run("after a rollback", func(t *testing.T) {
+		w := setup(t)
+		res, err := apply.Run(apply.Options{Plan: &w.plan, Tree: w.tree, Root: w.root,
+			Validate: func() error { return errors.New("refused") }})
+		require.Error(t, err)
+		check(t, res)
+	})
+
+	t.Run("after a refusal before any write", func(t *testing.T) {
+		w := setup(t)
+		w.plan.ConfigHash = strings.Repeat("0", 64)
+		res, err := apply.Run(apply.Options{Plan: &w.plan, Tree: w.tree, Root: w.root, Validate: ok})
+		require.Error(t, err)
+		check(t, res)
+	})
 }
