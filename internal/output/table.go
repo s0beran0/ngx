@@ -3,6 +3,7 @@ package output
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -27,6 +28,17 @@ type TableRenderable interface {
 type Table struct {
 	Header []string
 	Rows   [][]string
+
+	// Prefix, when set, is a path every row's first column starts with. It is
+	// printed once as a comment and stripped from the rows.
+	//
+	// It exists because that column is a ref, and a ref carries the whole file
+	// path -- so a 60-row answer repeated /etc/nginx/conf.d sixty times.
+	// Extracting it measured 20% fewer tokens on exactly that shape.
+	//
+	// A consumer that ignores the comment reads relative refs, which is why the
+	// comment says what to prepend rather than merely naming the directory.
+	Prefix string
 }
 
 // tabEscape is the escaping rule of --format table, and it is the answer to
@@ -78,6 +90,16 @@ func (r *Renderer) renderTable(env *Envelope) error {
 	}
 
 	w := bufio.NewWriter(r.Out)
+
+	// The shared prefix, once, as a comment saying what to put back. A
+	// consumer that ignores comments reads relative refs, so the comment has to
+	// state the operation rather than just name a directory.
+	if table.Prefix != "" {
+		if _, err := fmt.Fprintf(w, "# refs below are relative to %s/\n", table.Prefix); err != nil {
+			return Internal(err, "failed to write the output")
+		}
+	}
+
 	if err := writeTSVRow(w, table.Header); err != nil {
 		return err
 	}
@@ -88,6 +110,10 @@ func (r *Renderer) renderTable(env *Envelope) error {
 		if len(row) != len(table.Header) {
 			return Internal(nil, "row %d has %d fields and the header has %d",
 				i, len(row), len(table.Header))
+		}
+		if table.Prefix != "" && len(row) > 0 {
+			row = append([]string(nil), row...)
+			row[0] = strings.TrimPrefix(row[0], table.Prefix+"/")
 		}
 		if err := writeTSVRow(w, row); err != nil {
 			return err
