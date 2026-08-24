@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,12 +32,39 @@ type Summary struct {
 // top-level file, and a filter that matches nothing fails before reaching
 // here.
 type InspectData struct {
-	Config  []*config.File `json:"config,omitempty"`
-	Summary Summary        `json:"summary"`
+	Config []*config.File `json:"config,omitempty"`
+
+	// detail decides what MarshalJSON emits, for the reason GetData.detail
+	// records: a lean form is a different shape, not different data.
+	detail  detailLevel
+	Summary Summary `json:"summary"`
 
 	// Scope is present only when the tree is a subset. Its absence means
 	// "not filtered".
 	Scope *Scope `json:"scope,omitempty"`
+}
+
+// MarshalJSON emits the level the caller asked for, for the reason
+// GetData.MarshalJSON records: only the shape changes, never the data, so the
+// nginx renderer and the redaction pass keep reading typed nodes.
+func (d InspectData) MarshalJSON() ([]byte, error) {
+	type shape struct {
+		Config  any     `json:"config,omitempty"`
+		Summary Summary `json:"summary"`
+		Scope   *Scope  `json:"scope,omitempty"`
+	}
+	out := shape{Summary: d.Summary, Scope: d.Scope}
+	// Absent, not empty: an unavailable tree is not an empty one. Assigning a
+	// nil slice into an `any` field would make omitempty stop working, so the
+	// nil case is left alone instead.
+	if len(d.Config) > 0 {
+		if d.detail == detailAnswer {
+			out.Config = leanFiles(d.Config)
+		} else {
+			out.Config = d.Config
+		}
+	}
+	return json.Marshal(out)
 }
 
 // Scope marks the result as a deliberate subset, INSIDE data, where an agent
@@ -108,7 +136,7 @@ func (d InspectData) Redacted(rs output.RedactSet) any {
 			})
 		}
 	}
-	return InspectData{Config: files, Summary: d.Summary, Scope: d.Scope}
+	return InspectData{Config: files, Summary: d.Summary, Scope: d.Scope, detail: d.detail}
 }
 
 func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
@@ -138,9 +166,10 @@ func redactNodes(nodes []*config.Node, rs output.RedactSet) []*config.Node {
 
 func newInspectCmd(ctx *Context) *cobra.Command {
 	var (
-		combine  bool
-		fullTree bool
-		filter   inspectFilter
+		combine    bool
+		detailFlag string
+		fullTree   bool
+		filter     inspectFilter
 	)
 
 	cmd := &cobra.Command{
@@ -231,6 +260,11 @@ JSON, in the syntax every model already reads.`,
 			// came out.
 			data := InspectData{Summary: summarize(tree)}
 
+			detail, derr := parseDetail(detailFlag)
+			if derr != nil {
+				return output.Usage("%s", derr.Error())
+			}
+
 			switch {
 			case filter.active():
 				files, ferr := filter.apply(tree)
@@ -242,6 +276,7 @@ JSON, in the syntax every model already reads.`,
 					return ferr
 				}
 				data.Config = files
+				data.detail = detail
 				data.Scope = &Scope{
 					Partial:           true,
 					Filters:           ScopeFilters{File: filter.File, Server: filter.Server},
@@ -258,6 +293,7 @@ JSON, in the syntax every model already reads.`,
 			default:
 				if fullTree {
 					data.Config = tree.Files
+					data.detail = detail
 				}
 				env.Meta.ConfigHash = tree.Hash
 			}
@@ -268,6 +304,7 @@ JSON, in the syntax every model already reads.`,
 	}
 
 	cmd.Flags().BoolVar(&combine, "combine", false, "resolve the includes into a single tree")
+	cmd.Flags().StringVar(&detailFlag, "detail", string(detailFull), detailFlagHelp)
 	cmd.Flags().BoolVar(&fullTree, "full-tree", false,
 		"emit every node of every file; on a production nginx this is megabytes of JSON")
 	// The help text says "emitted", not "read": --file could prune the read

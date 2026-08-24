@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -43,7 +44,13 @@ const (
 // get would be a second parser, free to drift into a second truth.
 type GetData struct {
 	Matches []*config.Node `json:"matches"`
-	Summary Summary        `json:"summary"`
+
+	// detail decides what MarshalJSON emits. It is unexported and carries no
+	// tag: it changes the SERIALISATION, not the data, so every other consumer
+	// -- the table, the nginx renderer, the redaction pass -- keeps working
+	// with typed nodes.
+	detail  detailLevel
+	Summary Summary `json:"summary"`
 
 	// Scope is always present: every result of get is a subset by
 	// definition, so partial is the only value it could take.
@@ -73,7 +80,26 @@ func (d GetData) Redacted(rs output.RedactSet) any {
 		Summary: d.Summary,
 		Scope:   d.Scope,
 		sources: d.sources,
+		detail:  d.detail,
 	}
+}
+
+// MarshalJSON emits the level the caller asked for.
+//
+// Only the JSON changes. A lean form is a different SHAPE, not different data,
+// and putting the decision here is what keeps `--format table` and
+// `--format nginx` reading the same typed nodes they always did.
+func (d GetData) MarshalJSON() ([]byte, error) {
+	type shape struct {
+		Matches any     `json:"matches"`
+		Summary Summary `json:"summary"`
+		Scope   *Scope  `json:"scope,omitempty"`
+	}
+	out := shape{Matches: d.Matches, Summary: d.Summary, Scope: d.Scope}
+	if d.detail == detailAnswer {
+		out.Matches = leanNodes(d.Matches)
+	}
+	return json.Marshal(out)
 }
 
 // Table answers --format table, which is what a flat result was waiting for:
@@ -127,9 +153,20 @@ func (d GetData) Table() (output.Table, error) {
 	//
 	// And it is cheaper than what it replaced: ref IS "<file>#<id>", so
 	// emitting both columns printed the file twice per row.
+	refs := make([]string, 0, len(rows))
+	for _, r := range rows {
+		refs = append(refs, r[0])
+	}
 	return output.Table{
 		Header: []string{"ref", "line", "directive", "args"},
 		Rows:   rows,
+		// The whole path repeated on every row is what a ref column costs.
+		// Extracted once, it measured 20% fewer tokens on a 60-row answer;
+		// grouping the rows by file instead measured 30% MORE, because a group
+		// header costs more than the repetition it saves when there is about
+		// one match per file -- which is the shape of every "find this
+		// directive across the sites" question.
+		Prefix: commonPathPrefix(refs),
 	}, nil
 }
 
@@ -157,8 +194,9 @@ func (d GetData) RenderNginx(w io.Writer) error {
 
 func newGetCmd(ctx *Context) *cobra.Command {
 	var (
-		filter getFilter
-		scope  inspectFilter
+		filter     getFilter
+		scope      inspectFilter
+		detailFlag string
 	)
 
 	cmd := &cobra.Command{
@@ -206,6 +244,11 @@ in ` + "`ngx inspect --full-tree`" + `. A flat result is what --format table is 
   ngx get -c /etc/nginx/nginx.conf --file sites-enabled/example.com --directive proxy_pass`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			detail, err := parseDetail(detailFlag)
+			if err != nil {
+				return output.Usage("%s", err.Error())
+			}
+
 			path := configPathOf(ctx)
 			if path == "" {
 				return output.Usage("provide the configuration with -c or in nginx.config")
@@ -259,6 +302,7 @@ in ` + "`ngx inspect --full-tree`" + `. A flat result is what --format table is 
 
 			data := GetData{
 				Matches: matches,
+				detail:  detail,
 				Summary: summarize(tree),
 				Scope: &Scope{
 					Partial: true,
@@ -298,6 +342,7 @@ in ` + "`ngx inspect --full-tree`" + `. A flat result is what --format table is 
 	// know which files hold the directive, and only --file could prune the
 	// read -- which it does not do yet. Promising a saving here is the kind
 	// of claim a user discovers with a stopwatch.
+	cmd.Flags().StringVar(&detailFlag, "detail", string(detailFull), detailFlagHelp)
 	cmd.Flags().StringVar(&filter.Directive, "directive", "",
 		"emit every occurrence of this directive, by exact name (required)")
 	cmd.Flags().StringVar(&filter.In, "in", "",

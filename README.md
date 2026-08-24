@@ -882,6 +882,66 @@ argument. Quotes are **not** touched: TSV has no quoting, and escaping them
 would corrupt an argument that legitimately contains one. A row whose number of
 fields does not match the header is refused, never padded nor truncated.
 
+**The shared directory is printed once.** When every row's `ref` sits under one
+directory, that directory comes out as a comment line and the rows carry only
+what differs — measured **20% cheaper** on a 60-row answer:
+
+```console
+$ ./bin/ngx get --directive listen -c internal/cli/testdata/filters/nginx.conf --format table
+# info: partial result: data.matches holds only the nodes the flags name, and meta.config_hash is omitted because it would be a valid hash of a subset
+# refs below are relative to internal/cli/testdata/filters/
+ref	line	directive	args
+nginx.conf#h.s0.d0	8	listen	80
+sites/portal.conf#s0.d0	2	listen	80
+sites/portal.conf#s1.d0	8	listen	443 ssl
+sites-extra/portal.conf#s0.d0	2	listen	8080
+```
+
+A consumer that splits on tabs is unaffected: comment lines start with `#` and
+were always to be skipped. Grouping the rows under a per-file header was tried
+instead and measured **30% worse** — a header costs more than the repetition it
+saves when there is roughly one match per file, which is the shape of every
+"find this directive across the sites" question.
+
+#### `--detail`: pay for the answer, not for the byte offsets
+
+On `get` and `inspect`, `--detail answer` drops the fields a reader does not
+use — `span`, `head_span`, `column` — and keeps directive, args, file, line,
+`ref` and `id`.
+
+```console
+$ ./bin/ngx get --directive listen -c internal/cli/testdata/filters/nginx.conf --json | jq -c '.data.matches[0]'
+{"directive":"listen","args":["80"],"file":"internal/cli/testdata/filters/nginx.conf","line":8,"column":9,"span":{"start":108,"end":118},"head_span":{"start":108,"end":117},"arg_spans":[{"start":115,"end":117}],"id":"h.s0.d0","ref":"internal/cli/testdata/filters/nginx.conf#h.s0.d0"}
+
+$ ./bin/ngx get --directive listen -c internal/cli/testdata/filters/nginx.conf --detail answer --json | jq -c '.data.matches[0]'
+{"directive":"listen","args":["80"],"file":"internal/cli/testdata/filters/nginx.conf","line":8,"ref":"internal/cli/testdata/filters/nginx.conf#h.s0.d0","id":"h.s0.d0"}
+```
+
+The reason is a measurement. On a 61-file configuration, `get --directive
+listen` costs 5537 tokens, and the directive itself — the field that answers the
+question — is **5.8%** of them; the byte ranges alone are 31.6%. Dropping what
+is not read takes the same query to 3198 tokens, and `inspect --full-tree` from
+53475 to 31857.
+
+| | `full` | `answer` |
+|---|---|---|
+| `get --directive listen` | 5537 | 3198 (**-42%**) |
+| `inspect --full-tree` | 53475 | 31857 (**-40%**) |
+| `inspect --file` | 1023 | 665 (**-35%**) |
+
+`full` stays the default, and that is deliberate: the envelope is a contract,
+and removing a field from it is what `schema_version` exists to announce. It is
+also what an **edit** needs — `ngx set` replaces a directive by its byte span,
+so a plan built from `--detail answer` would have nothing to anchor on.
+
+What `answer` does keep is `ref`, which is what makes it usable rather than
+merely small: whatever the reader decides, it can name the node to `ngx set`
+without asking again.
+
+The numbers, the rejected alternatives and the case for eventually flipping the
+default are in
+[`docs/superpowers/plans/2026-08-24-ngx-v021-token-cost.md`](docs/superpowers/plans/2026-08-24-ngx-v021-token-cost.md).
+
 The remote access flags (`--host`, `--user`, `--port`, `--key`,
 `--known-hosts`, `--insecure-host-key`, `--sudo`) are documented in
 [`docs/remote.md`](docs/remote.md).
