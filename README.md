@@ -28,20 +28,28 @@ pipe, structurally, cannot even ask.
 
 ## Current state — read this before trying to install
 
-This is **v0.1, under development**. It is read-only **as a milestone, not as
-a design**: `ngx` is meant to edit and create `.conf` files, and v0.2 brings
-mutation with plan/apply and rollback.
+This is **v0.2**, and it **writes**. Changing a configuration is two steps —
+`ngx set|add|rm|create` produce a plan and write nothing; `ngx apply` checks the
+plan still describes the world, writes it, runs `nginx -t`, and puts every file
+back if nginx refuses.
 
-v0.1 ships without any write path on purpose. The two riskiest bets of the
-project — how a caller addresses a node, and the stability of node IDs — get
-validated first, so that when a code path capable of writing to a production
-`.conf` finally exists, it is built on parts that were already proven.
-Shipping the writer first would mean discovering a parser bug by corrupting
-somebody's server.
+`ngx apply --check` answers "would nginx accept this" **without writing
+anything**, by applying the plan to a copy of the configuration and asking nginx
+there. Writing over SSH is not here yet: v0.2 writes locally, and `--host` still
+reads anything.
 
-The first of those two was settled by *removing* something: the selector
-expression of the design became the flat flags of [`ngx get`](#ngx-get).
-`--directive listen` cannot be subtly wrong, and `http.server.listen` can.
+v0.1 shipped with no write path on purpose, and the order paid off. The two
+riskiest bets — how a caller addresses a node, and whether node IDs are
+stable — were validated first, and both turned out to be wrong in ways that
+would have corrupted files if the writer had come first. An `id` did not name a
+node (112 `listen` directives shared one, and 324 shared 23 in production), and
+a Lua comment holding a brace made `ngx` describe a structure the server would
+have refused. Shipping the writer first would have meant discovering those by
+corrupting somebody's server.
+
+One of the two was settled by *removing* something: the selector expression of
+the design became the flat flags of [`ngx get`](#ngx-get). `--directive listen`
+cannot be subtly wrong, and `http.server.listen` can.
 
 The architecture already carries what writing needs: every node holds byte
 spans (`Span` for the whole directive, `HeadSpan` for name and arguments),
@@ -419,6 +427,68 @@ failure from asking about a directive that is not there.
 > emitted**, not what is read — pruning the read is not implemented yet, and
 > `--directive` could not use it anyway: knowing which files hold a directive
 > means reading them.
+
+### Changing a configuration
+
+Four commands produce a **plan** and write nothing:
+
+| | |
+|---|---|
+| `ngx set --ref R --value V…` | replace a directive's arguments |
+| `ngx add --parent R --directive D --value V…` | insert a directive as the last child of a block |
+| `ngx rm --ref R` / `--file P` | remove a directive, or a whole `.conf` |
+| `ngx create --file P --from F` | create a `.conf` nginx will actually load |
+
+`R` is a **ref**, `"<file>#<id>"`, and it comes from `ngx get` or `ngx inspect`.
+An `id` on its own does not name a node: on the `conf.d/*.conf` layout the first
+directive of every file is `s0.d0`, and a production configuration answered
+`--directive listen` with 324 matches sharing 23 ids.
+
+```console
+$ ngx get -c /etc/nginx/nginx.conf --directive listen --format table
+ref	line	directive	args
+/etc/nginx/conf.d/site.conf#s0.d0	2	listen	8080
+
+$ ngx set -c /etc/nginx/nginx.conf --ref /etc/nginx/conf.d/site.conf#s0.d0 --value 8443 > plan.json
+```
+
+### `ngx apply`
+
+Reads a plan, checks it still describes this configuration, writes it, runs
+`nginx -t`, and puts every file back if nginx refuses.
+
+```console
+$ ngx apply -c /etc/nginx/nginx.conf plan.json | jq -c .data
+{"written":["/etc/nginx/conf.d/site.conf"],"rolled_back":[],"created":[],"deleted":[],"not_restored":[]}
+```
+
+Three flags, three different questions:
+
+| | writes? | runs nginx? | answers |
+|---|---|---|---|
+| `--dry-run` | no | no | is the plan still current? |
+| `--check` | **no** | yes | would nginx accept this change? |
+| *(none)* | yes | yes | apply it, and roll back if nginx refuses |
+
+`--check` applies the plan to a copy of the whole configuration, redirects every
+absolute `include` into that copy, and asks nginx there — so `listen 8443 ssl`
+with no certificate is caught before a byte of the real files moves. It is local
+only: the copy lives on the machine running `ngx`, so with `--host` it refuses
+rather than answering about a path the remote nginx cannot see.
+
+**Exit codes worth knowing.** A plan built against a configuration that has
+since changed exits **9** and writes nothing. A change nginx refuses exits **3**
+with every file back as it was. And `data.not_restored` is the one to watch: it
+lists files that were written and could **not** be put back, which means the
+configuration on disk is neither the old one nor a validated new one. It names
+them rather than counting them, because that list is what has to be acted on.
+
+### `ngx reload`
+
+`nginx -t` first, always, and a failure stops the reload with exit 3. Separate
+from `apply` on purpose: applying and reloading are different decisions, and a
+tool that coupled them could not express "stage this now, reload in the
+maintenance window".
 
 ### `ngx test`
 

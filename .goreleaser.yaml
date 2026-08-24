@@ -547,46 +547,74 @@ release:
   # other way to find out. "It was in the schema version" is not a defence for
   # silence.
   header: |
-    ## What changed for anyone reading the output
+    **ngx can change an nginx configuration now.** Every version before this
+    could only read one.
 
-    `schema_version` is still `1`: nothing in the envelope's SHAPE was removed
-    or renamed. Two behaviours changed, and one column did.
+    ## The shape of it
 
-    - **A node now carries `ref`, and `ref` is what names it.** An `id` is
-      unique within its FILE, not within the configuration: IDs count siblings
-      from the root of the file they live in, so on the `conf.d/*.conf` layout
-      every distribution ships, the first directive of every file is `s0.d0`.
-      Measured against a 133-file production configuration: `--directive
-      listen` returned **324 matches carrying 23 distinct ids** — an average of
-      fourteen nodes answering to the same name. The same query now returns 324
-      distinct `ref`s. `ref` is `"<file>#<id>"`, it is assigned once and never
-      reassigned, and it is what v0.2 will target.
+    Changing something is TWO steps, and the split is the whole safety design:
 
-    - **`get --format table` has one `ref` column where it had `id` and
-      `file`.** This is the one break: a script reading those two columns has
-      to read one. It is also cheaper, since `ref` already contains the file,
-      so printing both meant printing the file twice per row. JSON is additive
-      — `id`, `file` and `ref` are all present.
+    ```sh
+    ngx get -c /etc/nginx/nginx.conf --directive listen --format table
+    ngx set -c /etc/nginx/nginx.conf --ref /etc/nginx/conf.d/site.conf#s0.d0 --value 8443 > plan.json
+    ngx apply -c /etc/nginx/nginx.conf plan.json
+    ```
 
-    - **Lua blocks are delimited by Lua's rules.** ngx no longer uses the
-      dependency's Lua lexer, which counted braces outside `'` and `"` and
-      knew nothing else. Verified against OpenResty 1.27.1.2: four
-      configurations that ngx used to REFUSE and the server accepts now parse
-      (an escaped quote `'a\'b'`, an escaped `"a\"b"`, a long bracket
-      `[[ } ]]`, a comment `-- }`), and one that ngx used to ACCEPT and the
-      server refuses is now refused — `content_by_lua_block { -- }`, where the
-      comment swallows the closing brace. That last one is why this release
-      exists: ngx was describing a structure the running server never had, with
-      nothing in the output saying so.
+    `set`, `add`, `rm` and `create` produce a **plan** and write nothing. `apply`
+    checks the plan still describes the world, writes it, runs `nginx -t`, and
+    puts every file back if nginx refuses. So a change can be read before it
+    happens and refused if anything moved in between.
 
-      Reported upstream as nginxinc/nginx-go-crossplane#179, with reproductions
-      and an offer to patch. The workaround is not waiting on it.
+    `ngx reload` is separate again, because applying and reloading are different
+    decisions — a tool that coupled them could not express "stage this now,
+    reload in the maintenance window".
 
-    - **A comment's text no longer carries carriage returns.** `# a\rb` used to
-      come out as `" a\rb"`; a CR there is noise in what a reader consumes.
+    ## Asking before writing
 
-    Still read-only. Mutation is v0.2, and both prerequisites that were blocking
-    it are closed: this is the last release before that work starts.
+    ```sh
+    ngx set ... | ngx apply --check -
+    ```
+
+    `--check` applies the plan to a copy of the whole configuration, redirects
+    every absolute `include` into that copy, and asks nginx about it there. So
+    `listen 8443 ssl` with no certificate — valid syntax, invalid
+    configuration — is caught **before a single byte of the real files moves**.
+
+    The redirect is what makes it honest. Copying the tree without rewriting the
+    includes makes nginx follow the absolute paths back to the ORIGINAL files
+    and report "syntax is ok" without ever reading the change, which was
+    measured before this was built. `--check` is local only: the copy lives on
+    the machine running ngx, so with `--host` it refuses rather than answering
+    about a path the remote nginx cannot see.
+
+    ## What a write costs
+
+    A file you own is written as you, with no escalation — the unprivileged
+    write is always attempted first and `sudo` is reached for only after it is
+    refused, and only when `--sudo` says so. Availability is not permission.
+
+    If the files are root-owned there are two ways forward and they are not
+    equivalent. `docs/install-channels.md` states the one that matters plainly:
+    a sudoers rule permitting `install`, `dd`, `mv` and `rm` **is** granting
+    root, because sudoers restricts which program runs and not which files it
+    touches. Owning `/etc/nginx` is the option that does not.
+
+    ## Nothing breaks for anyone reading the JSON
+
+    `schema_version` stays **1**. Every field this release adds is new — the
+    plan, and what `apply` reports per file — and a new key is invisible to a
+    consumer that does not read it. Nothing was renamed, removed, or given a
+    different meaning.
+
+    Two exit codes get their first real use: **9** when the configuration
+    changed under a plan, reserved for that since v0.1, and **3** when nginx
+    refuses a written result and everything is put back.
+
+    ## What is not here
+
+    **Writing over SSH.** v0.2 writes locally; `--host` still reads anything.
+    A connection dropping mid-write is its own failure class and gets its own
+    design, in v0.2.1.
 
   footer: |
     ---
